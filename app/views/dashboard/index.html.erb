@@ -1,0 +1,131 @@
+<h1>FFRK Community DB</h1>
+
+<% if @last_refreshed_at %>
+  <p><strong>Last refreshed:</strong> <%= @last_refreshed_at.strftime("%Y-%m-%d %H:%M:%S %Z") %></p>
+<% else %>
+  <p><em>Data has not been loaded yet. Run <code>rake data:refresh</code> to populate.</em></p>
+<% end %>
+
+<hr>
+
+<% if @sheets.any? %>
+  <% @sheets.each do |name, rows| %>
+    <details>
+      <summary><strong><%= name.to_s.tr('_', ' ').split.map(&:capitalize).join(' ') %></strong> (<%= rows.size %> rows)</summary>
+      <% if rows.any? %>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <thead>
+            <tr>
+              <% rows.first.keys.each do |col| %>
+                <th><%= col %></th>
+              <% end %>
+            </tr>
+          </thead>
+          <tbody>
+            <% rows.each do |row| %>
+              <tr>
+                <% row.values.each do |val| %>
+                  <td><%= val %></td>
+                <% end %>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      <% else %>
+        <p><em>No rows loaded for <%= name %>.</em></p>
+      <% end %>
+    </details>
+    <hr>
+  <% end %>
+<% else %>
+  <p><em>No sheet data loaded.</em></p>
+  <hr>
+<% end %>
+
+<% cmp = @status_ailment_comparison %>
+<% if cmp %>
+  <details>
+    <summary><strong>Status Ailment Comparison: JS vs CSV</strong>
+      &nbsp;&#x2705; <%= cmp[:matched].size %> matched
+      &nbsp;&#x26A0;&#xFE0F; <%= cmp[:id_mismatch].size %> ID mismatch
+      &nbsp;&#x1F537; <%= cmp[:js_only].size %> JS only
+      &nbsp;&#x1F538; <%= cmp[:csv_only].size %> CSV only
+    </summary>
+
+    <% if cmp[:id_mismatch].any? %>
+      <h3>&#x26A0;&#xFE0F; ID Mismatch (<%= cmp[:id_mismatch].size %>)</h3>
+      <table border="1" cellpadding="4" cellspacing="0">
+        <thead><tr><th>Coded Name</th><th>JS ID</th><th>CSV ID</th></tr></thead>
+        <tbody>
+          <% cmp[:id_mismatch].each do |r| %>
+            <tr><td><%= r[:name] %></td><td><%= r[:js_id] %></td><td><%= r[:csv_id] %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+
+    <% if cmp[:js_only].any? %>
+      <h3>&#x1F537; In JS only — not in Status CSV (<%= cmp[:js_only].size %>)</h3>
+      <table border="1" cellpadding="4" cellspacing="0">
+        <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
+        <tbody>
+          <% cmp[:js_only].each do |r| %>
+            <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+
+    <% if cmp[:csv_only].any? %>
+      <h3>&#x1F538; In CSV only — not in JS (<%= cmp[:csv_only].size %>)</h3>
+      <table border="1" cellpadding="4" cellspacing="0">
+        <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
+        <tbody>
+          <% cmp[:csv_only].each do |r| %>
+            <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+
+    <% if cmp[:matched].any? %>
+      <details>
+        <summary>&#x2705; Matched (<%= cmp[:matched].size %>)</summary>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
+          <tbody>
+            <% cmp[:matched].each do |r| %>
+              <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </details>
+    <% end %>
+
+  </details>
+  <hr>
+<% end %>
+
+<details id="battle-js-details">
+  <summary><strong>battle.js</strong><% if @battle_js_data %> (<%= @battle_js_data.length %> chars)<% end %></summary>
+  <% if @battle_js_data %>
+    <pre id="battle-js-source"><%= @battle_js_data %></pre>
+  <% else %>
+    <p><em>No battle.js data loaded.</em></p>
+  <% end %>
+</details>
+
+<% if @battle_js_data %>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
+  <script>
+    document.getElementById('battle-js-details').addEventListener('toggle', function() {
+      if (this.open) {
+        var pre = document.getElementById('battle-js-source');
+        if (!pre.dataset.formatted) {
+          pre.textContent = js_beautify(pre.textContent, { indent_size: 2 });
+          pre.dataset.formatted = true;
+        }
+      }
+    });
+  </script>
+<% end %>
