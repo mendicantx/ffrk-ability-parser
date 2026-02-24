@@ -37,3 +37,6 @@ __pycache__/
 
 # Local environment variables (contains secrets).
 .env
+
+# Claude Code local project settings (personal overrides, not shared).
+.claude/settings.local.json

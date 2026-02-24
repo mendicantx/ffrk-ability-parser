@@ -751,6 +751,145 @@ def parse_js_durations():
     return result
 
 # ---------------------------------------------------------------------------
+# Object-literal status def parser  (A[v.NAME]={durations:[…], effects:[…]})
+# ---------------------------------------------------------------------------
+
+def _js_object_ability_cond(eff_obj):
+    """Extract human-readable ability condition from an effect object's abilityCondition:{…}."""
+    m = re.search(r'abilityCondition:\{', eff_obj)
+    if not m:
+        return None
+    cond_block = _extract_balanced_block(eff_obj, m.end() - 1, '{', '}')
+    if not cond_block:
+        return None
+    return _ubm_ability_cond(cond_block)
+
+
+def _js_object_chase_name(eff_obj, status_name):
+    """Derive a display name for the chase ability from its chaseAbilityId field."""
+    m = re.search(r'ABILITY_ID_OF\.([A-Z_]+)', eff_obj)
+    if m:
+        raw = m.group(1)
+        if raw.startswith('CHASE_ABILITY_FOR_'):
+            raw = raw[len('CHASE_ABILITY_FOR_'):]
+        return ' '.join(w.capitalize() for w in raw.split('_'))
+    return ' '.join(w.capitalize() for w in status_name.split('_'))
+
+
+def _js_object_parse_effect(eff_obj, status_name):
+    """Parse one effect object from an A[v.X]={effects:[…]} block."""
+    m_type = re.search(r'\btype:[a-z_$]+\.([A-Z_]+)', eff_obj)
+    if not m_type:
+        return None
+    etype = m_type.group(1)
+
+    cond = _js_object_ability_cond(eff_obj)
+    cond_str = f'{cond} abilities' if cond else 'abilities'
+
+    if etype == 'REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE':
+        m_repeat = re.search(r'repeatNum:(\d+)', eff_obj)
+        repeat_n = int(m_repeat.group(1)) if m_repeat else 1
+        times_str = {1: 'an additional time', 2: 'an additional two times'}.get(
+            repeat_n, f'an additional {repeat_n} times')
+        return f'{cond_str} trigger {times_str}'
+
+    if etype == 'INCREASE_EXECUTED_DAMAGE' and 'generalValueToAbilityDamageRateMap' not in eff_obj:
+        m_f = re.search(r'DAMAGE_FACTOR\.(\w+)', eff_obj)
+        pct = _EXEC_DAMAGE_FACTORS.get(m_f.group(1), 30) if m_f else 30
+        return f'{cond_str} deal {pct}% more damage'
+
+    if etype in ('REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE',
+                 'REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE_REACT_ALL_ACTOR'):
+        chase_name = _js_object_chase_name(eff_obj, status_name)
+        m_done  = re.search(r'chaseAbilityDoneCountForIsDone:(\d+)', eff_obj)
+        m_count = re.search(r'abilityUseCountCondition:\{equal:(\d+)\}', eff_obj)
+        if m_count:
+            n = int(m_count.group(1))
+            text = f'casts [{chase_name}] every {n} {cond_str}'
+        else:
+            text = f'casts [{chase_name}] after using {cond_str}'
+        if m_done:
+            text += f' (max {m_done.group(1)})'
+        return text
+
+    return None
+
+
+def parse_js_object_defs():
+    """
+    Parse A[v.NAME]={durations:[…], effects:[…]} object-literal blocks
+    from StatusAilmentsConfig.  Returns effects descriptions and duration
+    for each status defined this way.
+    Returns {STATUS_NAME: {'Effects': str, 'Default Duration': str}}.
+    """
+    if not BATTLE_JS_FILE.exists():
+        return {}
+
+    data = BATTLE_JS_FILE.read_text(encoding='utf-8')
+    block_start = data.find('define("scenes/battle/StatusAilmentsConfig"')
+    if block_start == -1:
+        return {}
+    block_end_pos = data.find('define(', block_start + 100)
+    block = data[block_start:block_end_pos] if block_end_pos != -1 else data[block_start:]
+
+    result = {}
+    for m in re.finditer(r'A\[v\.([A-Z][A-Z0-9_]*)\]=\{', block):
+        name = m.group(1)
+        obj_start = m.end() - 1  # position of the opening {
+        obj_str = _extract_balanced_block(block, obj_start, '{', '}')
+        if not obj_str:
+            continue
+
+        entry = {}
+
+        # --- Effects ---
+        eff_m = re.search(r'effects:\[', obj_str)
+        if eff_m:
+            eff_arr = _extract_balanced_block(obj_str, eff_m.end() - 1, '[', ']')
+            if eff_arr:
+                parsed = []
+                i = 0
+                while i < len(eff_arr):
+                    if eff_arr[i] == '{':
+                        eff_obj = _extract_balanced_block(eff_arr, i, '{', '}')
+                        if eff_obj:
+                            desc = _js_object_parse_effect(eff_obj, name)
+                            if desc:
+                                parsed.append(desc)
+                            i += len(eff_obj)
+                            continue
+                    i += 1
+                if parsed:
+                    entry['Effects'] = '; '.join(parsed)
+
+        # --- Duration ---
+        dur_m = re.search(r'durations:\[', obj_str)
+        if dur_m:
+            dur_arr = _extract_balanced_block(obj_str, dur_m.end() - 1, '[', ']')
+            if dur_arr:
+                if dur_arr == '[]':
+                    entry['Default Duration'] = '-'
+                elif '.TIME' not in dur_arr:
+                    entry['Default Duration'] = '-'
+                else:
+                    tm = re.search(r'time:([\d.]+(?:e\d+)?)', dur_arr)
+                    if tm:
+                        ms = float(tm.group(1))
+                        entry['Default Duration'] = f'{int(ms / 1000)} seconds'
+                    else:
+                        tm2 = re.search(r'\.TIME\.([A-Z0-9_]+)', dur_arr)
+                        if tm2:
+                            entry['Default Duration'] = TIME_DURATIONS.get(
+                                f'TIME_{tm2.group(1)}', '-')
+                        else:
+                            entry['Default Duration'] = '-'
+
+        if entry:
+            result[name] = entry
+
+    return result
+
+# ---------------------------------------------------------------------------
 # Name-based inference data
 # ---------------------------------------------------------------------------
 
@@ -782,7 +921,7 @@ CHARACTER_NAMES = {
     'NOCTIS': 'Noctis', 'RAIN': 'Rain', 'LASSWELL': 'Lasswell', 'WRIEG': 'Wrieg',
     'MONTBLANC': 'Montblanc', 'SAZH': 'Sazh', 'LILISETTE': 'Lilisette',
     'LILITH': 'Lilith', 'EXNINE': 'Ex-Nine',
-    'SETZER': 'Setzer',
+    'SETZER': 'Setzer', 'LIGHTNING': 'Lightning',
 }
 
 ELEMENT_NAMES = {
@@ -827,6 +966,9 @@ def char_name_from_suffix(suffix):
     # Collect trailing element parts
     i = len(parts) - 1
     while i >= 0 and parts[i] in ELEMENT_NAMES:
+        # Don't consume the last remaining part if it's also a valid character name
+        if i == 0 and parts[i] in CHARACTER_NAMES:
+            break
         elements.insert(0, ELEMENT_NAMES[parts[i]])
         i -= 1
     # Try to match character name from remaining parts (longest first)
@@ -922,10 +1064,14 @@ _EXERCISE_TYPE_MAP = {
 _HEAL_FACTORS = {'SMALL': 10, 'MEDIUM': 20, 'LARGE': 30}
 
 # INCREASE_EXECUTED_DAMAGE / COUNT scaling damage-factor → % boost
+# Values derived from statusAilmentsConfig/Common: DAMAGE_FACTOR value - 100 = %
 _EXEC_DAMAGE_FACTORS = {
-    'EXTRA_SMALL_105': 5,  'EXTRA_SMALL': 9,   'EXTRA_SMALL_110': 10,
-    'SMALL': 15,           'SMALL_120': 20,     'SMALL_125': 25,
-    'MEDIUM': 30,          'LARGE': 50,
+    'EXTRA_SMALL_105': 5,   'EXTRA_SMALL': 9,        'EXTRA_SMALL_110': 10,
+    'SMALL': 15,            'SMALL_120': 20,          'SMALL_125': 25,
+    'MEDIUM': 30,           'MEDIUM_135': 35,
+    'EXTRA_MEDIUM': 40,     'EXTRA_MEDIUM_135': 35,   'EXTRA_MEDIUM_145': 45,
+    'LARGE': 50,            'LARGE_160': 60,
+    'EXTRA_LARGE': 70,      'SUPER_EXTRA_LARGE': 150,
 }
 
 # ATTACH_ELEMENT_KIWAMI additionalFactor → % bonus
@@ -1370,7 +1516,7 @@ def _accel_parse_effect(effect_obj, spirit_name):
         cond_str = _accel_cond_from_effect(effect_obj) or 'abilities'
         if factor >= 1000000:
             return f'instant cast for {cond_str}'
-        return f'{cast_factor_str(factor)} cast speed for {cond_str}'
+        return f'cast speed {cast_factor_str(factor)} for {cond_str}'
 
     if etype == 'REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE':
         cond_str = _accel_cond_from_effect(effect_obj) or 'abilities'
@@ -1389,7 +1535,11 @@ def _accel_parse_effect(effect_obj, spirit_name):
 
     if etype == 'INCREASE_DAMAGE_THRESHOLD_LV':
         cond_str = _accel_cond_from_effect(effect_obj) or 'abilities'
-        return f'raises damage cap for {cond_str}'
+        m_lv = re.search(r'damageThresholdLv:(\d+)', effect_obj)
+        amount = int(m_lv.group(1)) * 10000 if m_lv else None
+        if amount:
+            return f'Increases the damage/healing cap by {amount} for {cond_str}'
+        return f'Increases the damage/healing cap for {cond_str}'
 
     return None
 
@@ -1404,7 +1554,7 @@ def _parse_accel_buddy_mode_js():
       m-type  — INCREASE_CAST_TIME_FACTOR MEDIUM          (detected by CAST_TIME_FACTOR.MEDIUM)
       v-type  — COUNT_ABILITY_USED + scaling damage       (detected by COUNT_ABILITY_USED)
       p-type  — explicit effects array                    (detected by n.each(r.effects)
-    All four always have hasAbilityBoost:!0.
+    hasAbilityBoost:!1 suppresses the damage rank boost line.
     """
     if not BATTLE_JS_FILE.exists():
         return {}
@@ -1462,38 +1612,46 @@ def _parse_accel_buddy_mode_js():
             continue
 
         cond_str = _accel_parse_cond(arg1)
-        boost_line = f'{cond_str} deal 15/20/25/30/50% more damage at ability rank 1/2/3/4/5'
-        effects_parts = [boost_line]
+
+        # Extract arg2 (options object) for all fn_types
+        rest2 = rest[brace1 + len(arg1):]
+        arg2 = None
+        try:
+            brace2 = rest2.index('{')
+            arg2 = _extract_balanced_block(rest2, brace2, '{', '}')
+        except ValueError:
+            pass
+
+        effects_parts = []
+        if not arg2 or 'hasAbilityBoost:!1' not in arg2:
+            effects_parts.append(f'{cond_str} deal 15/20/25/30/50% more damage at ability rank 1/2/3/4/5')
 
         if fn_type == 'chase':
-            effects_parts.append(f'casts [{spirit}] after using {cond_str}')
+            chase_str = f'casts [{spirit}] after using {cond_str}'
+            if arg2:
+                m_done = re.search(r'chaseAbilityDoneCountForIsDone:(\d+)', arg2)
+                if m_done:
+                    chase_str += f' (max {m_done.group(1)})'
+            effects_parts.append(chase_str)
 
         elif fn_type == 'cast':
-            effects_parts.append(f'x2.00 cast speed for {cond_str}')
+            effects_parts.append(f'cast speed x2.00 for {cond_str}')
 
         elif fn_type == 'boost':
             effects_parts.append(
                 f'10/20/30% more damage for {cond_str} after using 1/2/3')
 
         elif fn_type == 'passthrough':
-            # Extract arg2 (options object with effects array)
-            rest2 = rest[brace1 + len(arg1):]
-            try:
-                brace2 = rest2.index('{')
-            except ValueError:
-                pass
-            else:
-                arg2 = _extract_balanced_block(rest2, brace2, '{', '}')
-                if arg2:
-                    eff_idx = arg2.find('effects:[')
-                    if eff_idx != -1:
-                        arr_start = arg2.index('[', eff_idx)
-                        arr = _extract_balanced_block(arg2, arr_start, '[', ']')
-                        if arr:
-                            for eff_obj in _extract_object_blocks(arr[1:-1]):
-                                text = _accel_parse_effect(eff_obj, spirit)
-                                if text:
-                                    effects_parts.append(text)
+            if arg2:
+                eff_idx = arg2.find('effects:[')
+                if eff_idx != -1:
+                    arr_start = arg2.index('[', eff_idx)
+                    arr = _extract_balanced_block(arg2, arr_start, '[', ']')
+                    if arr:
+                        for eff_obj in _extract_object_blocks(arr[1:-1]):
+                            text = _accel_parse_effect(eff_obj, spirit)
+                            if text:
+                                effects_parts.append(text)
 
         effects_parts.append("removed if the character hasn't [Accel Mode]")
         result[coded_name] = {'Effects': ', '.join(effects_parts)}
@@ -1508,6 +1666,209 @@ def _get_accel_defs():
     if _ACCEL_DEFS_CACHE is None:
         _ACCEL_DEFS_CACHE = _parse_accel_buddy_mode_js()
     return _ACCEL_DEFS_CACHE
+
+
+# ---------------------------------------------------------------------------
+# CRYSTAL_BUDDY_MODE JS parser
+# ---------------------------------------------------------------------------
+
+def _cbm_cond_from_effect(eff_obj):
+    """Extract and parse abilityCondition:{...} from within a CBM effect object."""
+    m = re.search(r'abilityCondition:\{', eff_obj)
+    if not m:
+        return None
+    cond = _extract_balanced_block(eff_obj, m.end() - 1, '{', '}')
+    return _accel_parse_cond(cond) if cond else None
+
+
+def _cbm_parse_effect(eff_obj, char_name):
+    """Parse a single effect object from a Crystal Buddy Mode extras or h-type effects array."""
+    m_type = re.search(r'type:u\.(\w+)', eff_obj)
+    if not m_type:
+        return None
+    etype = m_type.group(1)
+
+    if etype == 'ABILITY_BOOST':
+        cond = _cbm_cond_from_effect(eff_obj) or 'abilities'
+        return f'{cond} deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5'
+
+    if etype == 'REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE':
+        cond = _cbm_cond_from_effect(eff_obj) or 'abilities'
+        rn_m = re.search(r'repeatNum:(\d+)', eff_obj)
+        repeat_n = int(rn_m.group(1)) if rn_m else 1
+        times_str = {1: 'an additional time', 2: 'an additional two times'}.get(
+            repeat_n, f'an additional {repeat_n} times')
+        return f'{cond} trigger {times_str}'
+
+    if etype == 'NO_CONSUMPTION_ABILITY_NUM':
+        cond = _cbm_cond_from_effect(eff_obj) or 'abilities'
+        return f"{cond} don't consume ability uses"
+
+    if etype == 'DEF_AND_MDEF_PENETRATION':
+        return 'grants [DEF and RES 25% Piercing (15s)]'
+
+    if etype in ('REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE',
+                 'REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE_REACT_ALL_ACTOR'):
+        spirit = f'Crystal Force Chase: {char_name}'
+        is_all_actor = 'REACT_ALL_ACTOR' in etype
+        count_m = re.search(r'chaseAbilityDoneCountForIsDone:(\d+)', eff_obj)
+        count_n = int(count_m.group(1)) if count_m else None
+        if is_all_actor:
+            cond = _cbm_cond_from_effect(eff_obj)
+            if cond and cond != 'abilities':
+                # Strip trailing " abilities" to use as a modifier before "ability"
+                cond_mod = re.sub(r' abilities$', '', cond)
+                text = f'casts [{spirit}] when any ally uses a {cond_mod} ability'
+            elif 'hasDamage:!0' in eff_obj:
+                text = f'casts [{spirit}] when any ally uses a damaging ability'
+            else:
+                text = f'casts [{spirit}] when any ally uses an ability'
+        elif 'isCritical:!0' in eff_obj:
+            text = f'casts [{spirit}] on critical Crystal Force abilities'
+        elif 'abilityUseCountCondition' in eff_obj:
+            text = f'casts [{spirit}] every 2 Crystal Force abilities'
+        else:
+            cond = _cbm_cond_from_effect(eff_obj)
+            cond_desc = f'{cond} ' if cond and cond != 'abilities' else 'Crystal Force '
+            text = f'casts [{spirit}] after using {cond_desc}abilities'
+        if count_n:
+            text += f' (max {count_n})'
+        return text
+
+    if etype == 'COUNT_CRYSTAL_FORCE_USED':
+        return None  # internal counter, no display
+
+    if etype == 'INCREASE_EXECUTED_DAMAGE':
+        return 'Mimic deals 10/30/50% more damage based on Crystal Force ability uses'
+
+    return None
+
+
+def _parse_crystal_buddy_mode_js():
+    """Parse all CRYSTAL_BUDDY_MODE entries from the CrystalBuddyMode config block.
+
+    p-type: ability boost + dualcast + no-consume + DEF/MDEF penetration
+    d-type: cast speed x2.00 + no-consume (+ any extras)
+    h-type: fully custom effects only
+    """
+    if not BATTLE_JS_FILE.exists():
+        return {}
+    js = BATTLE_JS_FILE.read_text(encoding='utf-8')
+    block_start = js.find('define("scenes/battle/statusAilmentsConfig/CrystalBuddyMode"')
+    if block_start == -1:
+        return {}
+    block_end = js.find('define("', block_start + 100)
+    block = js[block_start:block_end]
+
+    # Identify p/d/h function letters from the preamble (before first assignment)
+    first_assign = block.find('c[s.CRYSTAL_BUDDY_MODE_')
+    preamble = block[:first_assign]
+    fn_map = {}
+    for fn_m in re.finditer(r',([a-z])=function\b[^(]*\(', preamble):
+        letter = fn_m.group(1)
+        if letter in fn_map:
+            continue
+        rest = preamble[fn_m.end():]
+        brace_i = rest.find('{')
+        if brace_i == -1:
+            continue
+        body = _extract_balanced_block(rest, brace_i, '{', '}')
+        if not body:
+            continue
+        if 'ABILITY_BOOST' in body and 'REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE' in body:
+            fn_map[letter] = 'p'
+        elif 'INCREASE_CAST_TIME_FACTOR' in body:
+            fn_map[letter] = 'd'
+        elif '.each(t.effects' in body:
+            fn_map[letter] = 'h'
+
+    result = {}
+    for m in re.finditer(r'c\[s\.(CRYSTAL_BUDDY_MODE_\w+)\]=([a-z])\(', block):
+        coded_name = m.group(1)
+        fn_letter  = m.group(2)
+        fn_type    = fn_map.get(fn_letter, 'unknown')
+
+        suffix = coded_name[len('CRYSTAL_BUDDY_MODE_'):]
+        char_name, elements, _ = char_name_from_suffix(suffix)
+        elem_str = '/'.join(elements)
+
+        # Extract arg1 (condition for p/d, options object for h)
+        rest = block[m.end():]
+        try:
+            brace1 = rest.index('{')
+        except ValueError:
+            continue
+        arg1 = _extract_balanced_block(rest, brace1, '{', '}')
+        if not arg1:
+            continue
+
+        # Extract arg2 (options for p/d; h only has one arg)
+        rest2 = rest[brace1 + len(arg1):]
+        arg2 = None
+        try:
+            close_paren = rest2.index(')')
+            brace2 = rest2.index('{')
+            if brace2 < close_paren:
+                arg2 = _extract_balanced_block(rest2, brace2, '{', '}')
+        except ValueError:
+            pass
+
+        # repeatNum from arg2 (p-type; default 1)
+        repeat_num = 1
+        if arg2:
+            rn_m = re.search(r'repeatNum:(\d+)', arg2)
+            if rn_m:
+                repeat_num = int(rn_m.group(1))
+
+        # Build base effects
+        effects_parts = []
+        cond_str = _accel_parse_cond(arg1) if fn_type in ('p', 'd') else 'abilities'
+
+        if fn_type == 'p':
+            effects_parts.append(
+                f'{cond_str} deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5')
+            if repeat_num > 0:
+                times_str = {1: 'an additional time', 2: 'an additional two times'}.get(
+                    repeat_num, f'an additional {repeat_num} times')
+                effects_parts.append(f'{cond_str} trigger {times_str}')
+            effects_parts.append(f"{cond_str} don't consume ability uses")
+            effects_parts.append('grants [DEF and RES 25% Piercing (15s)]')
+        elif fn_type == 'd':
+            effects_parts.append(f'cast speed x2.00 for {cond_str}')
+            effects_parts.append(f"{cond_str} don't consume ability uses")
+
+        # Extra effects: from arg2 for p/d, from arg1 for h
+        extras_src = arg2 if fn_type in ('p', 'd') else arg1
+        if extras_src:
+            eff_idx = extras_src.find('effects:[')
+            if eff_idx != -1:
+                arr_start = extras_src.index('[', eff_idx)
+                arr = _extract_balanced_block(extras_src, arr_start, '[', ']')
+                if arr:
+                    for eff_obj in _extract_object_blocks(arr[1:-1]):
+                        text = _cbm_parse_effect(eff_obj, char_name)
+                        if text:
+                            effects_parts.append(text)
+
+        effects_parts.append("removed if the character hasn't [Crystal Force Mode]")
+
+        common_name = (f"Crystal Force Mode: {char_name} ({elem_str})" if elem_str
+                       else f"Crystal Force Mode: {char_name}")
+        result[coded_name] = {
+            'Common Name': common_name,
+            'Effects': ', '.join(effects_parts),
+        }
+
+    return result
+
+
+_CBM_DEFS_CACHE = None
+
+def _get_cbm_defs():
+    global _CBM_DEFS_CACHE
+    if _CBM_DEFS_CACHE is None:
+        _CBM_DEFS_CACHE = _parse_crystal_buddy_mode_js()
+    return _CBM_DEFS_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -1599,21 +1960,10 @@ def pattern_crystal_buddy_mode(cn):
     PREFIX = 'CRYSTAL_BUDDY_MODE_'
     if not cn.startswith(PREFIX) or cn == 'CRYSTAL_BUDDY_MODE':
         return None
-    suffix = cn[len(PREFIX):]
-    char_name, elements, _ = char_name_from_suffix(suffix)
-    elem_str = '/'.join(elements)
-    if elem_str:
-        common_name = f"Crystal Force Mode: {char_name} ({elem_str})"
-        effects = (
-            f"{elem_str} abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5, "
-            f"{elem_str} abilities trigger 1 additional time, "
-            f"cast speed x1.20 for {elem_str} abilities, "
-            f"removed if the character hasn't [Crystal Force Mode]"
-        )
-    else:
-        common_name = f"Crystal Force Mode: {char_name}"
-        effects = f"Grants Crystal Force Mode buffs for {char_name}, removed if the character hasn't [Crystal Force Mode]"
-    return {'Common Name': common_name, 'Effects': effects, 'Default Duration': '-'}
+    result = _get_cbm_defs().get(cn)
+    if result:
+        return {**result, 'Default Duration': '-'}
+    return None
 
 
 def pattern_limit_break_soul_drive_mode(cn):
@@ -1949,9 +2299,10 @@ def pattern_seq_ability_repeat_element_while(cn):
     qualifier = WHILE_MODE_MAP.get(mode_raw, f'(while {mode_raw.replace("_", " ").title()})')
     duration = f'{max_n} turn{"s" if max_n != 1 else ""}'
 
+    repeat_times = {1: 'an additional time', 2: 'an additional two times'}.get(repeat_n, f'an additional {repeat_n} times')
     common_name = f'{repeat_name}, Instant Cast {elem_str} {qualifier}'
     effects = (
-        f'{elem_str} abilities trigger an additional time; '
+        f'{elem_str} abilities trigger {repeat_times}; '
         f'Cast speed x999999 for {elem_str} abilities'
     )
 
@@ -2218,12 +2569,15 @@ def main():
     for name, info in extend_defs.items():
         if name not in js_defs:
             js_defs[name] = info
-    # Tertiary source: object-style duration blocks
-    js_durations = parse_js_durations()
+    # Tertiary source: object-literal A[v.NAME]={...} blocks (effects + duration)
+    object_defs = parse_js_object_defs()
+    for name, info in object_defs.items():
+        if name not in js_defs:
+            js_defs[name] = info
 
-    print(f"JS function defs loaded: {len(js_defs) - len(extend_defs)} entries")
+    print(f"JS function defs loaded: {len(js_defs) - len(extend_defs) - len(object_defs)} entries")
     print(f"JS extend defs loaded:   {len(extend_defs)} entries")
-    print(f"JS durations loaded:     {len(js_durations)} entries")
+    print(f"JS object defs loaded:   {len(object_defs)} entries")
 
     output_rows = []
     inferred_counts = {
@@ -2313,7 +2667,7 @@ def main():
             'MND Modifier':     '-',
             'Exclusive Status': '-',
             'Coded Name':       cn,
-            'Notes':            'inferred',
+            'Notes':            '',
         })
 
     # --- Pass 2: synthetic rows for ailment IDs missing from the status sheet ---
@@ -2375,7 +2729,7 @@ def main():
             'MND Modifier':     '-',
             'Exclusive Status': '-',
             'Coded Name':       cn,
-            'Notes':            'inferred',
+            'Notes':            '',
         })
 
     # Sort by integer ID
