@@ -1,117 +1,134 @@
-<h1>FFRK Community DB</h1>
-
-<% if @last_refreshed_at %>
-  <p><strong>Last refreshed:</strong> <%= @last_refreshed_at.strftime("%Y-%m-%d %H:%M:%S %Z") %></p>
-<% else %>
-  <p><em>Data has not been loaded yet. Run <code>rake data:refresh</code> to populate.</em></p>
-<% end %>
-
-<hr>
+<div class="px-4 py-2">
+<div class="d-flex align-items-baseline gap-3 mb-3">
+  <h4 class="mb-0">Dashboard</h4>
+  <% if @last_refreshed_at %>
+    <small class="text-secondary">Last refreshed: <%= @last_refreshed_at.strftime("%Y-%m-%d %H:%M:%S %Z") %></small>
+  <% else %>
+    <small class="text-warning">Data not loaded — run <code>rake data:refresh</code></small>
+  <% end %>
+</div>
 
 <% if @sheets.any? %>
   <% @sheets.each do |name, rows| %>
-    <details>
-      <summary><strong><%= name.to_s.tr('_', ' ').split.map(&:capitalize).join(' ') %></strong> (<%= rows.size %> rows)</summary>
+    <details class="mb-2">
+      <summary class="user-select-none fw-semibold py-1">
+        <%= name.to_s.tr('_', ' ').split.map(&:capitalize).join(' ') %>
+        <span class="badge bg-secondary fw-normal ms-1"><%= rows.size %> rows</span>
+      </summary>
       <% if rows.any? %>
-        <table border="1" cellpadding="4" cellspacing="0">
-          <thead>
-            <tr>
-              <% rows.first.keys.each do |col| %>
-                <th><%= col %></th>
-              <% end %>
-            </tr>
-          </thead>
-          <tbody>
-            <% rows.each do |row| %>
+        <div class="overflow-auto mt-2 mb-3" style="max-height: 400px;">
+          <table class="table table-sm table-bordered table-striped-columns mb-0" style="font-size: 12px;">
+            <thead class="table-dark sticky-top">
               <tr>
-                <% row.values.each do |val| %>
-                  <td><%= val %></td>
+                <% rows.first.keys.each do |col| %>
+                  <th class="text-nowrap"><%= col %></th>
                 <% end %>
               </tr>
-            <% end %>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <% rows.each do |row| %>
+                <tr>
+                  <% row.values.each do |val| %>
+                    <td><%= val %></td>
+                  <% end %>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
       <% else %>
-        <p><em>No rows loaded for <%= name %>.</em></p>
+        <p class="text-secondary fst-italic mt-2">No rows loaded for <%= name %>.</p>
       <% end %>
     </details>
-    <hr>
   <% end %>
 <% else %>
-  <p><em>No sheet data loaded.</em></p>
-  <hr>
+  <p class="text-secondary fst-italic">No sheet data loaded.</p>
 <% end %>
 
 <% cmp = @status_ailment_comparison %>
 <% if cmp %>
-  <details>
-    <summary><strong>Status Ailment Comparison: JS vs CSV</strong>
-      &nbsp;&#x2705; <%= cmp[:matched].size %> matched
-      &nbsp;&#x26A0;&#xFE0F; <%= cmp[:id_mismatch].size %> ID mismatch
-      &nbsp;&#x1F537; <%= cmp[:js_only].size %> JS only
-      &nbsp;&#x1F538; <%= cmp[:csv_only].size %> CSV only
+  <details class="mb-2">
+    <summary class="user-select-none fw-semibold py-1">
+      Status Ailment Comparison: JS vs CSV
+      <span class="badge bg-success fw-normal ms-1">&#x2713; <%= cmp[:matched].size %> matched</span>
+      <% if cmp[:id_mismatch].any? %><span class="badge bg-warning text-dark fw-normal ms-1">&#x26A0; <%= cmp[:id_mismatch].size %> ID mismatch</span><% end %>
+      <% if cmp[:js_only].any? %><span class="badge bg-info fw-normal ms-1">&#x2B24; <%= cmp[:js_only].size %> JS only</span><% end %>
+      <% if cmp[:csv_only].any? %><span class="badge bg-secondary fw-normal ms-1">&#x2B24; <%= cmp[:csv_only].size %> CSV only</span><% end %>
     </summary>
 
-    <% if cmp[:id_mismatch].any? %>
-      <h3>&#x26A0;&#xFE0F; ID Mismatch (<%= cmp[:id_mismatch].size %>)</h3>
-      <table border="1" cellpadding="4" cellspacing="0">
-        <thead><tr><th>Coded Name</th><th>JS ID</th><th>CSV ID</th></tr></thead>
-        <tbody>
-          <% cmp[:id_mismatch].each do |r| %>
-            <tr><td><%= r[:name] %></td><td><%= r[:js_id] %></td><td><%= r[:csv_id] %></td></tr>
-          <% end %>
-        </tbody>
-      </table>
-    <% end %>
+    <div class="mt-2">
+      <% if cmp[:id_mismatch].any? %>
+        <h6 class="text-warning">&#x26A0; ID Mismatch (<%= cmp[:id_mismatch].size %>)</h6>
+        <div class="overflow-auto mb-3">
+          <table class="table table-sm table-bordered" style="font-size: 12px;">
+            <thead class="table-dark"><tr><th>Coded Name</th><th>JS ID</th><th>CSV ID</th></tr></thead>
+            <tbody>
+              <% cmp[:id_mismatch].each do |r| %>
+                <tr><td><%= r[:name] %></td><td><%= r[:js_id] %></td><td><%= r[:csv_id] %></td></tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
 
-    <% if cmp[:js_only].any? %>
-      <h3>&#x1F537; In JS only — not in Status CSV (<%= cmp[:js_only].size %>)</h3>
-      <table border="1" cellpadding="4" cellspacing="0">
-        <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
-        <tbody>
-          <% cmp[:js_only].each do |r| %>
-            <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-          <% end %>
-        </tbody>
-      </table>
-    <% end %>
+      <% if cmp[:js_only].any? %>
+        <h6 class="text-info">In JS only — not in Status CSV (<%= cmp[:js_only].size %>)</h6>
+        <div class="overflow-auto mb-3">
+          <table class="table table-sm table-bordered" style="font-size: 12px;">
+            <thead class="table-dark"><tr><th>Coded Name</th><th>ID</th></tr></thead>
+            <tbody>
+              <% cmp[:js_only].each do |r| %>
+                <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
 
-    <% if cmp[:csv_only].any? %>
-      <h3>&#x1F538; In CSV only — not in JS (<%= cmp[:csv_only].size %>)</h3>
-      <table border="1" cellpadding="4" cellspacing="0">
-        <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
-        <tbody>
-          <% cmp[:csv_only].each do |r| %>
-            <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-          <% end %>
-        </tbody>
-      </table>
-    <% end %>
+      <% if cmp[:csv_only].any? %>
+        <h6 class="text-secondary">In CSV only — not in JS (<%= cmp[:csv_only].size %>)</h6>
+        <div class="overflow-auto mb-3">
+          <table class="table table-sm table-bordered" style="font-size: 12px;">
+            <thead class="table-dark"><tr><th>Coded Name</th><th>ID</th></tr></thead>
+            <tbody>
+              <% cmp[:csv_only].each do |r| %>
+                <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
 
-    <% if cmp[:matched].any? %>
-      <details>
-        <summary>&#x2705; Matched (<%= cmp[:matched].size %>)</summary>
-        <table border="1" cellpadding="4" cellspacing="0">
-          <thead><tr><th>Coded Name</th><th>ID</th></tr></thead>
-          <tbody>
-            <% cmp[:matched].each do |r| %>
-              <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-            <% end %>
-          </tbody>
-        </table>
-      </details>
-    <% end %>
-
+      <% if cmp[:matched].any? %>
+        <details>
+          <summary class="user-select-none text-success py-1">&#x2713; Matched (<%= cmp[:matched].size %>)</summary>
+          <div class="overflow-auto mt-2 mb-3" style="max-height: 300px;">
+            <table class="table table-sm table-bordered" style="font-size: 12px;">
+              <thead class="table-dark sticky-top"><tr><th>Coded Name</th><th>ID</th></tr></thead>
+              <tbody>
+                <% cmp[:matched].each do |r| %>
+                  <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      <% end %>
+    </div>
   </details>
-  <hr>
 <% end %>
 
-<details id="battle-js-details">
-  <summary><strong>battle.js</strong><% if @battle_js_data %> (<%= @battle_js_data.length %> chars)<% end %></summary>
+<details id="battle-js-details" class="mb-2">
+  <summary class="user-select-none fw-semibold py-1">
+    battle.js
+    <% if @battle_js_data %>
+      <span class="badge bg-secondary fw-normal ms-1"><%= @battle_js_data.length %> chars</span>
+    <% end %>
+  </summary>
   <% if @battle_js_data %>
-    <pre id="battle-js-source"><%= @battle_js_data %></pre>
+    <pre id="battle-js-source" class="mt-2 p-3 border rounded" style="font-size: 11px; max-height: 500px; overflow: auto;"><%= @battle_js_data %></pre>
   <% else %>
-    <p><em>No battle.js data loaded.</em></p>
+    <p class="text-secondary fst-italic mt-2">No battle.js data loaded.</p>
   <% end %>
 </details>
 
@@ -129,3 +146,4 @@
     });
   </script>
 <% end %>
+</div><!-- /.px-4 -->

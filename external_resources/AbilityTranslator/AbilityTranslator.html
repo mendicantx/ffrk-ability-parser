@@ -1,0 +1,1409 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Ability Translator</title>
+		<link id="globalTheme" rel="stylesheet" type="text/css" href="./AbilityTranslator_files/bootstrap_cerulean.min.css">
+		<!--<script src="../common/beautify.js"></script>-->
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.13.13/beautify.min.js" integrity="sha512-GAc4+tkG9n4GIoiR0bH7OgC1foQQlydk5FsKmpd0sogbmS9QRjHfZMKj1alrhgC4UsKJkW+LOEvfieGlNGny3g==" crossorigin="anonymous"></script>
+		
+		<script src="./AbilityTranslator_files/unpacker.js"></script>
+		<script src="./AbilityTranslator_files/moment.min.js"></script>
+		<script src="./AbilityTranslator_files/thenBy.min.js"></script>
+		<script src="./AbilityTranslator_files/constants.js"></script>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js" type="text/javascript"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.6/js/bootstrap.min.js" type="text/javascript"></script>
+		<!--<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js" type="text/javascript"></script>-->
+		<!--<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js" type="text/javascript"></script>-->
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" type="text/javascript"></script>
+		<script type="text/javascript" charset="utf-8" async="" data-requirecontext="_" data-requiremodule="Common" src="./AbilityTranslator_files/Common.js"></script>
+		
+		<script>
+			FF = {
+				Events: {},
+				Models: {},
+				Collections: {},
+				Views: {},
+				App: {},
+				Templates: {},
+				Debug:{},
+				CONST:{},
+				onload : function() {
+					Backbone.history.start();
+				},
+				isShowingLoadError: false,
+				modalStack: void 0
+			};
+			FF.ns = {
+				battle: {
+					battleEffectEvent: {},
+					materiaEffectEvent: {},
+					materiaEffectHook: {},
+					battleEffectHook: {},
+					ai: {
+						conf: {},
+						state: {},
+						transition: {},
+						transitCondition: {},
+						resultObjectTmp: {},
+						stateSnippet: {},
+						expression: {},
+						aiUtil: {},
+						
+					},
+					conf: {},
+					action: {},
+					materia: {},
+					beastPassiveSkill: {},
+					fsm: {},
+					state: {},
+					tutorial: {},
+					recept: {},
+					util: {},
+					comboCondition: {},
+					statusAilmentsEvent: {},
+					statusAilmentsHook: {},
+					fieldStatusAilments: {},
+					chorenEffectEvent: {},
+					chorenEffectHook: {},
+					view: {
+						animation: {},
+					},
+					mo: {
+						view: {
+							animation: {},
+						},
+					},
+				}
+			};
+			
+			FFEnv = {
+				modeName: "development",
+				isPseudoProdutionEnabled: false
+			}
+			
+			kickmotor = {
+				options: {
+					fcache: {
+						protocol: 'http',
+						port: 26284,
+						urlGetBundle: 'get_bundle',
+						downloadTimeoutMsec: 300000,
+						canUseCProxy: true
+					},
+					clientrContentDirectoryPath: '/Content',
+					serverStaticContentUrl: 'static'
+				}
+			};
+			
+			var actionMap = false;
+			var battleJs = false;
+			var libJs = false;
+			var preJs = false;
+			var battleConstants = false;
+			var statusAilmentsConfig = false;
+			var statusConstants = false;
+			var statusBundleConstants = false;
+			var saConfig = false;
+			var abilityCategoryIds = false;
+			var chainTypes = false;
+			var subActionControlStatements = false;
+			var subActionConditionType = false;
+			var subActionType = false;
+			var subActionTargetType = false;
+			var TargetRange = false;
+			var targetMethod = false;
+			var activeTargetMethod = false;
+			var targetSegment = false;
+			var exerciseTypes = false;
+			var elementTypes = false;
+			var atkTypes = false;
+			var abilityCatgeories = false;
+			
+			var beautifyOpts = {
+				race_style: "collapse",
+				break_chained_methods: false,
+				comma_first: false,
+				e4x: false,
+				end_with_newline: false,
+				indent_char: " ",
+				indent_inner_html: false,
+				indent_scripts: "normal",
+				indent_size: "4",
+				jslint_happy: false,
+				keep_array_indentation: false,
+				max_preserve_newlines: "5",
+				preserve_newlines: false,
+				space_before_conditional: true,
+				unescape_strings: false,
+				wrap_line_length: "0"
+			};
+			
+			window.onErrorFunc = function(){};
+			var eventBase = false;
+			$(document).ready(function() {
+				var transformSheetsResponse = function(sheetValues) {
+					var sheetData = [];
+					var headers = sheetValues[0];
+					for (var i = 1; i < sheetValues.length; i++) {
+						var rowArray = sheetValues[i];
+						var rowData = {};
+						sheetData.push(rowData);
+						for (var j = 0; j < rowArray.length; j++) {
+							rowData[headers[j]] = rowArray[j];
+						}
+					}
+					
+					return sheetData;
+				};
+
+				$.when(
+					$.getJSON("https://sheets.googleapis.com/v4/spreadsheets/1f8OJIQhpycljDQ8QNDk_va1GJ1u7RVoMaNjFcHH0LKk/values/Status?key=AIzaSyAVaeRmfLcGWbINcXz131cK4jYbp6yGYNk"),
+				).done(function(importedStatuses) {
+					statusList = transformSheetsResponse(importedStatuses.values);
+					statusMap = {}
+					for (var i = 1; i < statusList.length; i++) {
+						statusMap[statusList[i]["ID"]] = statusList[i]["Common Name"]
+					}
+					console.log(statusMap);
+				});
+
+				$("processSbJson").prop("disabled", true);
+				$.when(
+					//$.getJSON("https://api.sheety.co/62d471cf-4616-434a-9cf9-f8ff7a608585"),
+					//$.getJSON("https://gsx2json.com/api?id=1G9XjHXO-3DUcOdKcTbsrt6eLBjolcfVQ-cGAtWHsMwY&sheet=10&columns=false"),
+					//$.getJSON("https://gamerdude.thisisourcorner.net/ffrk/tools/sheetjson?id=1G9XjHXO-3DUcOdKcTbsrt6eLBjolcfVQ-cGAtWHsMwY&sheet=10&columns=false"),
+					$.getJSON("https://sheets.googleapis.com/v4/spreadsheets/1WaBSOfK2Wi0ZFhMrjZtouD9mun2u9KsNIlcetfO63Xg/values/Actions%20Args?key=AIzaSyAVaeRmfLcGWbINcXz131cK4jYbp6yGYNk"),
+				).done(function(importedActionMap) {
+					actionMap = transformSheetsResponse(importedActionMap.values);
+					for (var i = 1; i < actionMap.length; i++) {
+						if (isNaN(actionMap[i].action_id)) {
+							actionMap[i].action_id = actionMap[i].action_id.replace("!", "");
+						}
+					}
+					console.log(actionMap);
+				});
+				
+				$.when(
+					$.ajax({
+						url: "https://gamerdude.thisisourcorner.net/ffrk/tools/api/battle",
+						dataType: "text"
+					}),
+					$.ajax({
+						url: "https://gamerdude.thisisourcorner.net/ffrk/tools/api/lib",
+						dataType: "text"
+					}),
+					$.ajax({
+						url: "https://gamerdude.thisisourcorner.net/ffrk/tools/api/pre",
+						dataType: "text"
+					}),
+					$.ajax({
+						url: "https://gamerdude.thisisourcorner.net/ffrk/tools/api/vendor",
+						dataType: "text"
+					})
+				).done(function(battle, lib, pre, vendor) {
+					preJs = js_beautify(unpacker_filter(pre[0]), beautifyOpts);
+					libJs = js_beautify(unpacker_filter(lib[0]), beautifyOpts);
+					battleJs = js_beautify(unpacker_filter(battle[0]), beautifyOpts);
+					
+					require.config({	
+						shim: {
+							'backbone': {
+								deps: ['jquery', 'underscore'],
+								exports: 'Backbone'
+							},
+							'sprintf': {
+								exports: 'sprintf'
+							},
+							'kickmotor': {
+								deps: ['jquery', 'logger', 'env'],
+								exports: 'kickmotor'
+							},
+							'jq.fastCss': { // jquery ã¨ã®ä¾å­˜é–¢ä¿‚ã§ãƒ­ãƒ¼ãƒ‰ã‚¨ãƒ©ãƒ¼ã«ãªã‚‹ãŸã‚å¯¾å¿œ
+								deps: ['jquery'],
+							}
+						}
+					});
+					
+					vdt = new Function(vendor[0]);
+					vdt();
+					
+					pt = new Function(preJs);
+					pt();
+					
+					dt = new Function(libJs);
+					dt();
+					
+					console.log(battleJs);
+					vt = new Function(battleJs);
+					try {
+						vt();
+					}
+					catch(e){}
+					
+					
+					requirejs(["underscore", "jquery", "backbone", 'sprintf', 'util', './scenes/battle/ai/AiUtil', './scenes/battle/Conf', 'lib/NameConventionFsm',
+						"lib/EventBase", "util", "lib/SecureObjectFactory", './scenes/battle/action/ActionBase', './scenes/battle/action/InflictSaAction'], 
+						function(underscore, jq, backbone, sprintf, util, AiUtil, Conf, NameConventionFsm, EventBase, util, SecureObjectFactory, ActionBase, InflictSaAction) {
+							console.log(Conf);
+							eventBase = EventBase;
+							statusConstants = Object.keys(Conf.STATUS_AILMENTS_TYPE).reduce((obj, key) => (obj[Conf.STATUS_AILMENTS_TYPE[key]] = key, obj), {});
+							statusBundleConstants = Object.keys(Conf.STATUS_AILMENTS_BUNDLE).reduce((obj, key) => (obj[Conf.STATUS_AILMENTS_BUNDLE[key]] = key, obj), {});
+							abilityCategoryIds = Object.keys(Conf.ABILITY_CATEGORY_ID).reduce((obj, key) => (obj[Conf.ABILITY_CATEGORY_ID[key]] = key, obj), {});
+							chainTypes = Object.keys(Conf.COMBO_CONDITION_TYPE).reduce((obj, key) => (obj[Conf.COMBO_CONDITION_TYPE[key]] = key, obj), {});
+							abilityCategories = Object.keys(Conf.ABILITY_CATEGORY_ID).reduce((obj, key) => (obj[Conf.ABILITY_CATEGORY_ID[key]] = key, obj), {});
+
+							subActionControlStatements = Object.keys(Conf.SUB_ACTION_CONTROL_STATEMENT_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_CONTROL_STATEMENT_TYPE[key]] = key, obj), {});
+							subActionConditionType = Object.keys(Conf.SUB_ACTION_CONDITION_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_CONDITION_TYPE[key]] = key, obj), {});
+							subActionType = Object.keys(Conf.SUB_ACTION_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_TYPE[key]] = key, obj), {});
+							subActionTargetType = Object.keys(Conf.SUB_ACTION_TARGET_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_TARGET_TYPE[key]] = key, obj), {});
+							
+							TargetRange = Object.keys(Conf.TARGET_RANGE).reduce((obj, key) => (obj[Conf.TARGET_RANGE[key]] = key, obj), {});
+							targetMethod = Object.keys(Conf.TARGET_METHOD).reduce((obj, key) => (obj[Conf.TARGET_METHOD[key]] = key, obj), {});
+							activeTargetMethod = Object.keys(Conf.ACTIVE_TARGET_METHOD).reduce((obj, key) => (obj[Conf.ACTIVE_TARGET_METHOD[key]] = key, obj), {});
+							targetSegment = Object.keys(Conf.TARGET_SEGMENT).reduce((obj, key) => (obj[Conf.TARGET_SEGMENT[key]] = key, obj), {});
+							exerciseTypes = Object.keys(Conf.EXERCISE_TYPE).reduce((obj, key) => (obj[Conf.EXERCISE_TYPE[key]] = key, obj), {});
+							conditionTypes = Object.keys(Conf.SUB_ACTION_CONDITION_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_CONDITION_TYPE[key]] = key, obj), {});							
+							controlStatementTypes = Object.keys(Conf.SUB_ACTION_CONTROL_STATEMENT_TYPE).reduce((obj, key) => (obj[Conf.SUB_ACTION_CONTROL_STATEMENT_TYPE[key]] = key, obj), {});							
+							elementTypes = Object.keys(Conf.ELEMENT_TYPE).reduce((obj, key) => (obj[Conf.ELEMENT_TYPE[key]] = key, obj), {});
+							atkTypes = Object.keys(Conf.ATK_TYPE).reduce((obj, key) => (obj[Conf.ATK_TYPE[key]] = key, obj), {});
+						});
+
+					$("processSbJson").prop("disabled", false);
+					//var constIndexBegin = battleJs.indexOf("return FF.ns.battle.Conf");
+					//var constIndexEnd = battleJs.indexOf(", FF.ns.battle.Conf");
+					//console.log(battleJs.substring(constIndexBegin, constIndexEnd));
+					
+					//var constantsString = battleJs.substring(constIndexBegin, constIndexEnd).replace("FF.ns.battle.Conf", "Conf")
+					//constantsString = constantsString.replace(/[a-zA-Z]\.[a-zA-Z_0-9]*,/g, "\"\",");
+					//battleConstants = new Function(constantsString);
+					//statusConstants = Object.keys(battleConstants().STATUS_AILMENTS_TYPE).reduce((obj, key) => (obj[battleConstants().STATUS_AILMENTS_TYPE[key]] = key, obj), {});
+					//statusBundleConstants = Object.keys(battleConstants().STATUS_AILMENTS_BUNDLE).reduce((obj, key) => (obj[battleConstants().STATUS_AILMENTS_BUNDLE[key]] = key, obj), {});
+					//abilityCategoryIds = Object.keys(battleConstants().ABILITY_CATEGORY_ID).reduce((obj, key) => (obj[battleConstants().ABILITY_CATEGORY_ID[key]] = key, obj), {});
+					//chainTypes = Object.keys(battleConstants().COMBO_CONDITION_TYPE).reduce((obj, key) => (obj[battleConstants().COMBO_CONDITION_TYPE[key]] = key, obj), {});
+					
+					/*
+					var indexOfFirstBundle = battleJs.regexIndexOf(/[a-zA-Z]*\[[a-zA-Z]*\.STATUS_AILMENTS_BUNDLE\./, 0);
+					var indexOfBundleArrayVar = battleJs.substring(0, indexOfFirstBundle).lastIndexOf("var");
+					var indexOfEndOfBundles = indexOfBundleArrayVar + battleJs.substring(indexOfBundleArrayVar).indexOf("FF.ns.battle.StatusAilmentsConfig");
+					console.log(battleJs.substring(indexOfBundleArrayVar, indexOfEndOfBundles));*/
+					
+					
+					var saConfigIdx = battleJs.indexOf("scenes/battle/StatusAilmentsConfig");
+					var nextNewLine = battleJs.substring(saConfigIdx).indexOf('\n');
+					var endSaConfigIdx = battleJs.substring(saConfigIdx  + nextNewLine).indexOf("}), define");
+					var saConfigJs = battleJs.substring(saConfigIdx  + nextNewLine, saConfigIdx + nextNewLine + endSaConfigIdx);
+					saConfigJs = saConfigJs.replace(/FF\.ns\.battle/g, "this");
+					saConfigJs = saConfigJs.replace(/\.Conf/g, ".battleJs()");
+					console.log(saConfigJs);
+					//saConfig = new Function(saConfigJs);
+					
+					/*
+					subActionControlStatements = Object.keys(battleConstants().SUB_ACTION_CONTROL_STATEMENT_TYPE).reduce((obj, key) => (obj[battleConstants().SUB_ACTION_CONTROL_STATEMENT_TYPE[key]] = key, obj), {});
+					subActionConditionType = Object.keys(battleConstants().SUB_ACTION_CONDITION_TYPE).reduce((obj, key) => (obj[battleConstants().SUB_ACTION_CONDITION_TYPE[key]] = key, obj), {});
+					subActionType = Object.keys(battleConstants().SUB_ACTION_TYPE).reduce((obj, key) => (obj[battleConstants().SUB_ACTION_TYPE[key]] = key, obj), {});
+					subActionTargetType = Object.keys(battleConstants().SUB_ACTION_TARGET_TYPE).reduce((obj, key) => (obj[battleConstants().SUB_ACTION_TARGET_TYPE[key]] = key, obj), {});*/
+					
+					//TargetRange = battleConstants().TARGET_RANGE;
+					$("#loadingMessage").removeClass("bg-primary");
+					$("#loadingMessage").addClass("bg-success");
+					$("#loadingMessage").text("Loaded successfully!");
+					$("#loadingMessage").fadeOut(2000);
+					//console.log(constantsString);
+				}).
+				fail(function(data) {
+					$("#loadingMessage").text("An error occurred while loading the required data.");
+					$("#loadingMessage").removeClass("bg-primary");
+					$("#loadingMessage").addClass("bg-danger");
+					console.log(data);
+				});
+				
+				$("#processSbJson").on("click", function(event, params) {
+					var input = $("#jsonTextbox").val();
+					var json = "";
+					
+					try {
+						json = JSON.parse(input);
+					}
+					catch (e) {
+						input = "{ \"battle\": { \"buddy\": [{ \"soul_strikes\": [" + input + " } ] } }";
+						input = input.replace("abilities", "],\"abilities\"");
+						json = JSON.parse(input);
+					}
+					
+					var results = "";
+					var parsedAbilities = [];
+					
+					var actors = [];
+					
+					if (json.battle.supporter != null) {
+						actors = actors.concat(json.battle.supporter);
+					}
+					actors = actors.concat(json.battle.buddy);
+					
+					for (var i = 0; i < actors.length; i++) {
+						var buddy = actors[i];
+						var abilities = buddy.abilities;
+						
+						if (buddy.params != null) {
+							results += "<strong><u>" + buddy.params[0].disp_name + " (" + buddy.id + ") -  Soulbreaks</u></strong>";
+						}
+						
+						for (var j = 0; j < buddy.soul_strikes.length; j++) {
+							var soulbreak = buddy.soul_strikes[j];
+							results += "<div style=\"margin-top: 10px; margin-bottom: 10px; border-bottom: 3px solid black;\"><strong>Soulbreak</strong><br />" + parseAbility(soulbreak, abilities, parsedAbilities) + "</div>";
+						}
+						
+						if (buddy.params != null) {
+							results += "<strong><u>" + buddy.params[0].disp_name + " (" + buddy.id + ") -  Other abilities</u></strong>";
+						}
+						for (var j = 0; j < abilities.length; j++) {
+							var ability = abilities[j];
+							var existingAbility = $.grep(parsedAbilities, function(existing) {
+								var doesExist = existing.abilityId == ability.ability_id;
+								
+								if (!doesExist) {
+									$.grep(existing.subAbilities, function(subExisting) {
+										return subExisting.abilityId == ability.ability_id;
+									})[0] != null ? doesExist = true : false;
+								}
+								
+								return doesExist;
+							})[0];
+					
+							if (existingAbility == null) {
+								results += "<div style=\"margin-top: 10px; margin-bottom: 10px; border-bottom: 3px solid black;\"><strong>Ability/Chase</strong><br />" + parseAbility(ability, abilities, parsedAbilities) + "</div>";
+							}
+						}
+					}
+					
+					console.log(parsedAbilities);
+					$("#results").html(results);
+				});
+				
+				
+				var processSoulbreak = function(soulbreak, abilities) {
+					var actionFormula = $.grep(actionMap, function(action, index) {
+						return action.action_id == soulbreak.action_id;
+					})[0];
+				};
+				
+				var parseAbility = function(ability, abilities, parsedAbilities) {
+					var results = "";
+					var action = { elements: [], modifiers: [], subAbilities: [], subActions: [] };
+					var options = ability.options;
+					
+					parsedAbilities.push(action);
+					
+					action.name = (options.name ? unescape(options.name) : "Attack");
+					action.abilityId = ability.ability_id;
+					action.exerciseType = exerciseTypes[ability.exercise_type];
+					action.targetRange = TargetRange[options.target_range];
+					action.targetMethod = targetMethod[options.target_method];
+					action.targetSegment = targetSegment[options.target_segment];
+					action.castTime = Number(options.cast_time / 1000).toFixed(2);
+					action.class = abilityCategories[ability.category_id];
+					action.sbCharge = Number(options.ss_point);
+					action.counterable = Number(options.counter_enable) == 0 ? false : true;
+
+					results += "<div>";
+					results += "Name: " + action.name + "<br />";
+					results += "Ability ID: " + action.abilityId + "<br />";
+					results += "Action Type: " + action.exerciseType + "<br />";
+					results += (action.class != null ? ("Ability Class: " + action.class + "<br />") : "");
+					results += "Cast Time: " + action.castTime + "<br />"
+					results += (action.sbCharge > 0 ? ("SB Charge: " + action.sbCharge + "<br />") : "");
+					results += "Target: " + getTargetById(options.target_range, options.target_method, options.target_segment, options.active_target_method) + "<br />";
+					results += "Counterable: " + action.counterable + "<br />";
+					
+					if (FF.ns.battle.Config.getInstance().get("ExceptionalFlightAttackIds").indexOf(Number(action.abilityId)) != -1) {
+						action.abilityType = "jump";
+						results += "Ability Type: Jump <br />";
+					}
+					
+					var actionFormula = $.grep(actionMap, function(action, index) {
+						return action.action_id == ability.action_id;
+					})[0];
+					
+					action.actionId = ability.action_id
+					
+					results += "Action ID: " + action.actionId + "<br />";
+					results += "Formula Type: ";
+					if (actionFormula) {
+						results += actionFormula.classname;
+					}
+					else {
+						results += "No mapping for action ID: " + ability.action_id;
+					}
+					results += "<br />";
+					
+					if (actionFormula == null) {
+						console.log("No formula mapped: " + ability.ability_id + " - " + ability.options.name + " - " + ability.action_id);
+						return "";
+					}
+					
+					var formulaAttributes = Object.keys(actionFormula);
+					var otherAbilities = "";
+					formulaAttributes.forEach(function(key, index) {
+						if (key.indexOf("arg") > -1) {
+							switch(actionFormula[key]) {
+								case "hpFactor":
+									if (Number(options[key] > 0)) {
+										action.removesKO = Number(options[key]);
+										results += "Removes KO: " + action.removesKO + "%<br />";
+									}
+									break;
+								case "factor":
+									if (Number(options[key] > 0)) {
+										action.healingFactor = Number(options[key]);
+										results += "Healing Factor: " + action.healingFactor + "<br />";
+									}
+									break;
+								case "magicalAttackDamageFactor":
+									if (Number(options[key]) > 0) {
+										action.matkMultiplier = Number(options[key]);
+										results += "Magical Multiplier: " + action.matkMultiplier + "<br />";
+									}
+									break;
+								case "physicalAttackDamageFactor":
+									if (Number(options[key]) > 0) {
+										action.patkMultiplier = Number(options[key]);
+										results += "Physical Multiplier: " + action.patkMultiplier + "<br />";
+									}
+									break;
+								case "damageFactor":
+									action.multiplier = Number(options[key]) / 100;
+									results += "Multiplier: " + action.multiplier + "<br />";
+									break;
+								case "atkElement":
+								case "matkElement":
+								case "args (elements)":
+									if (Number(options[key]) > 0) {
+										action.elements.push(elementTypes[options[key]]);
+									}
+									break;
+								case "atkExponentialFactor":
+									if (Number(options[key]) > 0) {
+										action.atkExponentialFactor = Number(options[key]);
+										results += "Defense Piercing Factor: " + action.atkExponentialFactor + "<br />";
+									}
+									break;
+								case "matkExponentialFactor":
+									if (Number(options[key]) > 0) {
+										action.matkExponentialFactor = Number(options[key]);
+										results += "Resistance Piercing Factor: " + action.matkExponentialFactor + "<br />";
+									}
+									break;
+								case "atkType":
+									action.isRanged = Number(options[key]) == 2 ? true : false;
+									results += "Range: " + atkTypes[options[key]] + "<br />";
+									break;
+								case "barrageNum":
+									action.hits = Number(options[key])
+									results += "Hits: " + action.hits + "<br />";
+									break;
+								case "criticalRatio":
+								case "critical":
+									if (Number(options[key]) > 0) {
+										action.critialHitPercentage = Number(options[key]);
+										results += "Critical Hit %: " + action.critialHitPercentage + "%<br />";
+									}
+									break;
+								case "damageRate":
+									if (Number(options[key]) > 0) {
+										if (Number(options["useMaxHp"]) == 1) {
+											action.maxHPDamage = Number(options[key]);
+											results += "Max HP Damage: " + action.maxHPDamage + "%<br />";
+										}
+										else {
+											action.currentHPDamage = Number(options[key]);
+											results += "Current HP Damage: " + action.currentHPDamage + "%<br />";
+										}
+									}
+									break;
+								case "fixedDamage":
+									if (Number(options[key]) > 0) {
+										action.fixedDamage = Number(options[key]);
+										results += "Fixed Damage: " + action.fixedDamage + "<br />";
+									}
+									break;
+								case "minDamageFactor":
+									if (Number(options[key]) > 0) {
+										action.minimumDamageFactor = Number(options[key]);
+										results += "Minimum Damage Factor: " + action.minimumDamageFactor + "<br />";
+									}
+									break;
+								case "burstAbilityArgs":
+									var burstAbility = $.grep(abilities, function(action, index) {
+										return action.ability_id == options[key];
+									})[0];
+									
+									if (burstAbility != null) {
+										otherAbilities += "<strong>Burst Ability</strong><br />" + parseAbility(burstAbility, abilities, action.subAbilities);
+									}
+									break;
+								case "wrappedAbilityId":
+								case "defaultAbility":
+								case "abilityId":
+									var wrappedAbility = $.grep(abilities, function(action, index) {
+										return action.ability_id == options[key];
+									})[0];
+									
+									if (wrappedAbility != null) {
+										otherAbilities += "<strong>Wrapped Ability</strong><br />" + parseAbility(wrappedAbility, abilities, action.subAbilities);
+									}
+									break;
+								case "barterRate":
+									if (Number(options[key]) > 0) {
+										action.percentDamageToSelf = (Number(options[key]) / 10).toFixed(2);
+										results += "Max HP damage to user: " + Number(options[key]) + "%<br />";
+									}
+									break;
+								case "isSameTarget":
+									if (Number(options[key]) == 0) {
+										action.isRandomTarget = true;
+										results += "Hits random targets<br />";
+									}
+									break;
+								case "absorbHpFactor":
+									if (Number(options[key]) > 0) {
+										action.absorbHPFactor = (Number(options[key]) / 10).toFixed(2);
+										results += "Restores HP: " + action.absorbHPFactor + "% of damage dealt<br />";
+									}
+									break;
+								case "ignoresStatusAilmentsBarrierArg":
+									if (Number(options[key]) > 0) {
+										action.ignoreAstra = true;
+										results += "Ignores Astra<br />";
+									}
+									break;
+								case "ignoresMirageAndMightyGuardArg":
+									if (Number(options[key]) > 0) {
+										action.ignorePhysicalBlink = true;
+										action.ignoreMagicalBlink = true;
+										results += "Ignores Magic Blink<br />";
+										results += "Ignores Physical Blink<br />";
+									}
+									break;
+								case "ignoresReflectionArg":
+									if (Number(options[key]) > 0) {
+										action.ignoreReflect = true;
+										results += "Ignores Reflect<br />";
+									}
+									break;
+								case "deathRate":
+									if (Number(options[key]) > 0) {
+										action.selfKOChance = Number(options[key]);
+										results += "Chance to self KO: " + action.selfKOChance + "%<br />";
+									}
+									break;
+								case "fixedHp":
+									if (Number(options[key]) > 0) {
+										action.restoreFixedHP = Number(options[key]);
+										results += "Restores Fixed HP: " + action.restoreFixedHP + "<br />";
+									}
+									break;
+								case "comboType":
+									if (Number(options[key]) > 0) {
+										var chainType = chainTypes[Number(options[key])];
+										action.chainType = chainType;
+										results += "Chain Type: " + chainType + "<br />";
+									}
+									break;
+								case "comboCondition":
+									if (Number(options[key]) > 0) {
+										action.chainCondition = elementTypes[options[key]];
+										results += "Chain Condition: " + action.chainCondition + "<br />";
+									}
+									break;
+								case "boostCoefficient":
+									var boostCoef = Number(options[key]);
+									if (boostCoef > 100) {
+										boostCoef -= 100;
+									}
+									
+									action.chainBoostCoefficient = boostCoef;
+									if (Number(options[key]) > 0) {
+										results += "Chain Field Boost: " + boostCoef + "%<br />";
+									}
+									break;
+								case "comboMaxNum":
+									if (Number(options[key]) > 0) {
+										action.chainMaxCount = Number(options[key]);
+										results += "Max Chain Count: " + action.chainMaxCount + "<br />";
+									}
+								case "synchroAbilityId1":
+									if (Number(options[key]) > 0) {
+										action.synchroAbilityId1 = Number(options[key]);
+										results += "Attach Synchro Ability ID: " + action.synchroAbilityId1 + "<br />";
+									}
+									break;
+								case "synchroAbilityId2":
+									if (Number(options[key]) > 0) {
+										action.synchroAbilityId2 = Number(options[key]);
+										results += "Defend Synchro Ability ID: " + action.synchroAbilityId2 + "<br />";
+									}
+									break;
+								case "forceHit":
+									if (Number(options[key]) == 1) {
+										action.autoHit = true;
+										results += "Auto-hit: true <br />";
+									}
+									break;
+								default:
+									if (options[key] != "" && options[key] != "0") {
+										results += actionFormula[key] + ": " + options[key] + " <br />";
+									}
+									break;
+							}
+						}
+					});
+					
+					results += (action.elements.length > 0 ? "Element(s): " + action.elements.join(", ")  + "<br />" : "");
+					
+					if (ability.sub_actions != null) {
+						for (var i = 0; i < ability.sub_actions.length; i++) {
+							var subAction = ability.sub_actions[i];
+							results += "<u>Sub Action " + (i + 1) + "</u><br />";
+							
+							var newSubAction = { elements: [], modifiers: [], synchroConditions: [] };
+							
+							newSubAction.type = subActionType[subAction.type];
+							newSubAction.target = subActionTargetType[subAction.target_type];
+							newSubAction.conditionType = conditionTypes[parseInt(subAction.condition_type)];
+							newSubAction.controlStatementType = controlStatementTypes[parseInt(subAction.control_statement_type)];
+							
+							results += "Action Type: " + newSubAction.type + "<br />";
+							results += "Target: " + newSubAction.target + "<br />";
+							if (newSubAction.controlStatementType != null ) {
+								results += "Control Statement Type: " + newSubAction.controlStatementType + "<br/>";
+							}
+							if (newSubAction.conditionType != null) {
+								results += "Condition Type: " + newSubAction.conditionType + "<br/>";
+							}
+							if (subAction.condition_arg.length > 0) {
+								results += "Condition Arg: " + subAction.condition_arg + "<br/>";
+							}
+							
+							if (subAction.arg != null) {
+								var subArgs = denaJsonParser().parse(subAction.arg);
+								var subArgKeys = Object.keys(subArgs);
+								subArgKeys.forEach(function(subArgKey, index) {
+									switch(subArgKey) {
+										case "isIndirectAttack":
+											newSubAction.isRanged = true;
+											results += "Ranged: true<br />";
+											break;
+										case "isFlightAttack":
+											newSubAction.abilityType = "jump";
+											results += "Ability Type: Jump<br />";
+											break;
+										case "factor":
+											newSubAction.multiplier = Number(subArgs[subArgKey]) / 100;
+											results += "Multiplier: " + newSubAction.multiplier + "<br />";
+											break;
+										case "factorForHealHp":
+											newSubAction.healingMultiplier = Number(subArgs[subArgKey]);
+											results += "Healing Multiplier: " + newSubAction.healingMultiplier + "<br />";
+											break;
+										case "rateOfMaxHpForHealDeath":
+											newSubAction.raiseMaxHP = Number(subArgs[subArgKey]);
+											results += "Healing Multiplier: " + newSubAction.raiseMaxHP + "%<br />";
+											break;
+										case "hitNum":
+											newSubAction.hits = Number(subArgs[subArgKey]);
+											results += "Hits: " + newSubAction.hits + "<br />";
+											break;
+										case "criticalRate":
+											newSubAction.criticalRate = Number(subArgs[subArgKey]);
+											results += "Critical Rate: " + newSubAction.criticalRate + "<br />";
+											break;
+										case "damageThresholdLv":
+											newSubAction.damageThreadholdLv = Number(subArgs[subArgKey]);
+											results += "Damage Threshold Level: " + newSubAction.damageThreadholdLv + "<br />";
+											break;
+										case "secondaryDamageThresholdLv":
+											newSubAction.damageThreadholdLv = Number(subArgs[subArgKey]);
+											results += "Secondary Damage Threshold Level: " + newSubAction.damageThreadholdLv + "<br />";
+											break;
+										case "elementIds":
+											subArgs[subArgKey].forEach(function(element, elementIdx) {
+												newSubAction.elements.push(elementTypes[element]);
+											});
+											break;
+										case "elementId":
+											newSubAction.elements.push(elementTypes[subArgs[subArgKey]]);
+											break;
+										case "saId":
+											var statusName = statusConstants[subArgs[subArgKey]];
+											if (statusName == false) {
+												statusName = statusBundleConstants[subArgs[subArgKey]];
+												var bundledStatuses = FF.ns.battle.StatusAilmentsConfig.getBundle(Number(subArgs[subArgKey]));
+												
+												results += "Status Bundle: " + subArgs[subArgKey] + " - " + statusName + "<br />";
+												if (bundledStatuses != null) {
+													bundledStatuses.forEach(function(saId) {
+														results += "Status Effect: " + saId + " - " + statusConstants[saId] + " - [" + statusMap[saId] + "]<br />";
+														newSubAction.modifiers.push({
+															id: Number(saId),
+															target: newSubAction.target
+														});
+													});
+												}
+											}
+											else {
+												newSubAction.modifiers.push({
+													id: Number(subArgs[subArgKey]),
+													target: newSubAction.target
+												});
+												results += "Status Effect: " + subArgs[subArgKey] + " - " + statusName + " - [" + statusMap[subArgs[subArgKey]] + "]<br />";
+											}
+											break;
+										case "saIds":
+											var saids = subArgs[subArgKey];
+											if (!Array.isArray(saids)) {
+												saids = [saids];
+											}
+											saids.forEach(function(saId, elementIdx) {
+												var statusName = statusConstants[saId];
+												if (statusName == false) {
+													statusName = statusBundleConstants[saId];
+													var bundledStatuses = FF.ns.battle.StatusAilmentsConfig.getBundle(Number(saId));
+													results += "Status Bundle: " + saId + " - " + statusName + "<br />";
+													if (bundledStatuses != null) {
+														bundledStatuses.forEach(function(nestedSaId) {
+															results += "Status Effect: " + nestedSaId + " - " + statusConstants[nestedSaId] + " - [" + statusMap[nestedSaId] + "]<br />";
+															newSubAction.modifiers.push({
+																id: Number(nestedSaId),
+																target: newSubAction.target
+															});
+														});
+													}
+												}
+												else {
+													results += "Status Effect: " + saId + " - " + statusName + " - [" + statusMap[saId] + "]<br />";
+													newSubAction.modifiers.push({
+														id: Number(saId),
+														target: newSubAction.target
+													});
+												}
+											});
+											break;
+										case "shouldHitForcely":
+											if (Number(subArgs[subArgKey]) == 1) {
+												action.autoHit = true;
+												results += "Auto-hit: true <br />";
+											}
+											break;
+										case "rateOfHp":
+											action.hpCost = (Number(subArgs[subArgKey]) / 100).toFixed(2);
+											results += "Current HP Barter: " + Number(subArgs[subArgKey]) + "% <br />";
+											break;
+										case "rateOfMaxHp":
+											action.maxHPDamage = (Number(subArgs[subArgKey]) / 100).toFixed(2);
+											results += "Max HP Barter: " + Number(subArgs[subArgKey]) + "% <br />";
+											break;
+										case "shouldEnableOverflow":
+											if (Number(subArgs[subArgKey]) == 1) {
+												action.isOverflow = true;
+												results += "Overflow?: Yes<br />";
+											}
+											break;
+										case "option":
+											if (subArgs[subArgKey].synchroConditions) {
+												newSubAction.synchroConditions = [];
+												var synchroConditions = subArgs[subArgKey].synchroConditions;
+												var synchroKeys = Object.keys(synchroConditions);
+												synchroKeys.forEach(function(synchroKey) {
+													var conditions = [];
+													results += "Synchro Condition " + synchroKey + ": ";
+													if (synchroConditions[synchroKey].categoryId) {
+														if (!Array.isArray(synchroConditions[synchroKey].categoryId)) {
+															synchroConditions[synchroKey].categoryId = [synchroConditions[synchroKey].categoryId];
+														}
+														
+														synchroConditions[synchroKey].categoryId.forEach(function(categoryId) {
+															conditions.push(abilityCategoryIds[categoryId]);
+														});
+													}
+													if (synchroConditions[synchroKey].categoryIds) {
+														synchroConditions[synchroKey].categoryIds.forEach(function(categoryId) {
+															conditions.push(abilityCategoryIds[categoryId]);
+														});
+													}
+													if (synchroConditions[synchroKey].elementId) {
+														if (!Array.isArray(synchroConditions[synchroKey].elementId)) {
+															synchroConditions[synchroKey].elementId = [synchroConditions[synchroKey].elementId];
+														}
+														
+														synchroConditions[synchroKey].elementId.forEach(function(elementId) {
+															conditions.push(elementTypes[elementId]);
+														});
+													}
+													if (synchroConditions[synchroKey].elementIds) {
+														synchroConditions[synchroKey].elementIds.forEach(function(elementId) {
+															conditions.push(elementTypes[elementId]);
+														});
+													}
+													
+													newSubAction.synchroConditions.push({
+														abilitySlotNumber: Number(synchroKey),
+														conditions: conditions
+													});
+													
+													results += conditions.join(", ") + "<br />";
+												});
+											}
+											
+											
+											break;
+									}
+								});
+								
+								results += "Element: " + newSubAction.elements.join(", ") + "<br />";
+							}
+							
+							results += "<br />";
+						}
+					}
+					
+					setActionModifiers(actionFormula, options, action);
+					setActionRemoveModifiers(actionFormula, options, action);
+					if (action.modifiers) {
+						for (var k = 0, modLen = action.modifiers.length; k < modLen; k += 1) {
+							var modifier = action.modifiers[k];
+							if (modifier.id != false && modifier.id > 0 && modifier.id != 100) {
+								var statusName = statusConstants[Number(modifier.id)];
+								if (statusName == null) {
+									statusName = statusBundleConstants[Number(modifier.id)];
+								}
+								
+								results += "Status Effect: " + modifier.id + " - " + statusName + " (" + modifier.target + ")" + (modifier.value != null && modifier.value != 0 ? (", value: " + modifier.value) : "") + " - [" + statusMap[modifier.id] + "]<br />";
+								var hitChance = modifier.hitChance;
+								if (hitChance > 0) {
+									results += "Status Chance: " + hitChance + "%<br /><br />";
+								}
+							}
+						}
+					}
+					
+					results += otherAbilities;
+					results += "</div><br />";
+					return results;
+				};
+			
+				var setActionModifiers = function(actionFormula, options, attack) {
+					var defaultTarget = getTargetById(options.target_range, options.target_method, options.target_segment, options.active_target_method);
+					var defaultDuration = false;
+					if (options.status_ailments_id > 0) {
+						var modifier = {};
+						modifier.id = Number(options.status_ailments_id);
+						modifier.hitChance = Number(options.status_ailments_factor);
+						modifier.target = defaultTarget;
+						
+						if (modifier.hitChance == FORCE_INFLICT_STATUS_AILMENTS_FACTOR) {
+							modifier.isAutoHit = true;
+						}
+						
+						if (modifier.id == 535) {
+							if (actionFormula.actionid == 137 || actionFormula.actionid == 151) {
+								modifier.value = Number(options["arg8"]) * 10;
+								modifier.duration = Number(options["arg9"]) / 1000;
+							}
+							else if (actionFormula.actionid == 160) {
+								modifier.value = Number(options["arg7"]) * 10;
+								modifier.duration = Number(options["arg8"]) / 1000;
+							}
+						}
+						else if (modifier.id == 532 || modifier.id == 50189 || modifier.id == 50552) {
+							modifier.duration = 15;
+							modifier.target = getTargetById(FF.ns.battle.Conf.TARGET_RANGE.SELF, FF.ns.battle.Conf.TARGET_METHOD.NOTHING, FF.ns.battle.Conf.TARGET_SEGMENT.COLLEAGUE, FF.ns.battle.Conf.ACTIVE_TARGET_METHOD.BOTH_ENABLE);
+						}
+						
+						attack.modifiers.push(modifier);
+					}
+					
+					var currentModifier = {};
+					var formulaAttributes = Object.keys(actionFormula);
+					formulaAttributes.forEach(function(key, index) {
+						if (key.indexOf("arg") > -1) {
+							switch(actionFormula[key]) {
+								case "atkSa":
+								case "args":
+								case "args (setSa)":
+								case "bundleArgs":
+								case "bundleArgs (setSa)":
+								case "statusId":
+								case "makeStatusAilments":
+								case "_saAbilityToTargetA":
+								case "id":
+								case "opponentStatusAilments":
+								case "statusAilmentsId":
+									if (currentModifier.id != options[key]) {
+										if (currentModifier.id != false) {
+											if (currentModifier.target == null) {
+												currentModifier.target = defaultTarget;
+											}
+											attack.modifiers.push(currentModifier);
+											currentModifier = {};
+										}
+										
+										var statusName = statusConstants[Number(key)];
+										if (statusName == false) {
+											statusName = statusBundleConstants[Number(key)];
+										}
+										
+										currentModifier.id = options[key];
+									}
+									break;
+								case "atkStatusAilments":
+								case "selfStatusAilments":
+								case "selfBundleAilments":
+								case "selfSaIds":
+								case "selfSaId":
+								case "optionalSelfSaId":
+									if (currentModifier.id != options[key]) {
+										if (currentModifier.id != false) {
+											if (currentModifier.target == null) {
+												currentModifier.target = defaultTarget;
+											}
+											attack.modifiers.push(currentModifier);
+											currentModifier = {};
+										}
+										currentModifier.id = options[key];
+										currentModifier.target = "SELF"
+									}
+									break;
+								case "partyStatusAilments":
+									if (currentModifier.id != options[key]) {
+										if (currentModifier.id != false) {
+											if (currentModifier.target == null) {
+												currentModifier.target = defaultTarget;
+											}
+											attack.modifiers.push(currentModifier);
+											currentModifier = {};
+										}
+										currentModifier.id = options[key];
+										currentModifier.target = "ALL"
+									}
+									break;
+								case "rate":
+								case "boost":
+								case "value":
+								case "amount":
+									currentModifier.value = options[key];
+									break;
+								case "defenseFactor":
+									if (options.status_ailments_id == 0) {
+										currentModifier.value = Number(options[key]) * 10;
+									}
+									break;
+								case "duration":
+									var duration = Number(options[key]);
+									if (duration > 0) {
+										currentModifier.duration = Number(options[key]) / 1000
+									}
+									break;
+								case "duration (statusAilments)":
+									defaultDuration = Number(options[key]) / 1000;
+									break;
+							}
+						}
+					});
+					
+					attack.modifiers.push(currentModifier);
+					
+					var newModifiers = [];
+					for (var i = attack.modifiers.length - 1; i >= 0 ; i--) {
+						var modifier = attack.modifiers[i];
+						if (modifier.target == null) {
+							modifier.target = defaultTarget;
+						}
+						
+						if (modifier.duration == null && defaultDuration != false) {
+							modifier.duration = defaultDuration;
+						}
+						
+						var statusName = statusConstants[modifier.id];
+						if (statusName == false) {
+							statusName = statusBundleConstants[modifier.id];
+							var bundledStatuses = FF.ns.battle.StatusAilmentsConfig.getBundle(Number(modifier.id));
+							if (bundledStatuses != null) {
+								bundledStatuses.forEach(function(saId) {
+									var newModifier = {
+										id: saId,
+										value: modifier.value,
+										target: modifier.target
+									};
+									
+									if (modifier.duration > 0) {
+										newModifier.duration = modifier.duration;
+									}
+									if (modifier.turns > 0) {
+										newModifier.turns = modifier.turns;
+									}
+									
+									newModifiers.push(newModifier);
+								});
+							}
+							
+							attack.modifiers.splice(i, 1);
+						}
+					}
+					
+					attack.modifiers = attack.modifiers.concat(newModifiers);
+				};
+				
+				var setActionRemoveModifiers = function(actionFormula, options, attack) {
+					if (actionFormula.unsetSa) {
+						if (!actionFormula.unsetSa.useStatusAilmentsId) {
+							if (actionFormula.unsetSa.bundleArgs != null) {
+								for (var i = 0, len = actionFormula.unsetSa.bundleArgs.length; i < len; i += 1) {
+									var statusBundleId = Number(options["arg"+actionFormula.unsetSa.bundleArgs[i]]);
+									var enumVal = utils.enumNameFromIndex(utils.status_ailment_bundles, Number(statusBundleId));
+									var statusBundle = STATUS_BUNDLES[enumVal];
+									
+									if (statusBundle) {
+										for (var j = 0, bundleLen = statusBundle.length; j < bundleLen; j += 1) {
+											if (!attack.removeModifiers) {
+												attack.removeModifiers = [];
+											}
+										
+											attack.removeModifiers.push({
+												id: statusBundle[j],
+												target: getTargetById(options.target_range, options.target_method, options.target_segment, options.active_target_method)
+											});
+										}
+									}
+									else {
+										console.log("No status bundle found for " + actionFormula.unsetSa.bundleArgs[i] + " (" + statusBundleId + ").");
+									}
+								}
+							}
+							if (actionFormula.unsetSa.args != null) {
+								for (var i = 0, len = actionFormula.unsetSa.args.length; i < len; i += 1) {
+									var statusId = Number(options["arg"+actionFormula.unsetSa.args[i]]);
+									var enumVal = utils.enumNameFromIndex(ModifierEnum, Number(statusBundleId));
+									var statusId = ModifierEnum[enumVal];
+									
+									if (!attack.removeModifiers) {
+										attack.removeModifiers = [];
+									}
+								
+									attack.removeModifiers.push({
+										id: statusId,
+										target: getTargetById(options.target_range, options.target_method, options.target_segment, options.active_target_method)
+									});
+								}
+							}
+						}
+						else {
+							if (options.status_ailments_id > 0) {
+								if (!attack.removeModifiers) {
+									attack.removeModifiers = [];
+								}
+							
+								attack.removeModifiers.push({
+									id: options.status_ailments_id,
+									target: getTargetById(options.target_range, options.target_method, options.target_segment, options.active_target_method)
+								});
+							}
+						}
+					}
+				};
+				
+				var getTargetById = function(range, method, segment, activeMethod) {
+					return TargetRange[range] + " - " + targetMethod[method] + " - " + targetSegment[segment] + " - " + activeTargetMethod[activeMethod];
+				};
+			
+				function unpacker_filter(source) {
+					var trailing_comments = '',
+						comment = '',
+						unpacked = '',
+						found = false;
+
+					// cut trailing comments
+					do {
+						found = false;
+						if (/^\s*\/\*/.test(source)) {
+							found = true;
+							comment = source.substr(0, source.indexOf('*/') + 2);
+							source = source.substr(comment.length).replace(/^\s+/, '');
+							trailing_comments += comment + "\n";
+						} else if (/^\s*\/\//.test(source)) {
+							found = true;
+							comment = source.match(/^\s*\/\/.*/)[0];
+							source = source.substr(comment.length).replace(/^\s+/, '');
+							trailing_comments += comment + "\n";
+						}
+					} while (found);
+
+					var unpackers = [P_A_C_K_E_R/*, Urlencoded, JavascriptObfuscator, MyObfuscate*/];
+					for (var i = 0; i < unpackers.length; i++) {
+						if (unpackers[i].detect(source)) {
+							unpacked = unpackers[i].unpack(source);
+							if (unpacked != source) {
+								source = unpacker_filter(unpacked);
+							}
+						}
+					}
+
+					return trailing_comments + source;
+				}
+				
+				var denaJsonParser = function (e, t) {
+					var n = {
+						parse: function (e) {
+							this._string = String("{" + e + "}").replace(/\r\n|\r|\n/g, ",");
+							var t = this._parse(0);
+							if ((typeof t === "undefined"))
+								throw new Error("SimpleJson Syntax Error: " + e);
+							return t.value
+						},
+						_parse: function (e) {
+							return this._parseObject(e)
+						},
+						_parseObject: function (e) {
+							e = this._skipWhiteSpace(e);
+							if (this._string.charAt(e) === "{") {
+								e++;
+								var t = {};
+								for (; ; ) {
+									var n = this._parseNumberOrString(e);
+									if ((typeof n === "undefined")) {
+										e = this._skipWhiteSpace(e);
+										if (this._string.charAt(e) === ",") {
+											e++;
+											continue
+										}
+										if (this._string.charAt(e) === "}") {
+											e++;
+											break
+										}
+										return void 0
+									}
+									e = n.index;
+									if (this._string.charAt(e) === ":")
+									{
+										e++;
+										var r = this._parse(e);
+										if ((typeof r === "undefined"))
+											return void 0;
+										e = r.index,
+										t[n.value] = r.value;
+										if (this._string.charAt(e) === ",") {
+											e++;
+											continue
+										}
+										if (this._string.charAt(e) === "}") {
+											e++;
+											break
+										}
+										return void 0
+									}
+									return void 0
+								}
+								return e = this._skipWhiteSpace(e), {
+									index: e,
+									value: t
+								}
+							}
+							return this._parseArray(e)
+						},
+						_parseArray: function (e) {
+							e = this._skipWhiteSpace(e);
+							if (this._string.charAt(e) === "[") {
+								e++;
+								var t = [];
+								for (; ; ) {
+									var n = this._parse(e);
+									(typeof n === "undefined") ? e = this._skipWhiteSpace(e) : (e = n.index, t.push(n.value));
+									if (this._string.charAt(e) === ",") {
+										e++;
+										continue
+									}
+									if (this._string.charAt(e) === "]") {
+										e++;
+										break
+									}
+									return void 0
+								}
+								return e = this._skipWhiteSpace(e), {
+									index: e,
+									value: t
+								}
+							}
+							return this._parseNumberOrString(e)
+						},
+						_parseNumberOrString: function (e) {
+							e = this._skipWhiteSpace(e);
+							var t = e;
+							while (/[\w.+-]/.test(this._string.charAt(e)))
+								e++;
+							if (e > t) {
+								var n = this._string.substr(t, e - t);
+								e = this._skipWhiteSpace(e);
+								var r = Number(n);
+								return isNaN(r) || !isFinite(r) ? {
+									index: e,
+									value: n
+								}
+								 :
+								{
+									index: e,
+									value: r
+								}
+							}
+							return void 0
+						},
+						_skipWhiteSpace: function (e) {
+							while (this._string.charAt(e).match(/\s/))
+								e++;
+							return e
+						}
+					}
+					return n;
+				};
+				
+				String.prototype.regexIndexOf = function(regex, startpos) {
+					var indexOf = this.substring(startpos || 0).search(regex);
+					return (indexOf >= 0) ? (indexOf + (startpos || 0)) : indexOf;
+				};
+			});
+			
+		var sprintf = (function() {
+			function get_type(variable) {
+				return Object.prototype.toString.call(variable).slice(8, -1).toLowerCase();
+			}
+			function str_repeat(input, multiplier) {
+				for (var output = []; multiplier > 0; output[--multiplier] = input) {/* do nothing */}
+				return output.join('');
+			}
+
+			var str_format = function() {
+				if (!str_format.cache.hasOwnProperty(arguments[0])) {
+					str_format.cache[arguments[0]] = str_format.parse(arguments[0]);
+				}
+				return str_format.format.call(null, str_format.cache[arguments[0]], arguments);
+			};
+
+			str_format.format = function(parse_tree, argv) {
+				var cursor = 1, tree_length = parse_tree.length, node_type = '', arg, output = [], i, k, match, pad, pad_character, pad_length;
+				for (i = 0; i < tree_length; i++) {
+					node_type = get_type(parse_tree[i]);
+					if (node_type === 'string') {
+						output.push(parse_tree[i]);
+					}
+					else if (node_type === 'array') {
+						match = parse_tree[i]; // convenience purposes only
+						if (match[2]) { // keyword argument
+							arg = argv[cursor];
+							for (k = 0; k < match[2].length; k++) {
+								if (!arg.hasOwnProperty(match[2][k])) {
+									throw(sprintf('[sprintf] property "%s" does not exist', match[2][k]));
+								}
+								arg = arg[match[2][k]];
+							}
+						}
+						else if (match[1]) { // positional argument (explicit)
+							arg = argv[match[1]];
+						}
+						else { // positional argument (implicit)
+							arg = argv[cursor++];
+						}
+
+						if (/[^s]/.test(match[8]) && (get_type(arg) != 'number')) {
+							throw(sprintf('[sprintf] expecting number but found %s', get_type(arg)));
+						}
+						switch (match[8]) {
+							case 'b': arg = arg.toString(2); break;
+							case 'c': arg = String.fromCharCode(arg); break;
+							case 'd': arg = parseInt(arg, 10); break;
+							case 'e': arg = match[7] ? arg.toExponential(match[7]) : arg.toExponential(); break;
+							case 'f': arg = match[7] ? parseFloat(arg).toFixed(match[7]) : parseFloat(arg); break;
+							case 'o': arg = arg.toString(8); break;
+							case 's': arg = ((arg = String(arg)) && match[7] ? arg.substring(0, match[7]) : arg); break;
+							case 'u': arg = Math.abs(arg); break;
+							case 'x': arg = arg.toString(16); break;
+							case 'X': arg = arg.toString(16).toUpperCase(); break;
+						}
+						arg = (/[def]/.test(match[8]) && match[3] && arg >= 0 ? '+'+ arg : arg);
+						pad_character = match[4] ? match[4] == '0' ? '0' : match[4].charAt(1) : ' ';
+						pad_length = match[6] - String(arg).length;
+						pad = match[6] ? str_repeat(pad_character, pad_length) : '';
+						output.push(match[5] ? arg + pad : pad + arg);
+					}
+				}
+				return output.join('');
+			};
+
+			str_format.cache = {};
+
+			str_format.parse = function(fmt) {
+				var _fmt = fmt, match = [], parse_tree = [], arg_names = 0;
+				while (_fmt) {
+					if ((match = /^[^\x25]+/.exec(_fmt)) !== null) {
+						parse_tree.push(match[0]);
+					}
+					else if ((match = /^\x25{2}/.exec(_fmt)) !== null) {
+						parse_tree.push('%');
+					}
+					else if ((match = /^\x25(?:([1-9]\d*)\$|\(([^\)]+)\))?(\+)?(0|'[^$])?(-)?(\d+)?(?:\.(\d+))?([b-fosuxX])/.exec(_fmt)) !== null) {
+						if (match[2]) {
+							arg_names |= 1;
+							var field_list = [], replacement_field = match[2], field_match = [];
+							if ((field_match = /^([a-z_][a-z_\d]*)/i.exec(replacement_field)) !== null) {
+								field_list.push(field_match[1]);
+								while ((replacement_field = replacement_field.substring(field_match[0].length)) !== '') {
+									if ((field_match = /^\.([a-z_][a-z_\d]*)/i.exec(replacement_field)) !== null) {
+										field_list.push(field_match[1]);
+									}
+									else if ((field_match = /^\[(\d+)\]/.exec(replacement_field)) !== null) {
+										field_list.push(field_match[1]);
+									}
+									else {
+										throw('[sprintf] huh?');
+									}
+								}
+							}
+							else {
+								throw('[sprintf] huh?');
+							}
+							match[2] = field_list;
+						}
+						else {
+							arg_names |= 2;
+						}
+						if (arg_names === 3) {
+							throw('[sprintf] mixing positional and named placeholders is not (yet) supported');
+						}
+						parse_tree.push(match);
+					}
+					else {
+						throw('[sprintf] huh?');
+					}
+					_fmt = _fmt.substring(match[0].length);
+				}
+				return parse_tree;
+			};
+
+			return str_format;
+		})();
+
+		var vsprintf = function(fmt, argv) {
+			argv.unshift(fmt);
+			return sprintf.apply(null, argv);
+		};
+		</script>
+	</head>
+	<body>
+		<div style="margin-bottom: 25px;">
+			<textarea id="jsonTextbox" cols="80" rows="40"></textarea><br/>
+			<button id="processSbJson">Process JSON</button>
+		</div>
+		<div id="loadingMessage" class="bg-primary">
+			Loading battle.js and other data, please wait...
+		</div>
+		<div id="results"></div>
+	</body>
+</html>

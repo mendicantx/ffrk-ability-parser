@@ -9,10 +9,11 @@ module DataLoader
   # Maps DataStore sheet keys to their environment variable names.
   # Add a new entry here to support an additional Google Sheet tab.
   GOOGLE_SHEETS = {
-    soul_breaks: 'SOUL_BREAKS_SHEET_URL',
-    characters:  'CHARACTERS_SHEET_URL',
-    status:      'STATUS_SHEET_URL',
-    other:       'OTHER_SHEET_URL',
+    soul_breaks:  'SOUL_BREAKS_SHEET_URL',
+    characters:   'CHARACTERS_SHEET_URL',
+    status:       'STATUS_SHEET_URL',
+    other:        'OTHER_SHEET_URL',
+    action_args:  'ACTION_ARGS_SHEET_URL',
   }.freeze
 
   def self.refresh_all

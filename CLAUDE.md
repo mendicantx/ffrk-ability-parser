@@ -28,6 +28,15 @@ Configure via environment variables (copy `.env.example` to `.env`):
 
 To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb` and set the corresponding env var.
 
+### Action Args sheet (separate spreadsheet)
+
+| Env var | Sheet | Notes |
+|---|---|---|
+| `ACTION_ARGS_SHEET_URL` | Actions Args | Different spreadsheet ID; accessed via gviz CSV export (no gid needed, uses sheet name in URL) |
+
+Maps `action_id` → formula class name + named parameter list (e.g. `damageFactor`, `atkElement`, `saId`).
+Used by the ability translator to know what each arg in an ability's JSON options means.
+
 ### Other sources
 
 - `BATTLE_JS_URL` — `https://dff.sp.mbga.jp/dff/static/js/event/challenge/battle.js`
