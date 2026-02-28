@@ -78,7 +78,7 @@
     .sbp-copy-row  { display: flex; gap: 6px; align-items: flex-start; margin-top: 8px; }
     .sbp-copy-btn  { background: #264f78; color: #9cdcfe; border: 1px solid #3c5a8a; padding: 3px 10px; font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px; flex-shrink: 0; }
     .sbp-copy-btn:hover { background: #1e3d5c; }
-    .sbp-tsv-area  { background: #111; color: #555; border: 1px solid #2a2a2a; font-family: monospace; font-size: 10px; flex: 1; resize: none; padding: 3px 5px; border-radius: 3px; height: 24px; overflow: hidden; white-space: nowrap; }
+    .sbp-tsv-area  { background: #111; color: #555; border: 1px solid #2a2a2a; font-family: monospace; font-size: 10px; flex: 1; resize: none; padding: 3px 5px; border-radius: 3px; height: 36px; max-height: 36px; overflow: hidden; white-space: nowrap; }
     .sbp-translating { color: #555; font-size: 10px; margin-left: 6px; vertical-align: middle; }
   </style>
 
@@ -135,13 +135,16 @@ const DB = {
   statusAilments:     {},   // STATUS_AILMENTS_TYPE  id → coded name
   statusBundles:      {},   // STATUS_AILMENTS_BUNDLE id → coded name
   bundleContents:     {},   // bundle_id → [status_id, ...]
+  jobIds:             {},   // JOB_ID id → key (e.g. 600013 → 'WARRIOR_I')
 
+  abilityIdOf:    {},   // ABILITY_ID_OF: key → numeric id
   // Sheet data
   statusMap:     {},   // id (number) → { commonName, effects, duration }
   actionMap:     [],   // array of row objects {action_id, className, arg1..arg30}
   soulBreaksMap:  {},   // id (number) → soul break row
   charactersMap:  {},   // id (number) → character row { Name, Realm, ... }
   otherMap:       [],   // array of other rows
+  otherNameMap:   {},   // other ability id → name
 };
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -260,6 +263,7 @@ async function loadBattleJs() {
       'ATK_TYPE', 'TARGET_RANGE', 'TARGET_METHOD', 'TARGET_SEGMENT', 'ACTIVE_TARGET_METHOD',
       'SUB_ACTION_TYPE', 'SUB_ACTION_TARGET_TYPE', 'SUB_ACTION_CONDITION_TYPE',
       'SUB_ACTION_CONTROL_STATEMENT_TYPE', 'STATUS_AILMENTS_TYPE', 'STATUS_AILMENTS_BUNDLE',
+      'JOB_ID',
     ];
     const maps = {};
     for (const c of consts) maps[c] = extractConstantMap(js, c);
@@ -279,6 +283,8 @@ async function loadBattleJs() {
     DB.controlStatementTypes = invert(maps.SUB_ACTION_CONTROL_STATEMENT_TYPE);
     DB.statusAilments      = invert(maps.STATUS_AILMENTS_TYPE);
     DB.statusBundles       = invert(maps.STATUS_AILMENTS_BUNDLE);
+    DB.jobIds              = invert(maps.JOB_ID);
+    DB.abilityIdOf         = extractConstantMap(js, 'ABILITY_ID_OF');
 
     // Extract bundle contents from StatusAilmentsConfig.setBundle calls
     // Pattern: setBundle(BUNDLE_ID,[id1,id2,...])
@@ -325,8 +331,12 @@ async function loadSheets() {
       if (!isNaN(id)) DB.soulBreaksMap[id] = r;
     }
 
-    // Other sheet: keep as array
+    // Other sheet: keep as array and build id → name lookup
     DB.otherMap = otherRows;
+    for (const r of otherRows) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
+    }
 
     // Characters map: ID → row
     for (const r of characterRows) {
@@ -396,9 +406,28 @@ function resolveStatuses(idOrIds) {
   return statuses;
 }
 
+function chaseAbilityName(codedName) {
+  if (!codedName) return null;
+  const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + codedName];
+  return id ? (DB.otherNameMap[id] ?? null) : null;
+}
+
+function statusEffectsText(s) {
+  let effects = s.effects ?? '';
+  const chaseName = chaseAbilityName(s.codedName);
+  if (chaseName) {
+    effects = effects
+      .replace(/,?\s*triggers? (?:a )?(?:crystal force )?chase abilit\w*/gi, '')
+      .replace(/,\s*$/, '').trimEnd()
+      + `. Triggers [${chaseName}] after using Crystal Force abilities (max 2)`;
+  }
+  return effects;
+}
+
 function statusTag(s) {
-  const name = s.commonName ? `[${s.commonName}]` : `[${s.codedName}]`;
-  return `<span class="tag status" title="${s.effects ?? ''}">${name}</span>`;
+  const name    = s.commonName ? `[${s.commonName}]` : `[${s.codedName}]`;
+  const effects = statusEffectsText(s);
+  return `<span class="tag status" title="${effects.replace(/"/g, '&quot;')}">${name}</span>`;
 }
 
 function elementTag(name) {
@@ -746,6 +775,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
         controlType:    DB.controlStatementTypes[parseInt(sa.control_statement_type)] ?? null,
         controlTypeRaw: parseInt(sa.control_statement_type) || 0,
         conditionArg:   sa.condition_arg,
+        partyCondition: null,
         elements:       [],
         statuses:       [],
         props:          {},
@@ -803,6 +833,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
             break;
           case 'isFlightAttack':
             sub.props.jump = true;
+            break;
+          case 'partyCondition':
+            sub.partyCondition = v;
             break;
           case 'option':
             if (v?.synchroConditions) {
@@ -877,6 +910,48 @@ function generateEffectsText(parsed) {
     return (s.commonName ?? '').toLowerCase().startsWith('status level');
   }
 
+  // Format a partyCondition object into a human-readable "if ..." clause.
+  // Handles countMatchedByBuddyCondition with anyJobId and greaterEqual count.
+  function formatPartyCondition(pc) {
+    if (!pc) return '';
+    const cbbc = pc.countMatchedByBuddyCondition;
+    if (!cbbc) return '';
+    const buddy     = cbbc.buddyCondition ?? {};
+    const countCond = cbbc.countCondition  ?? {};
+    const count = countCond.greaterEqual  != null ? countCond.greaterEqual
+                : countCond.greaterThan   != null ? (countCond.greaterThan + 1)
+                : null;
+    if (count == null) return '';
+    const ids    = Array.isArray(buddy.anyJobId) ? buddy.anyJobId : (buddy.anyJobId != null ? [buddy.anyJobId] : []);
+    if (!ids.length) return '';
+    const names  = ids.map(id => {
+      const key = DB.jobIds[id];
+      return key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`;
+    });
+    const below = count <= 1 ? '0' : `0-${count - 1}`;
+    return `if there are ${below}/${count}+ ${names.join('/')} allies in the party`;
+  }
+
+  // Parse a partyCondition directly from a raw condition_arg string using regex.
+  // More reliable than nested parseDenaArg for deeply-nested objects with inline arrays.
+  // Returns "if there are 0-2/3+ Job allies in the party" style string, or null.
+  function parsePartyConditionLabel(condArgStr) {
+    if (!condArgStr || !condArgStr.includes('partyCondition')) return null;
+    const countM = condArgStr.match(/greaterEqual\s*:\s*(\d+)/);
+    if (!countM) return null;
+    const count = parseInt(countM[1]);
+    const jobM  = condArgStr.match(/anyJobId\s*:\s*\[([^\]]+)\]/);
+    if (!jobM) return null;
+    const ids   = (jobM[1].match(/\d+/g) ?? []).map(Number);
+    if (!ids.length) return null;
+    const names = ids.map(id => {
+      const key = DB.jobIds[id];
+      return key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`;
+    });
+    const below = count <= 1 ? '0' : `0-${count - 1}`;
+    return `if there are ${below}/${count}+ ${names.join('/')} allies in the party`;
+  }
+
   // Human-readable target suffix, e.g. " to user" / " to all allies"
   // 'default' = SB activation re-tag → "to user".
   // Named sub-action targets use the same keyword matching as parseSubActionTarget (UPPERCASE).
@@ -939,7 +1014,7 @@ function generateEffectsText(parsed) {
           if (ref) target = ref.target;
         }
       }
-      for (const s of sa.statuses) out.push({ ...s, _target: target });
+      for (const s of sa.statuses) out.push({ ...s, _target: target, _partyCondition: sa.partyCondition ?? null });
     }
     return out;
   }
@@ -1303,19 +1378,45 @@ function generateEffectsText(parsed) {
       seenIds.add(s.id); return true;
     });
     if (uniqueStatuses.length > 0) {
-      const byTarget = new Map();
-      for (const s of uniqueStatuses) {
+      // Unconditional statuses: one segment per target (existing behaviour)
+      const unconditional = uniqueStatuses.filter(s => !s._partyCondition);
+      const conditional   = uniqueStatuses.filter(s =>  s._partyCondition);
+
+      const byTargetUnc = new Map();
+      for (const s of unconditional) {
         const tLabel = targetLabel(s._target);
-        if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
-        byTarget.get(tLabel).push(s);
+        if (!byTargetUnc.has(tLabel)) byTargetUnc.set(tLabel, []);
+        byTargetUnc.get(tLabel).push(s);
       }
-      for (const [tLabel, group] of byTarget) {
+      for (const [tLabel, group] of byTargetUnc) {
         const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
         } else {
           segs.push(`Grants ${statusStr}${tLabel}`);
         }
+      }
+
+      // Conditional statuses: group by condition, combine targets with '/', append "if ..." suffix
+      const byCondition = new Map();
+      for (const s of conditional) {
+        const condKey = JSON.stringify(s._partyCondition);
+        if (!byCondition.has(condKey)) byCondition.set(condKey, { cond: s._partyCondition, byTarget: new Map() });
+        const bt = byCondition.get(condKey).byTarget;
+        const tLabel = targetLabel(s._target);
+        if (!bt.has(tLabel)) bt.set(tLabel, []);
+        bt.get(tLabel).push(s);
+      }
+      for (const [, { cond, byTarget: bt }] of byCondition) {
+        const condSuffix = ' ' + formatPartyCondition(cond);
+        const enemyParts = [], allyParts = [];
+        for (const [tLabel, group] of bt) {
+          const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+          if (tLabel.includes('enem')) enemyParts.push(`${statusStr}${tLabel.replace(' to ', ' on ')}`);
+          else                         allyParts.push(`${statusStr}${tLabel}`);
+        }
+        if (enemyParts.length) segs.push(`Causes ${enemyParts.join('/')}${condSuffix}`);
+        if (allyParts.length)  segs.push(`Grants ${allyParts.join('/')}${condSuffix}`);
       }
     }
   } else {
@@ -1349,15 +1450,27 @@ function generateEffectsText(parsed) {
     if (condStat) {
       const statLabel  = parseStatComparisonLabel(condStat.conditionArg)
                          ?? parseEnElementLabel(condStat.conditionArg)?.label;
+      const pcLabel    = parsePartyConditionLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const tLabel     = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
-      if (condStat.hasElse) {
+      if (pcLabel) {
+        // Party condition: "Grants [X] to user/[X] to all allies if there are 0-2/3+ Job allies in the party"
+        // ELSE branch listed first (fewer allies = lower threshold), IF branch second (more allies).
+        const elseStr   = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+        const ifLabel   = targetLabel(condStat.ifTarget);
+        const elseLabel = targetLabel(condStat.elseTarget);
+        const parts = [];
+        if (elseStr) parts.push(`${elseStr}${elseLabel}`);
+        if (ifStr)   parts.push(`${ifStr}${ifLabel}`);
+        if (parts.length) clauses.push(parts.join('/') + ` ${pcLabel}`);
+      } else if (condStat.hasElse) {
         // Two-sided: "grants [X] or [Y] to self based on condition"
+        const tLabel   = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const elseStr  = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
         const parts    = [ifStr, elseStr].filter(Boolean);
         if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
       } else {
         // One-sided: "grants [X] to self if condition"
+        const tLabel = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         if (ifStr) clauses.push(ifStr + tLabel + (statLabel ? ` if ${statLabel}` : ''));
       }
     }
@@ -1613,7 +1726,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'Points':         { val: parsed.sbCost ?? '',                                                                        src: false },
     'Mastery Bonus':  { val: '',                                                                                          src: false },
     'Honing Effects': { val: '',                                                                                          src: false },
-    'Relic':          { val: '',                                                                                          src: false },
+    'Relic':          { val: sb?.['Relic'] || '',                                                                         src: !!sb?.['Relic'] },
     'Name (JP)':      { val: parsed.nameJp || parsed.name,                                                               src: false },
     'ID':             { val: id,                                                                                          src: false },
     'Anima':          { val: '',                                                                                          src: false },
@@ -1636,8 +1749,23 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     return { col: colName, val: sheetVal, src: !!sheetVal };
   });
 
+  // Tab-separated row for direct paste into Google Sheets.
+  // Use rawVal when present (cols where val contains HTML).
+  const tsvRow = cols.map(c => String(c.rawVal ?? c.val ?? '').replace(/[\t\n\r]/g, ' ')).join('\t');
+  const tsvSafe = tsvRow.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
   let html = `<details class="sb-preview-details"><summary>Soul Break tab columns</summary>`;
   html += `<div class="sb-preview">`;
+  html += `<div class="sbp-copy-row">`;
+  html += `<button class="sbp-copy-btn" onclick="
+    const v = this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
+    )">Copy row</button>`;
+  html += `<textarea class="sbp-tsv-area" id="sbp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
+  html += `</div>`;
   html += `<table class="sb-preview-table">`;
   html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
   for (const { col, val, rawVal, tdId, src, tdExtra } of cols) {
@@ -1649,21 +1777,6 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
   }
   html += `</tbody></table>`;
   html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-
-  // Tab-separated row for direct paste into Google Sheets.
-  // Use rawVal when present (cols where val contains HTML).
-  const tsvRow = cols.map(c => String(c.rawVal ?? c.val ?? '').replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v = this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
-      () => { this.nextElementSibling.select(); document.execCommand('copy');
-              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="sbp-tsv-${id}" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
 
   html += `</div></details>`;
   return html;
@@ -1849,18 +1962,11 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     return { col, val: String(colValues[col]?.val ?? '') };
   });
 
-  let html = `<details class="sb-preview-details"><summary>Crystal Commands tab columns</summary>`;
-  html += `<div class="sb-preview"><table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val } of cols) {
-    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-
   const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
   const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let html = `<details class="sb-preview-details"><summary>Crystal Commands tab columns</summary>`;
+  html += `<div class="sb-preview">`;
   html += `<div class="sbp-copy-row">`;
   html += `<button class="sbp-copy-btn" onclick="
     const v=this.nextElementSibling.value;
@@ -1869,8 +1975,17 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
       ()=>{this.nextElementSibling.select();document.execCommand('copy');
            this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
     )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="cfp-tsv-${id}" readonly>${tsvSafe}</textarea>`;
-  html += `</div></div></details>`;
+  html += `<textarea class="sbp-tsv-area" id="cfp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
+  html += `</div>`;
+  html += `<table class="sb-preview-table">`;
+  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
+  for (const { col, val } of cols) {
+    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
+    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+  html += `</div></details>`;
   return html;
 }
 
@@ -1938,7 +2053,8 @@ function renderParsedInfoSection(p) {
     for (const s of p.statuses) {
       const label = s.target ? `${s.target}` : 'default target';
       const dur = s.duration ? ` · ${s.duration}` : '';
-      const effects = s.effects ? `<br><span style="color:#888;font-size:11px;">${s.effects}</span>` : '';
+      const effText = statusEffectsText(s);
+      const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
       html += `<tr><th>Status (${label}${dur})</th><td>${statusTag(s)}${effects}</td></tr>`;
       if (s.fromBundle) html += row('  (from bundle)', DB.statusBundles[s.fromBundle] ?? s.fromBundle, 'val-str');
     }
@@ -1964,7 +2080,8 @@ function renderParsedInfoSection(p) {
       if (sa.elements.length) html += `<tr><th>Elements</th><td>${sa.elements.map(elementTag).join('')}</td></tr>`;
       if (sa.statuses.length) {
         for (const s of sa.statuses) {
-          const effects = s.effects ? `<br><span style="color:#888;font-size:11px;">${s.effects}</span>` : '';
+          const effText = statusEffectsText(s);
+          const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
           html += `<tr><th>Status</th><td>${statusTag(s)}${effects}</td></tr>`;
         }
       }

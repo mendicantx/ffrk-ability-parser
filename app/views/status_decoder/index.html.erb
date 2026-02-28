@@ -139,7 +139,7 @@ const DB = {
 
   // Sheets
   statusMap:             {},   // id → { commonName, effects, duration, codedName }
-  otherMap:              [],
+  otherNameMap:          {},   // other ability id → name
 };
 
 // ─── Load state helpers ──────────────────────────────────────────────────────
@@ -229,20 +229,8 @@ async function loadBattleJs() {
     DB.elementTypes          = invert(ELEM);
     DB.abilityCategories     = invert(CAT);
 
-    // Extract ABILITY_ID_OF
-    const aidMarker = 'ABILITY_ID_OF:{';
-    const aidIdx = _rawBattleJs.indexOf(aidMarker);
-    if (aidIdx !== -1) {
-      let depth = 0, i = aidIdx + aidMarker.length - 1;
-      for (; i < _rawBattleJs.length; i++) {
-        if (_rawBattleJs[i] === '{') depth++;
-        else if (_rawBattleJs[i] === '}') { depth--; if (depth === 0) break; }
-      }
-      const aidBlock = _rawBattleJs.slice(aidIdx + aidMarker.length, i);
-      for (const m of aidBlock.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-        DB.abilityIdOf[m[1]] = parseInt(m[2]);
-      }
-    }
+    // Extract ABILITY_ID_OF — merge all occurrences (spread across multiple define() blocks)
+    DB.abilityIdOf = extractConstantMap(_rawBattleJs, 'ABILITY_ID_OF');
 
     // Extract DAMAGE_FACTOR map
     const dfMatch = _rawBattleJs.match(/DAMAGE_FACTOR:\{([^}]+)\}/);
@@ -278,6 +266,11 @@ async function loadSheets() {
         duration:   r['Default Duration'] || '',
         codedName:  r['Coded Name']   || '',
       };
+    }
+
+    for (const r of (data.other || [])) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
     }
 
     setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows (live)`);
@@ -416,6 +409,13 @@ function statusTag(id) {
   const key = DB.statusById[id];
   if (key) return `<span class="status-tag">[${titleCase(key)}]</span>`;
   return `<span class="status-tag">[Status #${id}]</span>`;
+}
+
+// ─── Chase ability name lookup ────────────────────────────────────────────────
+function chaseAbilityName(statusKey) {
+  const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + statusKey];
+  if (id == null) return null;
+  return DB.otherNameMap[id] ?? '<ability missing from Other Tab>';
 }
 
 // ─── nt decoder ──────────────────────────────────────────────────────────────
@@ -580,7 +580,13 @@ function decodeCbmP(statusKey, statusId, argsText) {
   // ── 3. Effects ──
   const hasChase = args.length > 1 && args[1].includes('REGISTER_CHASE_ABILITY');
   const baseEffects = `${condDesc} abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5, ${condDesc} abilities trigger 1 additional time, [DEF and RES 25% Piercing (15s)], removed if user hasn't Crystal Force Mode`;
-  const effects = hasChase ? `${baseEffects}, triggers a Crystal Force chase ability` : baseEffects;
+  let effects = baseEffects;
+  if (hasChase) {
+    const chaseName = chaseAbilityName(statusKey);
+    effects = chaseName
+      ? `${baseEffects}, triggers [${chaseName}] after using Crystal Force abilities (max 2)`
+      : `${baseEffects}, triggers a Crystal Force chase ability`;
+  }
 
   return {
     id:              statusId,
