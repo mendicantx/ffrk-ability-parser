@@ -6,4 +6,7 @@ Rails.application.routes.draw do
   get  '/ability_parser',            to: 'ability_parser#index'
   get  '/ability_parser/battle_js',  to: 'ability_parser#battle_js'
   get  '/ability_parser/sheet_data', to: 'ability_parser#sheet_data'
+
+  get  '/status_decoder',             to: 'status_decoder#index'
+  get  '/status_decoder/sheet_data',  to: 'status_decoder#sheet_data'
 end

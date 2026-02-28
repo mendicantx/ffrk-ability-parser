@@ -1,0 +1,54 @@
+<%#
+  Shared FFRK display-name constants.
+  Include this partial from any page that needs to translate internal names to EN display names.
+  Data is exposed on window.FFRK so it is available to the page's own <script> block.
+
+  Usage:
+    <%= render 'shared/ffrk_constants' %>
+%>
+<script>
+window.FFRK = window.FFRK || {};
+
+// Maps internal camelCase-extracted character names to their correct EN display names.
+// Keys are produced by: strip "learningMode" prefix → strip element/mode suffix →
+// split CamelCase → join with spaces → apply minor-word lowercasing.
+window.FFRK.CHAR_CORRECTIONS = {
+  // JP romanisations that differ from EN localisation
+  'Roza':        'Rosa',
+  'Fusoya':      'FuSoYa',
+  'Buts':        'Bartz',
+  'Mash':        'Sabin',
+  'Tina':        'Terra',
+  'Frioniel':    'Firion',
+  'Lock':        'Locke',
+  'Balflear':    'Balthier',
+  'Gradiolus':   'Gladiolus',
+  'Cain':        'Kain',
+  'Artimisia':   'Ultimecia',
+  'Stragus':     'Strago',
+  'Laan':        'Lann',
+  'Serafi':      'Serafie',
+  'Sheruku':     'Chelinka',
+  'Cayenne':     'Cyan',
+  // Internal names that collapse multi-word names to one token
+  'Drmog':       'Dr. Mog',
+  'Dr Mog':      'Dr. Mog',
+  'Ennakros':    'Enna Kros',
+  'Exnine':      'Ex-Nine',
+  // Internal names where the displayed EN name omits or changes parts
+  'Yufi':        'Yuffie',
+  'Haurchefan':  'Haurchefant',
+  'Deshi':       'Tyro',
+  'Zezae':       'Xezat',
+  'Super Monk':  'Master',
+  'Wor':         'Wol',
+  // Compound names — CamelCase split produces a space-separated string
+  'Shadow Smith':    'Shadowsmith',
+  'Paladin Cecil':   'Cecil (Paladin)',
+  'Dark Cecil':      'Cecil (Dark Knight)',
+  'Red Xiii':        'Red XIII',
+  'Cid Garlond':     'Cid (XIV)',
+  'Cid Pollendina':  'Cid (IV)',
+  'Leo Christophe':  'Leo',
+};
+</script>

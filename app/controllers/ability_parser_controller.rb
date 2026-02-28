@@ -1,4 +1,5 @@
 require_relative '../../lib/importers/battle_js_importer'
+require_relative '../../lib/importers/sheets_importer'
 
 class AbilityParserController < ApplicationController
   # GET /ability_parser
@@ -6,15 +7,25 @@ class AbilityParserController < ApplicationController
   end
 
   # GET /ability_parser/sheet_data
-  # Returns server-cached sheet data as JSON, avoiding client-side CORS issues with Google Sheets.
+  # Fetches all required sheets live from their configured URLs on every request.
+  SHEET_VARS = {
+    status:      'STATUS_SHEET_URL',
+    action_args: 'ACTION_ARGS_SHEET_URL',
+    soul_breaks: 'SOUL_BREAKS_SHEET_URL',
+    other:       'OTHER_SHEET_URL',
+    characters:  'CHARACTERS_SHEET_URL',
+  }.freeze
+
   def sheet_data
-    store = DataStore.instance
-    render json: {
-      status:      store.sheet(:status),
-      action_args: store.sheet(:action_args),
-      soul_breaks: store.sheet(:soul_breaks),
-      other:       store.sheet(:other),
-    }
+    result = {}
+    SHEET_VARS.each do |key, env_var|
+      url = ENV[env_var]
+      next if url.blank?
+      result[key] = SheetsImporter.fetch(url)
+    end
+    render json: result
+  rescue => e
+    render json: { error: e.message }, status: :internal_server_error
   end
 
   # GET /ability_parser/battle_js

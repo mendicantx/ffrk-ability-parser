@@ -1,0 +1,910 @@
+<style>
+  * { box-sizing: border-box; }
+  .ap-root { font-family: monospace; font-size: 13px; background: #1e1e1e; color: #d4d4d4; padding: 16px; min-height: calc(100vh - 70px); }
+  h1 { color: #9cdcfe; margin: 0 0 12px; font-size: 18px; }
+
+  /* Nav */
+  .page-nav { display: flex; gap: 12px; margin-bottom: 14px; font-size: 12px; }
+  .page-nav a { color: #888; text-decoration: none; }
+  .page-nav a:hover { color: #9cdcfe; }
+  .page-nav a.active { color: #9cdcfe; }
+
+  /* Loading status */
+  #load-status { background: #252526; border: 1px solid #3c3c3c; padding: 10px 14px; margin-bottom: 12px; border-radius: 4px; }
+  .load-item { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .load-icon { width: 14px; text-align: center; }
+  .load-icon.pending  { color: #888; }
+  .load-icon.loading  { color: #dcdcaa; }
+  .load-icon.ok       { color: #4ec9b0; }
+  .load-icon.err      { color: #f44747; }
+  .load-label  { color: #9cdcfe; min-width: 160px; }
+  .load-detail { color: #888; font-size: 11px; }
+
+  /* Search */
+  #search-area { margin-bottom: 14px; position: relative; }
+  #search-area label { color: #888; font-size: 11px; display: block; margin-bottom: 4px; }
+  .search-row { display: flex; gap: 8px; align-items: flex-start; }
+  #status-input { flex: 1; background: #1e1e1e; color: #ce9178; border: 1px solid #3c3c3c; padding: 7px 10px; font-family: monospace; font-size: 13px; border-radius: 4px; min-width: 0; }
+  #status-input:focus { outline: 1px solid #007acc; }
+  #decode-btn { background: #007acc; color: #fff; border: none; padding: 7px 18px; font-family: monospace; font-size: 13px; cursor: pointer; border-radius: 3px; white-space: nowrap; }
+  #decode-btn:disabled { background: #444; color: #888; cursor: default; }
+  #decode-btn:not(:disabled):hover { background: #005fa3; }
+  #search-hint { color: #888; font-size: 11px; margin-top: 4px; }
+
+  /* Autocomplete */
+  #autocomplete { position: absolute; top: 100%; left: 0; right: 80px; background: #252526; border: 1px solid #3c3c3c; border-top: none; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; z-index: 100; display: none; }
+  .ac-item { padding: 5px 10px; cursor: pointer; color: #d4d4d4; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-item:hover, .ac-item.ac-selected { background: #094771; color: #9cdcfe; }
+  .ac-item .ac-id { color: #555; font-size: 11px; margin-left: 6px; }
+
+  /* Output */
+  #output { }
+
+  .status-card { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 14px 16px; margin-bottom: 12px; }
+  .status-card-title { color: #9cdcfe; font-size: 15px; font-weight: bold; margin-bottom: 10px; }
+
+  .sheet-row-table { border-collapse: collapse; width: 100%; }
+  .sheet-row-table td, .sheet-row-table th { padding: 4px 12px 4px 0; vertical-align: top; }
+  .sheet-row-table th { color: #888; font-weight: normal; white-space: nowrap; min-width: 140px; font-size: 12px; }
+  .sheet-row-table td { color: #d4d4d4; }
+  .col-id       { color: #b5cea8; }
+  .col-name     { color: #9cdcfe; }
+  .col-effects  { color: #d4d4d4; line-height: 1.5; }
+  .col-duration { color: #ce9178; }
+  .col-coded    { color: #888; font-size: 11px; }
+  .col-dash     { color: #555; }
+
+  .status-tag { display: inline-block; background: #1e3a1e; color: #4ec9b0; padding: 1px 5px; border-radius: 3px; font-size: 11px; margin: 0 1px; }
+
+  .raw-section { margin-top: 12px; }
+  .raw-section details { }
+  .raw-section summary { cursor: pointer; color: #888; font-size: 11px; user-select: none; padding: 3px 0; }
+  .raw-section summary:hover { color: #9cdcfe; }
+  .raw-block { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 3px; padding: 8px 10px; margin-top: 6px; font-size: 12px; color: #ce9178; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+  .raw-func   { color: #dcdcaa; }
+  .raw-args   { color: #ce9178; }
+
+  .decoder-note { color: #888; font-style: italic; font-size: 12px; margin-top: 8px; }
+  .decoder-unknown { background: #2a2a1e; border: 1px solid #4a4a20; border-radius: 3px; padding: 8px 12px; margin-top: 10px; font-size: 12px; color: #dcdcaa; }
+
+  .copy-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .copy-btn { background: #264f78; color: #9cdcfe; border: 1px solid #3c5a8a; padding: 4px 12px; font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px; }
+  .copy-btn:hover { background: #1e3d5c; }
+  .tsv-area { background: #111; color: #555; border: 1px solid #2a2a2a; font-family: monospace; font-size: 10px; flex: 1; resize: none; padding: 3px 6px; border-radius: 3px; height: 24px; overflow: hidden; white-space: nowrap; }
+
+  .err-box { background: #3a1e1e; border: 1px solid #6a3030; border-radius: 4px; padding: 10px 14px; color: #f44747; font-size: 12px; }
+</style>
+
+<div class="ap-root">
+<h1>FFRK Status Decoder</h1>
+
+<div class="page-nav">
+  <a href="/">Dashboard</a>
+  <a href="/ability_parser">Ability Parser</a>
+  <a href="/status_decoder" class="active">Status Decoder</a>
+</div>
+
+<div id="load-status">
+  <div class="load-item">
+    <span class="load-icon pending" id="li-battlejs-icon">○</span>
+    <span class="load-label">battle.js</span>
+    <span class="load-detail" id="li-battlejs-detail">waiting…</span>
+  </div>
+  <div class="load-item">
+    <span class="load-icon pending" id="li-sheets-icon">○</span>
+    <span class="load-label">Sheet data</span>
+    <span class="load-detail" id="li-sheets-detail">waiting…</span>
+  </div>
+  <div class="load-item">
+    <span class="load-icon pending" id="li-parse-icon">○</span>
+    <span class="load-label">Status assignments</span>
+    <span class="load-detail" id="li-parse-detail">waiting…</span>
+  </div>
+</div>
+
+<div id="search-area">
+  <label>Status key or numeric ID</label>
+  <div class="search-row">
+    <input id="status-input" type="text" placeholder="e.g. INCREASE_EXECUTED_DAMAGE_WEAKNESS_EXTRA_SMALL_TURN_1 or 55763" autocomplete="off" disabled>
+    <button id="decode-btn" disabled>Decode</button>
+  </div>
+  <div id="search-hint"></div>
+  <div id="autocomplete"></div>
+</div>
+
+<div id="output"></div>
+</div>
+
+<%= render 'shared/ffrk_constants' %>
+
+<script>
+// ─── DB ──────────────────────────────────────────────────────────────────────
+const DB = {
+  // battle.js forward maps: name → id
+  statusAilmentsForward: {},   // STATUS_KEY → id
+  abilityIdOf:           {},   // ABILITY_KEY → id
+  elementTypeForward:    {},   // ELEMENT_KEY → id
+
+  // battle.js reverse maps: id → name
+  elementTypes:          {},   // id → ELEMENT_KEY
+  abilityCategories:     {},   // id → CATEGORY_KEY
+
+  // Derived
+  statusById:            {},   // id → STATUS_KEY
+  damageFactor:          {},   // SIZE_NAME → numeric value
+  statusAssignments:     {},   // STATUS_KEY → { funcName, argsText, defineModule, block }
+  // NOTE: funcName is local to its define() block's namespace.
+  // The same name in a different define() block is a completely different function.
+  // Always resolve function bodies using the block stored with the assignment.
+
+  // Sheets
+  statusMap:             {},   // id → { commonName, effects, duration, codedName }
+  otherMap:              [],
+};
+
+// ─── Load state helpers ──────────────────────────────────────────────────────
+let battleJsReady = false;
+let sheetsReady   = false;
+let parseReady    = false;
+
+function setLoadState(key, state, detail) {
+  const icon = document.getElementById(`li-${key}-icon`);
+  const det  = document.getElementById(`li-${key}-detail`);
+  if (icon) { icon.className = `load-icon ${state}`; icon.textContent = state === 'ok' ? '✓' : state === 'err' ? '✗' : state === 'loading' ? '…' : '○'; }
+  if (det)  det.textContent = detail ?? '';
+}
+
+function checkAllLoaded() {
+  if (battleJsReady && sheetsReady) {
+    setLoadState('parse', 'loading', 'parsing status assignments…');
+    setTimeout(() => {
+      try {
+        const t0 = performance.now();
+        buildStatusAssignments();
+        const ms = Math.round(performance.now() - t0);
+        setLoadState('parse', 'ok', `${Object.keys(DB.statusAssignments).length} assignments in ${ms}ms`);
+      } catch(e) {
+        setLoadState('parse', 'err', e.message);
+      }
+      parseReady = true;
+      enableSearch();
+    }, 10); // yield to browser before heavy parse
+  }
+}
+
+function enableSearch() {
+  document.getElementById('status-input').disabled = false;
+  document.getElementById('decode-btn').disabled   = false;
+  document.getElementById('status-input').focus();
+}
+
+// ─── battle.js helpers ───────────────────────────────────────────────────────
+function extractConstantMap(js, name) {
+  // Merge ALL occurrences — STATUS_AILMENTS_TYPE is spread across 13
+  // sub-module blocks, each covering a different slice of status IDs.
+  const marker = name + ':{';
+  const merged = {};
+  let searchFrom = 0;
+  while (true) {
+    const idx = js.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+    let depth = 0, start = idx + name.length + 1, i = start;
+    for (; i < js.length; i++) {
+      if (js[i] === '{') depth++;
+      else if (js[i] === '}') { depth--; if (depth === 0) break; }
+    }
+    const block = js.slice(start + 1, i);
+    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
+      merged[m[1]] = parseInt(m[2]);
+    }
+    searchFrom = idx + 1;
+  }
+  return merged;
+}
+
+function invert(map) {
+  const inv = {};
+  for (const [k, v] of Object.entries(map)) inv[v] = k;
+  return inv;
+}
+
+// ─── battle.js stored raw ────────────────────────────────────────────────────
+let _rawBattleJs = '';
+
+async function loadBattleJs() {
+  setLoadState('battlejs', 'loading', 'fetching…');
+  try {
+    const resp = await fetch('/ability_parser/battle_js');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    _rawBattleJs = await resp.text();
+    setLoadState('battlejs', 'loading', 'extracting constants…');
+
+    const SAT  = extractConstantMap(_rawBattleJs, 'STATUS_AILMENTS_TYPE');
+    const ELEM = extractConstantMap(_rawBattleJs, 'ELEMENT_TYPE');
+    const CAT  = extractConstantMap(_rawBattleJs, 'ABILITY_CATEGORY_ID');
+
+    DB.statusAilmentsForward = SAT;
+    DB.statusById            = invert(SAT);
+    DB.elementTypeForward    = ELEM;
+    DB.elementTypes          = invert(ELEM);
+    DB.abilityCategories     = invert(CAT);
+
+    // Extract ABILITY_ID_OF
+    const aidMarker = 'ABILITY_ID_OF:{';
+    const aidIdx = _rawBattleJs.indexOf(aidMarker);
+    if (aidIdx !== -1) {
+      let depth = 0, i = aidIdx + aidMarker.length - 1;
+      for (; i < _rawBattleJs.length; i++) {
+        if (_rawBattleJs[i] === '{') depth++;
+        else if (_rawBattleJs[i] === '}') { depth--; if (depth === 0) break; }
+      }
+      const aidBlock = _rawBattleJs.slice(aidIdx + aidMarker.length, i);
+      for (const m of aidBlock.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
+        DB.abilityIdOf[m[1]] = parseInt(m[2]);
+      }
+    }
+
+    // Extract DAMAGE_FACTOR map
+    const dfMatch = _rawBattleJs.match(/DAMAGE_FACTOR:\{([^}]+)\}/);
+    if (dfMatch) {
+      for (const m of dfMatch[1].matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
+        DB.damageFactor[m[1]] = parseInt(m[2]);
+      }
+    }
+
+    const statCount = Object.keys(SAT).length;
+    setLoadState('battlejs', 'ok', `${statCount} statuses, ${Object.keys(DB.abilityIdOf).length} abilities`);
+    battleJsReady = true;
+  } catch(e) {
+    setLoadState('battlejs', 'err', e.message);
+  }
+  checkAllLoaded();
+}
+
+// ─── Sheet data (fetched live from STATUS_SHEET_URL on every load) ────────────
+async function loadSheets() {
+  setLoadState('sheets', 'loading', 'fetching live from sheet…');
+  try {
+    const resp = await fetch('/status_decoder/sheet_data');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    for (const r of (data.status || [])) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id)) DB.statusMap[id] = {
+        commonName: r['Common Name'] || '',
+        effects:    r['Effects']      || '',
+        duration:   r['Default Duration'] || '',
+        codedName:  r['Coded Name']   || '',
+      };
+    }
+
+    setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows (live)`);
+    sheetsReady = true;
+  } catch(e) {
+    setLoadState('sheets', 'err', e.message);
+  }
+  checkAllLoaded();
+}
+
+// ─── Extract a single define() block's factory function body ──────────────────
+// Returns { defineModule, block } or null.
+// IMPORTANT: funcName values found in `block` are LOCAL to this namespace only.
+function extractDefineBlock(moduleName) {
+  const marker = `define("${moduleName}"`;
+  const blockStart = _rawBattleJs.indexOf(marker);
+  if (blockStart === -1) return null;
+
+  // Walk forward to find the opening { of the factory function body
+  let funcBodyStart = -1, parenDepth = 0;
+  for (let i = blockStart; i < _rawBattleJs.length; i++) {
+    const c = _rawBattleJs[i];
+    if (c === '(') parenDepth++;
+    else if (c === ')') parenDepth--;
+    else if (c === '{' && parenDepth > 0) { funcBodyStart = i; break; }
+  }
+  if (funcBodyStart === -1) return null;
+
+  // Bracket-count to find the matching }
+  let depth = 0, blockEnd = funcBodyStart;
+  for (let i = funcBodyStart; i < _rawBattleJs.length; i++) {
+    if (_rawBattleJs[i] === '{') depth++;
+    else if (_rawBattleJs[i] === '}') { depth--; if (depth === 0) { blockEnd = i; break; } }
+  }
+
+  return { defineModule: moduleName, block: _rawBattleJs.slice(funcBodyStart, blockEnd + 1) };
+}
+
+// ─── Parse status assignments — scoped to their define() block ────────────────
+function buildStatusAssignments() {
+  // Scans one define() block for status assignments and adds them to DB.statusAssignments.
+  // patternFn(block) must return a RegExp that captures [KEY, funcName] and leaves
+  // the regex positioned just before the opening '(' of the args.
+  function scanBlock(moduleName, assignPattern) {
+    const src = extractDefineBlock(moduleName);
+    if (!src) return 0;
+    const { defineModule, block } = src;
+    let m, count = 0;
+    assignPattern.lastIndex = 0;
+    while ((m = assignPattern.exec(block)) !== null) {
+      const statusKey = m[1];
+      const funcName  = m[2];
+      const argsStart = m.index + m[0].length;
+      let pdepth = 1, i = argsStart;
+      while (i < block.length && pdepth > 0) {
+        const ch = block[i];
+        if (ch === '(') pdepth++;
+        else if (ch === ')') pdepth--;
+        i++;
+      }
+      const argsText = block.slice(argsStart, i - 1);
+      DB.statusAssignments[statusKey] = { funcName, argsText, defineModule, block };
+      count++;
+    }
+    return count;
+  }
+
+  // Main StatusAilmentsConfig block — assignments use A[v.KEY]=FUNC(
+  const mainCount = scanBlock(
+    'scenes/battle/StatusAilmentsConfig',
+    /A\[v\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
+  );
+  if (mainCount === 0) throw new Error('StatusAilmentsConfig block not found or empty');
+
+  // Crystal Buddy Mode block — assignments use c[s.KEY]=FUNC(
+  scanBlock(
+    'scenes/battle/statusAilmentsConfig/CrystalBuddyMode',
+    /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
+  );
+}
+
+// ─── Argument splitting ───────────────────────────────────────────────────────
+function splitTopLevelArgs(argsText) {
+  const args = [];
+  let depth = 0, current = '';
+  for (let i = 0; i < argsText.length; i++) {
+    const c = argsText[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += c;
+  }
+  if (current.trim()) args.push(current.trim());
+  return args;
+}
+
+// ─── Display name helpers ─────────────────────────────────────────────────────
+const ELEM_DISPLAY = {
+  FIRE: 'Fire', ICE: 'Ice', LIGHTNING: 'Lightning', EARTH: 'Earth',
+  WIND: 'Wind', WATER: 'Water', HOLY: 'Holy', DARK: 'Dark', POISON: 'Poison',
+  NON_ELEMENTAL: 'NE', NOTHING: 'NE', NON: 'NE',
+};
+
+function elementDisplayName(key) {
+  return ELEM_DISPLAY[key] ?? titleCase(key);
+}
+
+const SERIES_DISPLAY = {
+  FF1: 'FF I', FF2: 'FF II', FF3: 'FF III', FF4: 'FF IV', FF5: 'FF V',
+  FF6: 'FF VI', FF7: 'FF VII', FF8: 'FF VIII', FF9: 'FF IX', FF10: 'FF X',
+  FF11: 'FF XI', FF12: 'FF XII', FF13: 'FF XIII', FF14: 'FF XIV', FF15: 'FF XV',
+  FF16: 'FF XVI', FFT: 'Tactics', FF_TYPE0: 'Type-0', KH: 'Kingdom Hearts',
+  FF_GAIDEN: 'Beyond', JOB: 'Core',
+};
+
+function seriesDisplayName(key) {
+  return SERIES_DISPLAY[key] ?? key;
+}
+
+function categoryDisplayName(key) {
+  return titleCase(key);
+}
+
+function titleCase(key) {
+  return key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Look up a status ID and return its [Common Name] tag
+function statusTag(id) {
+  const sheet = DB.statusMap[id];
+  if (sheet?.commonName) return `<span class="status-tag">[${sheet.commonName}]</span>`;
+  const key = DB.statusById[id];
+  if (key) return `<span class="status-tag">[${titleCase(key)}]</span>`;
+  return `<span class="status-tag">[Status #${id}]</span>`;
+}
+
+// ─── nt decoder ──────────────────────────────────────────────────────────────
+// nt(damageFactor, turns, condition?)
+// → turn-based damage increase
+function decodeNt(statusKey, statusId, argsText, block) {
+  // `block` is the StatusAilmentsConfig factory body — available for future
+  // use if we need to resolve helper functions called from within nt().
+  const args = splitTopLevelArgs(argsText);
+  if (args.length < 2) return null;
+
+  // Arg 1: damage factor — e.g. S[w.INCREASE_EXECUTED_DAMAGE].DAMAGE_FACTOR.EXTRA_SMALL
+  const factorMatch = args[0].match(/DAMAGE_FACTOR\.([A-Z_0-9]+)/);
+  const sizeName    = factorMatch?.[1] ?? null;
+  const factorValue = sizeName != null ? DB.damageFactor[sizeName] : null;
+  const pct         = factorValue != null ? factorValue - 100 : null;
+  const pctStr      = pct != null ? `${pct}%` : '?%';
+
+  // Arg 2: turns
+  const turns   = parseInt(args[1]);
+  const turnStr = `${turns} turn${turns !== 1 ? 's' : ''}`;
+
+  // Arg 3: condition object
+  const condText = args[2] ?? '';
+
+  // condPartsBase: weakness / elements / category — NOT abilityType (kept separate)
+  const condPartsBase = [];
+  let abilityType = '';
+  let abilityTypeExplicit = false;
+  if (/isWeaponSkill\s*:\s*!0/.test(condText))  { abilityType = 'Weapon Skill'; abilityTypeExplicit = true; }
+  else if (/isAbility\s*:\s*!0/.test(condText)) { abilityType = 'Ability';      abilityTypeExplicit = true; }
+
+  if (/hasWeakness\s*:\s*!0/.test(condText)) condPartsBase.push('vs Weakness');
+  if (/isPhysicalAttack\s*:\s*!0/.test(condText)) condPartsBase.push('Physical');
+  if (/isMagicalAttack\s*:\s*!0/.test(condText))  condPartsBase.push('Magical');
+  if (/isSoulStrike\s*:\s*!0/.test(condText))     condPartsBase.push('Soul Break');
+  if (/isIndirectAttack\s*:\s*!0/.test(condText)) condPartsBase.push('Ranged');
+
+  const elemMatch = condText.match(/\belementId\b[^,}]*?ELEMENT_TYPE\.([A-Z_]+)/);
+  if (elemMatch) condPartsBase.push(elementDisplayName(elemMatch[1]));
+
+  const anyElemMatch = condText.match(/anyElementIds\s*:\s*\[([^\]]+)\]/);
+  if (anyElemMatch) {
+    const names = [...anyElemMatch[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => elementDisplayName(m[1]));
+    condPartsBase.push(names.join(', '));
+  }
+
+  let hasCategory = false;
+
+  const catMatch = condText.match(/categoryId\s*:[^,}]*?ABILITY_CATEGORY_ID\.([A-Z_]+)/);
+  if (catMatch) {
+    condPartsBase.push(categoryDisplayName(catMatch[1]));
+    if (!abilityType) abilityType = 'Ability';
+    hasCategory = true;
+  }
+
+  const anyCatMatch = condText.match(/anyCategoryIds\s*:\s*\[([^\]]+)\]/);
+  if (anyCatMatch) {
+    const names = [...anyCatMatch[1].matchAll(/ABILITY_CATEGORY_ID\.([A-Z_]+)/g)].map(m => categoryDisplayName(m[1]));
+    condPartsBase.push(names.join(', '));
+    if (!abilityType) abilityType = 'Ability';
+    hasCategory = true;
+  }
+
+  // Realm (executerCondition.buddySeriesId)
+  let realmName = null;
+  const realmMatch = condText.match(/buddySeriesId\s*:\s*[a-zA-Z$_][a-zA-Z0-9$_.]*\.SERIES_ID\.([A-Z0-9_]+)/);
+  if (realmMatch) {
+    realmName = seriesDisplayName(realmMatch[1]);
+    condPartsBase.push(realmName);
+  }
+
+  const condBase       = condPartsBase.join(' ');
+  const condBasePrefix = condBase ? `${condBase} ` : '';
+
+  // Common Name: [condition incl. abilityType] +[pct]% Boost [N]
+  // abilityType appended only when explicit (isAbility/isWeaponSkill) AND no school is present —
+  // a school already implies Ability, so "Thief Ability" → just "Thief"
+  const allCondParts = (abilityType && abilityTypeExplicit && !hasCategory) ? [...condPartsBase, abilityType] : [...condPartsBase];
+  const condDesc   = allCondParts.join(' ');
+  const condPrefix = condDesc ? `${condDesc} ` : '';
+  const commonName = `${condPrefix}+${pctStr} Boost ${turns}`.replace(/\s+/g, ' ').trim();
+
+  // Effects — realm condition uses a different sentence structure
+  const pctNum = pct != null ? pct : '?';
+  let effects;
+  if (realmName) {
+    effects = `Increases damage dealt by ${pctNum}% if the character's Realm is ${realmName}`;
+  } else {
+    let effectsSubject;
+    if (abilityType === 'Ability')           effectsSubject = `${condBasePrefix}Abilities`;
+    else if (abilityType === 'Weapon Skill') effectsSubject = `${condBasePrefix}Weapon Skills`;
+    else                                     effectsSubject = condBase ? `${condBasePrefix}attacks` : 'Attacks';
+    effects = `${effectsSubject} deal ${pctNum}% more damage`.replace(/\s+/g, ' ').trim();
+  }
+
+  return {
+    id: statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: turnStr,
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'nt',
+    decoded:         true,
+  };
+}
+
+// ─── Crystal Buddy Mode p() decoder ──────────────────────────────────────────
+// p(abilityCondition, options?) → Crystal Force Mode status
+//   Standard 4 effects: ABILITY_BOOST (rank 1-5: 5/10/15/20/30%), REGISTER_SEQ_ABILITY (follow-up),
+//   NO_CONSUMPTION_ABILITY_NUM (no use consumption), DEF_AND_MDEF_PENETRATION (25% pierce).
+//   options.repeatNum defaults to 1 (number of follow-up triggers).
+//   options.effects may add a chase ability on top of the standard set.
+const CBM_ELEMENT_KEYS = new Set(['FIRE','ICE','LIGHTNING','EARTH','WIND','WATER','HOLY','DARK','POISON']);
+const CBM_ALL_ELEMENTS = ['FIRE','ICE','LIGHTNING','EARTH','WIND','WATER','HOLY','DARK','POISON'];
+
+function decodeCbmP(statusKey, statusId, argsText) {
+  // ── 1. Character name and key-level element qualifier from the status key ──
+  const suffix = statusKey.replace(/^CRYSTAL_BUDDY_MODE_/, '');
+  const parts = suffix.split('_');
+  const keyElemKeys = [];
+  // Strip trailing element tokens (always leave at least one part for the char name)
+  while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
+    keyElemKeys.unshift(parts.pop());
+  }
+  const MINOR_WORDS = new Set(['of', 'the', 'a', 'an']);
+  const charRaw = parts.map((p, i) => {
+    const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
+  }).join(' ');
+  const charName = (window.FFRK?.CHAR_CORRECTIONS?.[charRaw]) ?? charRaw;
+
+  const elemQualifier = keyElemKeys.length > 0
+    ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
+    : '';
+  const commonName = `Crystal Force Mode: ${charName}${elemQualifier}`;
+
+  // ── 2. Ability condition descriptor (for effects text) from p() first arg ──
+  const args = splitTopLevelArgs(argsText);
+  if (args.length < 1) return null;
+  const condText = args[0];
+
+  let condDesc = '';
+  const anyElemM = condText.match(/anyElementIds\s*:\s*\[([^\]]+)\]/);
+  if (anyElemM) {
+    const keys = [...anyElemM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => m[1]);
+    condDesc = keys.length >= CBM_ALL_ELEMENTS.length
+      ? 'Elemental'
+      : keys.map(k => elementDisplayName(k)).join('/');
+  }
+  const anyCatM = condText.match(/anyCategoryIds\s*:\s*\[([^\]]+)\]/);
+  if (anyCatM) {
+    const names = [...anyCatM[1].matchAll(/ABILITY_CATEGORY_ID\.([A-Z_]+)/g)].map(m => categoryDisplayName(m[1]));
+    condDesc = names.join('/');
+  }
+  const catM = condText.match(/\bcategoryId\b[^,}]*?ABILITY_CATEGORY_ID\.([A-Z_]+)/);
+  if (catM) condDesc = categoryDisplayName(catM[1]);
+
+  // ── 3. Effects ──
+  const hasChase = args.length > 1 && args[1].includes('REGISTER_CHASE_ABILITY');
+  const baseEffects = `${condDesc} abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5, ${condDesc} abilities trigger 1 additional time, [DEF and RES 25% Piercing (15s)], removed if user hasn't Crystal Force Mode`;
+  const effects = hasChase ? `${baseEffects}, triggers a Crystal Force chase ability` : baseEffects;
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'p (CBM)',
+    decoded:         true,
+  };
+}
+
+// ─── Or decoder ───────────────────────────────────────────────────────────────
+// Or("learningModeXxx", condition?) → character-specific Learning Mode status
+function decodeOr(statusKey, statusId, argsText) {
+  const args = splitTopLevelArgs(argsText);
+  if (args.length < 1) return null;
+
+  // Arg 1: internal camelCase name, e.g. "learningModeRozaBansho"
+  const nameMatch = args[0].match(/^"learningMode(.+)"$/);
+  if (!nameMatch) return null;
+  let namePart = nameMatch[1]; // e.g. "RozaBansho"
+
+  // Strip known camelCase suffixes — order matters (longest first for safety).
+  // Only strip if something remains (e.g. "Lightning" alone = Lightning the character, not an element suffix).
+  for (const suffix of ['Bansho', 'Bansyo', 'Koki', 'Tenmei', 'Water', 'Ice', 'Fire', 'Lightning', 'Wind', 'Earth', 'Dark', 'Holy', 'Poison']) {
+    if (namePart.endsWith(suffix) && namePart.length > suffix.length) { namePart = namePart.slice(0, -suffix.length); break; }
+  }
+
+  // Split CamelCase to words, lowercase minor words (not first word)
+  const words = namePart.replace(/([a-z])([A-Z])/g, '$1 $2').split(' ');
+  const MINOR = new Set(['of', 'the', 'a', 'an']);
+  let charName = words.map((w, i) => (i > 0 && MINOR.has(w.toLowerCase())) ? w.toLowerCase() : w).join(' ');
+
+  // Apply corrections from shared constant (see shared/_ffrk_constants.html.erb)
+  charName = (window.FFRK?.CHAR_CORRECTIONS?.[charName]) ?? charName;
+
+  // Qualifier from abilityCondition (element or category) — KOKI statuses have no condition arg
+  // so qualifier will be null and they are treated as blanket (all-damage) buffs
+  const condText = args[1] ?? '';
+  let qualifier = null;
+  const anyElemM = condText.match(/anyElementIds\s*:\s*\[([^\]]+)\]/);
+  if (anyElemM) {
+    const names = [...anyElemM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => elementDisplayName(m[1]));
+    qualifier = names.join(', ');
+  }
+  const elemM = condText.match(/\belementId\b[^,}]*?ELEMENT_TYPE\.([A-Z_]+)/);
+  if (elemM) qualifier = elementDisplayName(elemM[1]);
+  const catM = condText.match(/categoryId\s*:[^,}]*?ABILITY_CATEGORY_ID\.([A-Z_]+)/);
+  if (catM) qualifier = categoryDisplayName(catM[1]);
+  const anyCatM = condText.match(/anyCategoryIds\s*:\s*\[([^\]]+)\]/);
+  if (anyCatM) {
+    const names = [...anyCatM[1].matchAll(/ABILITY_CATEGORY_ID\.([A-Z_]+)/g)].map(m => categoryDisplayName(m[1]));
+    qualifier = names.join(', ');
+  }
+
+  const qualStr  = qualifier ? ` (${qualifier})` : '';
+  const commonName = `Learning Mode: ${charName}${qualStr}`;
+
+  // Damage map — try to parse a custom one from the condition arg, else use Or() defaults.
+  // Default: level 0→+5%, 1→+10%, 2→+15%, 3→+20%, 4→+25%, 5→+30%
+  const OR_DEFAULT_MAP = [
+    { level: 0, sizeName: 'EXTRA_SMALL_105' },
+    { level: 1, sizeName: 'EXTRA_SMALL_110' },
+    { level: 2, sizeName: 'SMALL' },
+    { level: 3, sizeName: 'SMALL_120' },
+    { level: 4, sizeName: 'SMALL_125' },
+    { level: 5, sizeName: 'MEDIUM' },
+  ];
+  const mapMatches = [...condText.matchAll(/greaterEqual\s*:\s*(\d+)[^}]*?DAMAGE_FACTOR\.([A-Z_0-9]+)/g)];
+  const damageMap = mapMatches.length > 0
+    ? mapMatches.map(m => ({ level: parseInt(m[1]), sizeName: m[2] })).sort((a, b) => a.level - b.level)
+    : OR_DEFAULT_MAP;
+  const pcts   = damageMap.map(e => { const v = DB.damageFactor[e.sizeName]; return v != null ? (v - 100) : '?'; });
+  const levels = damageMap.map(e => e.level);
+
+  const damageClause = qualifier
+    ? `increases damage dealt by ${qualifier} Abilities by ${pcts.join('/')}%`
+    : `increases damage dealt by ${pcts.join('/')}%`;
+  const effects = `Keeps track of ${commonName} level, ${damageClause} at ${commonName} level ${levels.join('/')}.`;
+
+  return {
+    id: statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'Or',
+    decoded:         true,
+  };
+}
+
+// ─── Decoder dispatcher ───────────────────────────────────────────────────────
+function decodeStatus(statusKey) {
+  const id = DB.statusAilmentsForward[statusKey];
+  if (id == null) return { error: `Status key not found in battle.js: ${statusKey}` };
+
+  const assignment = DB.statusAssignments[statusKey];
+  if (!assignment) return { error: `No assignment found for ${statusKey}` };
+
+  const { funcName, argsText, defineModule, block } = assignment;
+
+  // Decoders receive `block` so they can look up any helper function bodies
+  // within the correct define() namespace — never cross-referencing other blocks.
+  let decoded = null;
+  const isCbm = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
+
+  if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
+  if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
+  if (isCbm && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
+
+  if (decoded) return decoded;
+
+  // Fallback: not yet implemented
+  return {
+    id,
+    codedName:       statusKey,
+    commonName:      null,
+    effects:         null,
+    defaultDuration: null,
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName,
+    argsText,
+    defineModule,
+    decoded:         false,
+  };
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function renderResult(result) {
+  if (result.error) {
+    document.getElementById('output').innerHTML = `<div class="err-box">${escHtml(result.error)}</div>`;
+    return;
+  }
+
+  const sheetRow = DB.statusMap[result.id];
+
+  // Sheet row columns — use decoded if available, fall back to sheet
+  const displayName     = result.commonName      ?? sheetRow?.commonName ?? '—';
+  const displayEffects  = result.effects         ?? sheetRow?.effects    ?? '—';
+  const displayDuration = result.defaultDuration ?? sheetRow?.duration   ?? '—';
+
+  let html = `<div class="status-card">`;
+  html += `<div class="status-card-title">${escHtml(result.codedName)}</div>`;
+
+  html += `<table class="sheet-row-table">`;
+  html += `<tr><th>ID</th><td class="col-id">${result.id}</td></tr>`;
+  html += `<tr><th>Common Name</th><td class="col-name">${escHtml(displayName)}</td></tr>`;
+  html += `<tr><th>Effects</th><td class="col-effects">${escHtml(displayEffects)}</td></tr>`;
+  html += `<tr><th>Default Duration</th><td class="col-duration">${escHtml(displayDuration)}</td></tr>`;
+  html += `<tr><th>MND Modifier</th><td class="col-dash">${result.mndModifier}</td></tr>`;
+  html += `<tr><th>Exclusive Status</th><td class="col-dash">${result.exclusiveStatus}</td></tr>`;
+  html += `<tr><th>Coded Name</th><td class="col-coded">${escHtml(result.codedName)}</td></tr>`;
+  html += `<tr><th>Notes</th><td class="col-dash">${escHtml(result.notes) || '—'}</td></tr>`;
+  html += `</table>`;
+
+  // TSV copy row (tab-separated in sheet column order: ID, Common Name, Effects, Duration, MND, Exclusive, Coded Name, Notes)
+  const tsvCols = [
+    result.id,
+    displayName,
+    displayEffects,
+    displayDuration,
+    result.mndModifier,
+    result.exclusiveStatus,
+    result.codedName,
+    result.notes,
+  ];
+  const tsv = tsvCols.join('\t');
+
+  html += `<div class="copy-row">`;
+  html += `<button class="copy-btn" onclick="copyTsv(this)">Copy row (TSV)</button>`;
+  html += `<textarea class="tsv-area" readonly id="tsv-out">${escHtml(tsv)}</textarea>`;
+  html += `</div>`;
+
+  // Decoder note
+  if (!result.decoded) {
+    html += `<div class="decoder-unknown">`;
+    html += `Decoder not yet implemented for function <strong>${escHtml(result.funcName)}</strong> in <em>${escHtml(result.defineModule ?? '?')}</em>.<br>`;
+    html += `Raw call: <span class="raw-func">${escHtml(result.funcName)}</span>(<span class="raw-args">${escHtml(result.argsText ?? '')}</span>)`;
+    html += `</div>`;
+  } else {
+    html += `<div class="decoder-note">Decoded via <strong>${escHtml(result.funcName)}</strong>()</div>`;
+  }
+
+  // Raw call expandable
+  if (result.argsText != null) {
+    html += `<div class="raw-section"><details>`;
+    html += `<summary>Raw function call</summary>`;
+    html += `<div class="raw-block"><span class="raw-func">${escHtml(result.funcName)}</span>(<span class="raw-args">${escHtml(result.argsText)}</span>)</div>`;
+    html += `</details></div>`;
+  }
+
+  // Sheet row (if exists)
+  if (sheetRow) {
+    html += `<div class="raw-section"><details>`;
+    html += `<summary>Existing sheet row</summary>`;
+    html += `<div class="raw-block">Common Name: ${escHtml(sheetRow.commonName)}\nEffects: ${escHtml(sheetRow.effects)}\nDuration: ${escHtml(sheetRow.duration)}</div>`;
+    html += `</details></div>`;
+  }
+
+  html += `</div>`;
+  document.getElementById('output').innerHTML = html;
+}
+
+function copyTsv(btn) {
+  const area = document.getElementById('tsv-out');
+  if (!area) return;
+  navigator.clipboard.writeText(area.value).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Search & autocomplete ────────────────────────────────────────────────────
+const input = document.getElementById('status-input');
+const acBox  = document.getElementById('autocomplete');
+let acItems  = [];
+let acIndex  = -1;
+
+function runDecode() {
+  const raw = input.value.trim();
+  if (!raw) return;
+
+  let statusKey = null;
+
+  // Try as numeric ID
+  const asNum = parseInt(raw);
+  if (!isNaN(asNum) && String(asNum) === raw) {
+    statusKey = DB.statusById[asNum];
+    if (!statusKey) {
+      document.getElementById('output').innerHTML = `<div class="err-box">No status found with ID ${asNum}</div>`;
+      return;
+    }
+  } else {
+    statusKey = raw.toUpperCase().replace(/\s+/g, '_');
+    if (!DB.statusAilmentsForward[statusKey]) {
+      document.getElementById('output').innerHTML = `<div class="err-box">Status key not found: ${escHtml(statusKey)}</div>`;
+      return;
+    }
+  }
+
+  closeAc();
+  renderResult(decodeStatus(statusKey));
+}
+
+function showAc(query) {
+  if (!query || query.length < 2) { closeAc(); return; }
+  const q = query.toUpperCase().replace(/\s+/g, '_');
+  const allKeys = Object.keys(DB.statusAilmentsForward);
+  const matches = allKeys.filter(k => k.includes(q)).slice(0, 20);
+
+  if (!matches.length) { closeAc(); return; }
+
+  acItems = matches;
+  acIndex = -1;
+  acBox.innerHTML = matches.map((k, i) =>
+    `<div class="ac-item" data-key="${escHtml(k)}" data-idx="${i}">
+      ${escHtml(k)}<span class="ac-id">${DB.statusAilmentsForward[k]}</span>
+    </div>`
+  ).join('');
+  acBox.style.display = 'block';
+
+  for (const item of acBox.querySelectorAll('.ac-item')) {
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      input.value = item.dataset.key;
+      closeAc();
+      runDecode();
+    });
+  }
+}
+
+function closeAc() {
+  acBox.style.display = 'none';
+  acBox.innerHTML = '';
+  acItems = [];
+  acIndex = -1;
+}
+
+function setAcIndex(idx) {
+  const items = acBox.querySelectorAll('.ac-item');
+  items.forEach(el => el.classList.remove('ac-selected'));
+  if (idx >= 0 && idx < items.length) {
+    items[idx].classList.add('ac-selected');
+    acIndex = idx;
+  }
+}
+
+input.addEventListener('input', () => showAc(input.value));
+input.addEventListener('blur',  () => setTimeout(closeAc, 150));
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { runDecode(); closeAc(); return; }
+  if (e.key === 'Escape') { closeAc(); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const next = Math.min(acIndex + 1, acItems.length - 1);
+    setAcIndex(next);
+    if (acItems[next]) input.value = acItems[next];
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const prev = Math.max(acIndex - 1, 0);
+    setAcIndex(prev);
+    if (acItems[prev]) input.value = acItems[prev];
+  }
+});
+
+document.getElementById('decode-btn').addEventListener('click', runDecode);
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+Promise.all([loadBattleJs(), loadSheets()]);
+</script>

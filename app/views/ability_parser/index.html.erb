@@ -45,6 +45,8 @@
 
     .subaction-block { border-left: 2px solid #3c3c3c; padding-left: 10px; margin: 6px 0; }
     .subability-block { border-left: 2px solid #505050; padding-left: 10px; margin: 6px 0; }
+    .chain-header { color: #9cdcfe; font-size: 12px; font-weight: bold; margin: 14px 0 4px; padding: 4px 0; border-bottom: 1px solid #264f78; }
+    .chain-header .chain-ids { color: #888; font-weight: normal; font-size: 11px; margin-left: 8px; }
 
     .tag { display: inline-block; background: #264f78; color: #9cdcfe; padding: 1px 5px; border-radius: 3px; font-size: 11px; margin: 1px 2px 1px 0; }
     .tag.elem { background: #3d2e00; color: #dcdcaa; }
@@ -77,13 +79,17 @@
     .sbp-copy-btn  { background: #264f78; color: #9cdcfe; border: 1px solid #3c5a8a; padding: 3px 10px; font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px; flex-shrink: 0; }
     .sbp-copy-btn:hover { background: #1e3d5c; }
     .sbp-tsv-area  { background: #111; color: #555; border: 1px solid #2a2a2a; font-family: monospace; font-size: 10px; flex: 1; resize: none; padding: 3px 5px; border-radius: 3px; height: 24px; overflow: hidden; white-space: nowrap; }
-    .sbp-translate-btn { background: #1e3a1e; color: #4ec9b0; border: 1px solid #2a5a2a; padding: 1px 6px; font-family: monospace; font-size: 10px; cursor: pointer; border-radius: 2px; margin-left: 6px; vertical-align: middle; }
-    .sbp-translate-btn:hover:not(:disabled) { background: #153015; }
-    .sbp-translate-btn:disabled { color: #555; cursor: default; }
+    .sbp-translating { color: #555; font-size: 10px; margin-left: 6px; vertical-align: middle; }
   </style>
 
 <div class="ap-root">
 <h1>FFRK Ability Parser</h1>
+
+<div class="page-nav" style="display:flex;gap:12px;margin-bottom:14px;font-size:12px;">
+  <a href="/" style="color:#888;text-decoration:none;">Dashboard</a>
+  <a href="/ability_parser" style="color:#9cdcfe;text-decoration:none;">Ability Parser</a>
+  <a href="/status_decoder" style="color:#888;text-decoration:none;">Status Decoder</a>
+</div>
 
 <div id="load-status">
   <div class="load-item" id="li-battlejs">
@@ -102,6 +108,7 @@
   <textarea id="json-input" placeholder="Paste FFRK battle JSON here…"></textarea>
   <br>
   <button id="parse-btn" disabled>Parse</button>
+  <button id="reload-btn" style="background:#2d6a4f;margin-left:8px">Reload sheets &amp; re-parse</button>
   <div id="parse-error"></div>
 </div>
 
@@ -132,8 +139,9 @@ const DB = {
   // Sheet data
   statusMap:     {},   // id (number) → { commonName, effects, duration }
   actionMap:     [],   // array of row objects {action_id, className, arg1..arg30}
-  soulBreaksMap: {},   // id (number) → soul break row
-  otherMap:      [],   // array of other rows
+  soulBreaksMap:  {},   // id (number) → soul break row
+  charactersMap:  {},   // id (number) → character row { Name, Realm, ... }
+  otherMap:       [],   // array of other rows
 };
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -209,21 +217,26 @@ function csvToObjects(text) {
 // Extract a simple {KEY:num, KEY:num} map from battle.js text
 // Returns { NAME: number } (forward map)
 function extractConstantMap(js, name) {
-  // Look for NAME:{...} block — use balanced-brace extraction
+  // Merge ALL occurrences — STATUS_AILMENTS_TYPE is spread across 13
+  // sub-module blocks, each covering a different slice of status IDs.
   const marker = name + ':{';
-  const idx = js.indexOf(marker);
-  if (idx === -1) return {};
-  let depth = 0, start = idx + name.length + 1, i = start;
-  for (; i < js.length; i++) {
-    if (js[i] === '{') depth++;
-    else if (js[i] === '}') { depth--; if (depth === 0) break; }
+  const merged = {};
+  let searchFrom = 0;
+  while (true) {
+    const idx = js.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+    let depth = 0, start = idx + name.length + 1, i = start;
+    for (; i < js.length; i++) {
+      if (js[i] === '{') depth++;
+      else if (js[i] === '}') { depth--; if (depth === 0) break; }
+    }
+    const block = js.slice(start + 1, i);
+    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
+      merged[m[1]] = parseInt(m[2]);
+    }
+    searchFrom = idx + 1;
   }
-  const block = js.slice(start + 1, i); // contents between { }
-  const forward = {};
-  for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-    forward[m[1]] = parseInt(m[2]);
-  }
-  return forward;
+  return merged;
 }
 
 // Invert: {NAME: num} → {num: NAME}
@@ -291,10 +304,11 @@ async function loadSheets() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
-    const statusRows = data.status      || [];
-    const actionRows = data.action_args || [];
-    const sbRows     = data.soul_breaks || [];
-    const otherRows  = data.other       || [];
+    const statusRows    = data.status      || [];
+    const actionRows    = data.action_args || [];
+    const sbRows        = data.soul_breaks || [];
+    const otherRows     = data.other       || [];
+    const characterRows = data.characters  || [];
 
     // Status map: id → { commonName, effects, duration }
     for (const r of statusRows) {
@@ -314,8 +328,14 @@ async function loadSheets() {
     // Other sheet: keep as array
     DB.otherMap = otherRows;
 
+    // Characters map: ID → row
+    for (const r of characterRows) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id)) DB.charactersMap[id] = r;
+    }
+
     setLoadState('sheets', 'ok',
-      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length}`);
+      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length}`);
   } catch(e) {
     setLoadState('sheets', 'err', e.message);
   }
@@ -323,8 +343,27 @@ async function loadSheets() {
 }
 
 // ─── Parsing helpers ─────────────────────────────────────────────────────────
+
+// Local supplement for action_ids whose rows exist in the community sheet but whose action_id
+// cell is dropped by the gviz CSV export (known gviz bug for late-sheet rows).
+// Values copied directly from the sheet.
+const ACTION_ARG_SUPPLEMENTS = {
+  // 235 — CrystalShingiAction
+  235: {
+    arg1: 'wrappedAbilityId', arg2: 'crystalForceAbilityId', arg3: 'crystalForceAbilityId',
+    arg11: 'attachElementLevel', arg12: 'attachElementAddMaxLevel',
+    arg13: 'possibleAttachElement', arg14: 'possibleAttachElement', arg15: 'possibleAttachElement',
+    arg16: 'possibleAttachElement', arg17: 'possibleAttachElement', arg18: 'possibleAttachElement',
+    arg19: 'possibleAttachElement', arg20: 'possibleAttachElement', arg21: 'possibleAttachElement',
+  },
+  // 236 — CutinAbilityAction
+  236: { arg1: 'wrappedAbilityId', arg2: 'cutinAbilityId' },
+};
+
 function getActionFormula(actionId) {
-  return DB.actionMap.find(r => String(r.action_id).replace('!','') === String(actionId));
+  const fromSheet = DB.actionMap.find(r => String(r.action_id).replace('!','') === String(actionId));
+  if (fromSheet) return fromSheet;
+  return ACTION_ARG_SUPPLEMENTS[Number(actionId)] ?? null;
 }
 
 function lookupStatus(id) {
@@ -429,7 +468,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
   const result = {
     abilityId:    ability.ability_id,
     actionId:     ability.action_id,
-    name:         opts.name ? decodeURIComponent(opts.name.replace(/\+/g, ' ')) : 'Attack',
+    name:         opts.name ? (() => { try { return decodeURIComponent(opts.name.replace(/\+/g, ' ')); } catch(e) { return opts.name; } })() : 'Attack',
     exerciseType: DB.exerciseTypes[ability.exercise_type] ?? String(ability.exercise_type),
     category:     DB.abilityCategories[ability.category_id] ?? null,
     castTime:          opts.cast_time ? (opts.cast_time / 1000).toFixed(2) : null,
@@ -440,9 +479,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
     counterable:       Number(opts.counter_enable) !== 0 ? 'Yes' : 'No',
     kiwamiAbilityId:          Number(ability.kiwamiAbilityId)         > 0 ? Number(ability.kiwamiAbilityId)         : null,
     replacePersonalAbilityId: Number(ability.replacePersonalAbilityId) > 0 ? Number(ability.replacePersonalAbilityId) : null,
-    attachElementLevel:       Number(ability.attachElementLevel)     || null,
-    attachElementAddMaxLevel: Number(ability.attachElementAddMaxLevel) || null,
-    attachElements:           (ability.possibleAttachElement ?? []).map(Number).filter(id => id > 0),
+    attachElementLevel:       null,   // populated by formula switch (attachElementLevel arg type)
+    attachElementAddMaxLevel: null,   // populated by formula switch (attachElementAddMaxLevel arg type)
+    attachElements:           [],     // populated by formula switch (possibleAttachElement arg type)
     target: {
       range:  DB.targetRange[opts.target_range]         ?? opts.target_range,
       method: DB.targetMethod[opts.target_method]       ?? opts.target_method,
@@ -457,6 +496,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
     subActions:   [],
     props:        {},   // misc named props
     unknownArgs:  [],
+    actionArgs:   [],   // raw [{argNum, type, value}] from action_args sheet
   };
 
   // Default status from options.status_ailments_id
@@ -501,7 +541,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'matkElement':
         case 'args (elements)':
           if (numVal > 0) {
-            const elemName = DB.elementTypes[numVal];
+            const elemName = fmtElement(DB.elementTypes[numVal] ?? '');
             if (elemName && !result.elements.includes(elemName)) result.elements.push(elemName);
           }
           break;
@@ -627,6 +667,15 @@ function parseAbility(ability, allAbilities, parsedSet) {
           }
           break;
         }
+        case 'attachElementLevel':
+          if (numVal > 0) result.attachElementLevel = numVal;
+          break;
+        case 'attachElementAddMaxLevel':
+          if (numVal > 0) result.attachElementAddMaxLevel = numVal;
+          break;
+        case 'possibleAttachElement':
+          if (numVal > 0) result.attachElements.push(numVal);
+          break;
         case 'duration':
           if (numVal > 0) result.props.statusDuration = (numVal / 1000).toFixed(1) + 's';
           break;
@@ -640,6 +689,27 @@ function parseAbility(ability, allAbilities, parsedSet) {
           if (rawVal && rawVal !== '0') result.unknownArgs.push({ type: argType, value: rawVal });
       }
     }
+  }
+
+  // Collect action args for display: scan all opts.arg1..arg30 with non-zero values.
+  // Type labels come from the formula where available; shown as plain argN otherwise.
+  for (let argNum = 1; argNum <= 30; argNum++) {
+    const argKey  = `arg${argNum}`;
+    const rawVal  = opts[argKey];
+    if (rawVal === undefined || rawVal === null || rawVal === '' || rawVal === '0' || rawVal === 0) continue;
+    const argType = formula?.[argKey];
+    result.actionArgs.push({ argNum, type: (argType && argType !== '-') ? argType : null, value: rawVal });
+  }
+
+  // Fallback: some game data stores attach element info as top-level named fields
+  // rather than (or in addition to) positional options args.
+  if (result.attachElementLevel == null && Number(ability.attachElementLevel) > 0)
+    result.attachElementLevel = Number(ability.attachElementLevel);
+  if (result.attachElementAddMaxLevel == null && Number(ability.attachElementAddMaxLevel) > 0)
+    result.attachElementAddMaxLevel = Number(ability.attachElementAddMaxLevel);
+  if (result.attachElements.length === 0 && ability.possibleAttachElement != null) {
+    const pae = ability.possibleAttachElement;
+    (Array.isArray(pae) ? pae : [pae]).forEach(id => { if (Number(id) > 0) result.attachElements.push(Number(id)); });
   }
 
   // Heuristic: scan all option args for unlinked companion ability references.
@@ -670,6 +740,8 @@ function parseAbility(ability, allAbilities, parsedSet) {
       const sub = {
         type:           DB.subActionType[parseInt(sa.type)]           ?? sa.type,
         target:         DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type,
+        targetArgRaw:   sa.target_arg || '',
+        processOrder:   parseInt(sa.process_order) || 0,
         conditionType:  DB.conditionTypes[parseInt(sa.condition_type)] ?? null,
         controlType:    DB.controlStatementTypes[parseInt(sa.control_statement_type)] ?? null,
         controlTypeRaw: parseInt(sa.control_statement_type) || 0,
@@ -695,11 +767,11 @@ function parseAbility(ability, allAbilities, parsedSet) {
             sub.props.critRate = Number(v);
             break;
           case 'elementId':
-            { const en = DB.elementTypes[Number(v)]; if (en) sub.elements.push(en); }
+            { const en = fmtElement(DB.elementTypes[Number(v)] ?? ''); if (en) sub.elements.push(en); }
             break;
           case 'elementIds':
             for (const eid of (Array.isArray(v) ? v : [v])) {
-              const en = DB.elementTypes[Number(eid)]; if (en) sub.elements.push(en);
+              const en = fmtElement(DB.elementTypes[Number(eid)] ?? ''); if (en) sub.elements.push(en);
             }
             break;
           case 'saId':
@@ -723,6 +795,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
           case 'damageThresholdLv':
             sub.props.damageCapBoost = Number(v) * 10000;
             break;
+          case 'secondaryDamageThresholdLv':
+            sub.props.secondaryDamageThresholdLv = Number(v);
+            break;
           case 'isIndirectAttack':
             sub.props.ranged = true;
             break;
@@ -736,7 +811,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
                 const catIds = cond.categoryIds ?? (cond.categoryId ? [cond.categoryId].flat() : []);
                 const elemIds = cond.elementIds ?? (cond.elementId ? [cond.elementId].flat() : []);
                 catIds.forEach(id => { const n = DB.abilityCategories[id]; if (n) conditions.push(n); });
-                elemIds.forEach(id => { const n = DB.elementTypes[id];    if (n) conditions.push(n); });
+                elemIds.forEach(id => { const n = fmtElement(DB.elementTypes[id] ?? ''); if (n) conditions.push(n); });
                 sub.synchroConditions.push({ slot: Number(slotKey), conditions });
               }
             }
@@ -751,6 +826,27 @@ function parseAbility(ability, allAbilities, parsedSet) {
   return result;
 }
 
+// ─── Element display name (shared across parser and renderer) ────────────────
+// Maps battle.js ELEMENT_TYPE keys → EN display names where they differ from simple title-case.
+const ELEMENT_NAME_CORRECTIONS = {
+  THUNDER:  'Lightning',
+  DARKNESS: 'Dark',
+};
+
+// Title-case the raw ELEMENT_TYPE key; apply EN corrections and non-elemental normalisation.
+function fmtElement(name) {
+  if (!name) return '';
+  const up = name.toUpperCase();
+  if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE' || up === 'NON') return 'NE';
+  if (ELEMENT_NAME_CORRECTIONS[up]) return ELEMENT_NAME_CORRECTIONS[up];
+  return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+}
+
+// Resolve a numeric element ID → display name via DB.elementTypes (battle.js ELEMENT_TYPE).
+function elemDisplayName(id) {
+  return fmtElement(DB.elementTypes[Number(id)] ?? '');
+}
+
 // ─── Effects text generator ──────────────────────────────────────────────────
 function generateEffectsText(parsed) {
 
@@ -763,12 +859,11 @@ function generateEffectsText(parsed) {
   ];
   function hitsWord(n) { return NUM_WORDS[n] ?? String(n); }
 
-  // Title-case an element name; map "NOTHING" / non-elemental variants → "NE"
-  function fmtElement(name) {
-    if (!name) return '';
-    const up = name.toUpperCase();
-    if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE') return 'NE';
-    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  // Damage cap for an attack sub-action (accounts for secondaryDamageThresholdLv and damageCapBoost).
+  function atkCap(sa) {
+    if (!sa) return 9999;
+    if (sa.props.secondaryDamageThresholdLv) return 199999;
+    return 9999 + (sa.props.damageCapBoost ?? 0);
   }
 
   // Best available display name for a status object
@@ -795,13 +890,13 @@ function generateEffectsText(parsed) {
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
     const isSelf  = t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF') || t.startsWith('EXECUTER');
     const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    if (isSelf)             return ' to self';
+    if (isSelf)             return ' to user';
     if (isAlly  && isAllT)  return ' to all allies';
     if (isAlly)             return ' to single ally';
     if (isEnemy && isAllT)  return ' to enemies';
     if (isEnemy)            return ' to enemy';
     // Numeric fallbacks for common IDs not in the DB map
-    if (raw === '1001') return ' to self';
+    if (raw === '1001') return ' to user';
     if (raw === '2001' || raw === '4001') return ' to all allies';
     if (raw === '3003') return ' to enemies';
     return '';
@@ -816,7 +911,8 @@ function generateEffectsText(parsed) {
     const fac     = factorOverride ?? sa.props.multiplier;
     const elemStr = '';
     const perHit  = fac ? ` (${fac.toFixed(2)} each)` : '';
-    const capVal  = sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
+    const capVal  = sa.props.secondaryDamageThresholdLv ? 199999
+                  : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
     const capStr  = capVal ? ` capped at ${capVal.toLocaleString()}` : '';
     const flags   = [
       // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
@@ -830,11 +926,20 @@ function generateEffectsText(parsed) {
     return `${hitsWord(hits)} ${elemStr}${atkWord}${perHit}${capStr}${flagStr}`;
   }
 
-  // Collect statuses from an ability's sub-actions, tagged with their target
+  // Collect statuses from an ability's sub-actions, tagged with their target.
+  // HIT_ACTOR_OF_SPECIFIC_SUB_ACTION (5001): resolves to the target of the referenced sub-action.
   function subActionStatuses(ab) {
     const out = [];
     for (const sa of ab.subActions) {
-      for (const s of sa.statuses) out.push({ ...s, _target: sa.target });
+      let target = sa.target;
+      if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
+        const m = sa.targetArgRaw.match(/processOrder\s*:\s*(\d+)/);
+        if (m) {
+          const ref = ab.subActions.find(r => r.processOrder === parseInt(m[1]));
+          if (ref) target = ref.target;
+        }
+      }
+      for (const s of sa.statuses) out.push({ ...s, _target: target });
     }
     return out;
   }
@@ -895,7 +1000,7 @@ function generateEffectsText(parsed) {
 
   const segs = [];
 
-  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs']);
+  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
   const wrapped  = parsed.subAbilities.find(s => wrappedLabels.has(s._label));
   const commands = parsed.subAbilities.filter(s => !wrappedLabels.has(s._label));
   const exec     = wrapped ?? parsed;
@@ -978,8 +1083,35 @@ function generateEffectsText(parsed) {
         return null;
       }
       const p = findParam(cond);
-      if (p?.a && p?.b) return `${String(p.a).toUpperCase()} and ${String(p.b).toUpperCase()}`;
+      const STAT_LABELS = { atk:'ATK', def:'DEF', matk:'MAG', mdef:'RES', mnd:'MND', spd:'SPD' };
+      const fmt = s => STAT_LABELS[String(s).toLowerCase()] ?? String(s).toUpperCase();
+      if (p?.a && p?.b) return `${fmt(p.a)} and ${fmt(p.b)}`;
     } catch(e) {}
+    return null;
+  }
+
+  // Parse actorCondition enelement (infusion) checks → human-readable label.
+  // Returns { label } or null.
+  function parseEnElementLabel(condArgStr) {
+    if (!condArgStr) return null;
+    function enName(id) {
+      const name = elemDisplayName(id);
+      return (name && name !== 'NE') ? name : null;
+    }
+    // Use regex to avoid parseDenaArg's inline nested-object limitation
+    const sidMatch = condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/);
+    if (sidMatch) {
+      const n = enName(sidMatch[1]) ?? `Element${sidMatch[1]}`;
+      return { label: `En${n}` };
+    }
+    const aidsMatch = condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+    if (aidsMatch) {
+      const ids   = aidsMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+      const names = ids.map(id => { const n = enName(id); return n ? `En${n}` : `Element${id}`; }).join(' or ');
+      const lvlMatch = condArgStr.match(/greaterEqual\s*:\s*(\d+)/);
+      const lvl = lvlMatch ? lvlMatch[1] : null;
+      return { label: (lvl != null ? `Level ${lvl}+ ` : '') + names };
+    }
     return null;
   }
 
@@ -1054,10 +1186,11 @@ function generateEffectsText(parsed) {
           if (![...ifBranch, ...elseBranch].some(isAtk)) {
             const ifSA   = ifBranch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
             const elseSA = elseBranch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
-            if (ifSA && elseSA) {
-              return { ifStatuses: ifSA.statuses, elseStatuses: elseSA.statuses,
-                       ifTarget: ifSA.target, elseTarget: elseSA.target,
-                       conditionArg: sas[blockStart].conditionArg ?? '' };
+            if (ifSA || elseSA) {
+              return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
+                       ifTarget: ifSA?.target, elseTarget: elseSA?.target,
+                       conditionArg: sas[blockStart].conditionArg ?? '',
+                       hasElse: !!elseSA };
             }
           }
           blockStart = -1; blockElse = -1;
@@ -1091,8 +1224,8 @@ function generateEffectsText(parsed) {
     const atkPerHitBoost = atkBoost ? resolvePerHit(atkBoost, exec) : null;
     const mndPerHitBase  = resolvePerHit(mndBase, exec);
     const mndPerHitBoost = mndBoost ? resolvePerHit(mndBoost, exec) : null;
-    const baseCap  = 9999 + (atkBase?.props.damageCapBoost ?? mndBase?.props.damageCapBoost ?? 0);
-    const boostCap = 9999 + (atkBoost?.props.damageCapBoost ?? mndBoost?.props.damageCapBoost ?? 0);
+    const baseCap  = atkCap(atkBase ?? mndBase);
+    const boostCap = atkCap(atkBoost ?? mndBoost);
 
     const atkWord   = hits === 1 ? 'single attack' : 'single attacks';
     const perHitStr = (atkPerHitBoost != null && mndPerHitBoost != null)
@@ -1106,27 +1239,43 @@ function generateEffectsText(parsed) {
     segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
 
   } else if (condAtk) {
-    // Simple two-branch conditional: "N attacks (base/boost each) capped at X/Y after L1/L2 uses"
+    // Simple two-branch conditional: factor/cap difference, or element difference (same factor)
     const { ifAtk, elseAtk, conditionArg } = condAtk;
-    const condLabel  = parseStateConditionLabel(conditionArg);
-    const statLabel  = condLabel ? null : parseStatComparisonLabel(conditionArg);
-    const baseSA     = elseAtk ?? ifAtk;        // else = initial/base branch
-    const boostSA    = elseAtk ? ifAtk : null;  // if  = enhanced branch
-    const hits       = baseSA.props.hits ?? boostSA?.props.hits ?? 1;
+    const condLabel = parseStateConditionLabel(conditionArg);
+    const statLabel = condLabel ? null : parseStatComparisonLabel(conditionArg);
+    const enLabel   = (!condLabel && !statLabel) ? parseEnElementLabel(conditionArg) : null;
+    const baseSA    = elseAtk ?? ifAtk;        // else = initial/base branch
+    const boostSA   = elseAtk ? ifAtk : null;  // if  = enhanced branch
+    const hits      = baseSA.props.hits ?? boostSA?.props.hits ?? 1;
     const basePerHit  = resolvePerHit(baseSA, exec);
     const boostPerHit = boostSA ? resolvePerHit(boostSA, exec) : null;
-    const baseCap    = 9999 + (baseSA.props.damageCapBoost  ?? 0);
-    const boostCap   = boostSA ? 9999 + (boostSA.props.damageCapBoost ?? 0) : null;
-    const atkWord    = hits === 1 ? 'single attack' : 'single attacks';
-    const perHitStr  = boostPerHit != null && basePerHit != null
-      ? ` (${basePerHit.toFixed(2)}/${boostPerHit.toFixed(2)} each)`
-      : basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
-    const capStr     = boostCap != null && baseCap !== boostCap
-      ? ` capped at ${baseCap}/${boostCap}`
-      : ` capped at ${baseCap}`;
-    const afterStr   = condLabel ? ` after ${condLabel.elseLabel}/${condLabel.ifLabel} uses` : '';
-    const basedStr   = statLabel ? ` based on ${statLabel}` : '';
-    segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
+    const baseCap   = atkCap(baseSA);
+    const boostCap  = boostSA ? atkCap(boostSA) : null;
+    const atkWord   = hits === 1 ? 'single attack' : 'single attacks';
+    // Detect element-conditional: both branches present, same factor, different elements
+    const sameFactors = boostSA && boostPerHit != null && basePerHit != null
+      && Math.abs(boostPerHit - basePerHit) < 0.001;
+    const ifElems   = ifAtk?.elements  ?? [];
+    const elseElems = elseAtk?.elements ?? [];
+    const elemsDiffer = JSON.stringify([...ifElems].sort()) !== JSON.stringify([...elseElems].sort());
+    if (enLabel && sameFactors && elemsDiffer) {
+      // "One Dark/NE or Wind/NE single attack (1.00 each) capped at 199,999 based on EnDark"
+      const fmtEL       = sa => sa.elements.map(fmtElement).filter(Boolean).join('/') || 'NE';
+      const ifElemStr   = fmtEL(ifAtk);
+      const elseElemStr = fmtEL(elseAtk);
+      const perHitStr   = basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
+      segs.push(`${hitsWord(hits)} ${ifElemStr} or ${elseElemStr} ${atkWord}${perHitStr} capped at ${baseCap.toLocaleString()} based on ${enLabel.label}${hpStr}`);
+    } else {
+      const perHitStr = boostPerHit != null && basePerHit != null
+        ? ` (${basePerHit.toFixed(2)}/${boostPerHit.toFixed(2)} each)`
+        : basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
+      const capStr    = boostCap != null && baseCap !== boostCap
+        ? ` capped at ${baseCap.toLocaleString()}/${boostCap.toLocaleString()}`
+        : ` capped at ${baseCap.toLocaleString()}`;
+      const afterStr  = condLabel ? ` after ${condLabel.elseLabel}/${condLabel.ifLabel} uses` : '';
+      const basedStr  = statLabel ? ` based on ${statLabel}` : (enLabel ? ` based on ${enLabel.label}` : '');
+      segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
+    }
 
   } else {
     const atkSAs = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
@@ -1142,10 +1291,11 @@ function generateEffectsText(parsed) {
 
   // ── 2. Activation statuses ──
   if (wrapped) {
-    // Soul break / wrapped ability: collect all sub-action statuses tagged as "to user".
+    // Soul break / wrapped ability: formula-level statuses activate on the user ('default');
+    // sub-action statuses keep their own target (e.g. 4001=all allies, 1001=self).
     const activationStatuses = [
-      ...parsed.statuses.map(s => ({ ...s, _target: 'default' })),
-      ...subActionStatuses(wrapped).map(s => ({ ...s, _target: 'default' })),
+      ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
+      ...subActionStatuses(wrapped),
     ].filter(s => !isLevelTracker(s));
     const seenIds = new Set();
     const uniqueStatuses = activationStatuses.filter(s => {
@@ -1159,11 +1309,14 @@ function generateEffectsText(parsed) {
         if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
         byTarget.get(tLabel).push(s);
       }
-      const grantParts = [];
       for (const [tLabel, group] of byTarget) {
-        grantParts.push(group.map(s => `[${statusName(s)}]`).join(', ') + tLabel);
+        const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+        if (tLabel.includes('enem')) {
+          segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
+        } else {
+          segs.push(`Grants ${statusStr}${tLabel}`);
+        }
       }
-      segs.push(`Grants ${grantParts.join(', ')}`);
     }
   } else {
     // Direct ability (exec = parsed): depth-aware collection with conditional status support.
@@ -1187,28 +1340,55 @@ function generateEffectsText(parsed) {
         }
       }
     }
-    // Conditional status block: IF/ELSE where both branches have status sub-actions.
+    // Conditional status block: IF(/ELSE) where branches have status sub-actions.
     const condStat = findConditionalStatus(exec.subActions);
     const clauses = [];
     for (const [tLabel, statuses] of byTarget) {
       if (statuses.length > 0) clauses.push(statuses.map(s => `[${statusName(s)}]`).join(', ') + tLabel);
     }
     if (condStat) {
-      const statLabel  = parseStatComparisonLabel(condStat.conditionArg);
+      const statLabel  = parseStatComparisonLabel(condStat.conditionArg)
+                         ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const elseStr    = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const parts      = [ifStr, elseStr].filter(Boolean);
-      // Use the IF branch target; fall back to ELSE target if they differ (edge case)
       const tLabel     = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
-      if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
+      if (condStat.hasElse) {
+        // Two-sided: "grants [X] or [Y] to self based on condition"
+        const elseStr  = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+        const parts    = [ifStr, elseStr].filter(Boolean);
+        if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
+      } else {
+        // One-sided: "grants [X] to self if condition"
+        if (ifStr) clauses.push(ifStr + tLabel + (statLabel ? ` if ${statLabel}` : ''));
+      }
     }
     if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
   }
 
-  // ── 3. Follow-up sub-abilities — parsed but not included in SB tab effects ──
+  // ── 3. Attach Element grant (conditional on entry element when multiple options) ──
+  if (parsed.attachElements && parsed.attachElements.length > 0) {
+    const aeLevel      = parsed.attachElementLevel;
+    const aeHasStack   = !!parsed.attachElementAddMaxLevel;
+    const aeStatusName = (elemId) => {
+      const elemName = DB.elementTypes[elemId] ? fmtElement(DB.elementTypes[elemId]) : `ELEMENT_${elemId}`;
+      const levelStr = (aeLevel != null && aeLevel >= 2) ? ` ${aeLevel}` : '';
+      const stackStr = aeHasStack ? ' with Stacking' : '';
+      return `Attach ${elemName}${levelStr}${stackStr}`;
+    };
+    const statusTags = parsed.attachElements.map(id => `[${aeStatusName(id)}]`);
+    if (parsed.attachElements.length === 1) {
+      segs.push(`Grants ${statusTags[0]}`);
+    } else {
+      const elemLabels = parsed.attachElements
+        .map(id => DB.elementTypes[id] ? fmtElement(DB.elementTypes[id]) : `ELEMENT_${id}`)
+        .join('/');
+      segs.push(`Grants ${statusTags.join('/')} based on if entry damage was ${elemLabels}`);
+    }
+  }
+
+  // ── 4. Follow-up sub-abilities — parsed but not included in SB tab effects ──
   // (Follow-ups belong in the Other tab; excluded here intentionally.)
 
-  // ── 4. Commands — parsed but not included in SB tab effects ──
+  // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
 
   return segs.length ? segs.join('. ') + '.' : '(No effects detected)';
@@ -1229,14 +1409,11 @@ function row(label, value, cls) {
   return `<tr><th>${label}</th><td class="${cls ?? ''}">${value}</td></tr>`;
 }
 
-// ─── JP → EN name translation (on demand) ────────────────────────────────────
+// ─── JP → EN name translation (auto on render) ───────────────────────────────
 async function translateSBName(abilityId, jpText) {
   const nameCell = document.getElementById(`sbp-name-${abilityId}`);
   const tsvArea  = document.getElementById(`sbp-tsv-${abilityId}`);
-  const btn = nameCell?.querySelector('.sbp-translate-btn');
-  if (!nameCell || !btn) return;
-  btn.disabled = true;
-  btn.textContent = '…';
+  if (!nameCell) return;
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=${encodeURIComponent(jpText)}`;
     const resp = await fetch(url);
@@ -1244,30 +1421,32 @@ async function translateSBName(abilityId, jpText) {
     const translated = data[0].map(c => c[0]).join('');
     const span = nameCell.querySelector('.sbp-name-val');
     if (span) span.textContent = translated;
-    btn.remove();
+    const indicator = nameCell.querySelector('.sbp-translating');
+    if (indicator) indicator.remove();
     // Rebuild TSV from current table cell text content
     if (tsvArea) {
       const tbody = tsvArea.closest('.sb-preview').querySelector('.sb-preview-table tbody');
       tsvArea.value = [...tbody.rows].map(r => r.cells[1].textContent.trim()).join('\t');
     }
   } catch(e) {
-    btn.textContent = 'Retry';
-    btn.disabled = false;
+    const indicator = nameCell.querySelector('.sbp-translating');
+    if (indicator) indicator.textContent = '⚠';
   }
 }
 
 // ─── SB sheet column preview ──────────────────────────────────────────────────
-function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement) {
+function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '') {
   // ── Local helpers ──
 
   function fmtElem(name) {
     if (!name) return '';
     const up = name.toUpperCase();
-    if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE') return 'NE';
+    if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE' || up === 'NON') return 'NE';
+    if (up === 'DARKNESS') return 'Dark';
     return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
   }
 
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs']);
+  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
   function getExec() {
     return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
@@ -1309,7 +1488,8 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement) {
     const fc     = (parsed.formulaClass ?? '').toUpperCase();
     const cat    = (parsed.category     ?? '').toUpperCase();
     const saType = (getFirstAtkSA()?.type ?? '').toUpperCase();
-    const hay    = [fc, cat, saType, atkTypeName].join(' ');
+    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
+    const hay    = [fc, cat, saType, atkTypeName, exType].join(' ');
 
     // More-specific checks first to avoid mis-classification
     if (hay.includes('INBORN')  || hay.includes('HYBRID'))  return { type: 'NAT', formula: ''         };
@@ -1375,32 +1555,51 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement) {
   }
 
   // ── Derivations ──
-  const { type, formula }      = inferTypeFormula();
-  const { target, autoTarget } = inferTargetInfo();
-  const multiplier             = inferMultiplier();
+  const { type, formula: rawFormula } = inferTypeFormula();
+  const { target, autoTarget }        = inferTargetInfo();
+  let formula    = rawFormula;
+  let multiplier = inferMultiplier();
+  if (type === 'NAT') {
+    formula    = multiplier ? 'Hybrid' : '';
+    multiplier = '';
+  }
   const element                = inferElement();
   const id                     = parsed.abilityId;
   const imgFormula             = `=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",${id},"/",${id},"_256.png"),4,64,64)`;
 
   // ── Per-column value/src for all columns we know how to derive ──
-  // Name: use sheet English name if available; otherwise show JP name with a translate button.
+  // Name: use sheet English name if present; otherwise show JP name and auto-translate.
   const nameEntry = (() => {
-    if (sb?.['Name']) return { val: sb['Name'], src: true };
+    const sheetName = sb?.['Name'];
+    if (sheetName) {
+      return { val: sheetName, rawVal: sheetName, src: true };
+    }
     const jpText = parsed.nameJp || parsed.name || '';
     const safe   = jpText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const jpAttr = jpText.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     return {
-      val:    `<span class="sbp-name-val">${safe}</span><button class="sbp-translate-btn" onclick="translateSBName(${id},${JSON.stringify(jpText)})">EN</button>`,
+      val:    `<span class="sbp-name-val">${safe}</span><span class="sbp-translating">⟳</span>`,
       rawVal: jpText,
       src:    false,
       tdId:   `sbp-name-${id}`,
+      tdExtra: `data-translate-jp="${jpAttr}"`,
     };
   })();
 
+  const SOUL_STRIKE_TIER = {
+     1: 'Default',            2: 'Shared',  3: 'SB',    4: 'SSB',   5: 'BSB',
+     6: 'OSB',                7: 'USB',     8: 'CSB',   9: 'AOSB', 10: 'G',
+    11: 'AASB',              12: 'SASB',   13: 'LBO',  14: 'LIMIT_BREAK_SENGI', 15: 'LBG',
+    16: 'LBG',               17: 'DASB',  18: 'LBC',  19: 'ZSB',  20: 'OZSB',
+    21: 'CASB',              22: 'ASB',   23: 'MASB',  24: 'LBSD', 25: 'TASB',
+    26: 'Buster',
+  };
+
   const colValues = {
-    'Realm':          { val: sb?.['Realm']    || '',                                                                     src: !!sb?.['Realm'] },
-    'Character':      { val: actorName        || sb?.['Character'] || '',                                                src: !!sb?.['Character'] },
+    'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
+    'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
     'Name':           nameEntry,
-    'Tier':           { val: sb?.['Tier']     || (parsed.soulStrikeCategory ? `cat.${parsed.soulStrikeCategory}` : ''), src: !!sb?.['Tier'] },
+    'Tier':           { val: SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '',                                              src: false },
     'SB Ver':         { val: '',                                                                                          src: false },
     'Type':           { val: type,                                                                                        src: false },
     'Target':         { val: target,                                                                                      src: false },
@@ -1409,7 +1608,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement) {
     'Element':        { val: element,                                                                                     src: false },
     'Time':           { val: parsed.castTime ?? '',                                                                      src: false },
     'Effects':        { val: genEffects,                                                                                  src: false },
-    'Counter':        { val: parsed.counterable,                                                                         src: false },
+    'Counter':        { val: parsed.counterable === 'Yes' ? 'Y' : 'N',                                                   src: false },
     'Auto Target':    { val: autoTarget,                                                                                  src: false },
     'Points':         { val: parsed.sbCost ?? '',                                                                        src: false },
     'Mastery Bonus':  { val: '',                                                                                          src: false },
@@ -1441,11 +1640,12 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement) {
   html += `<div class="sb-preview">`;
   html += `<table class="sb-preview-table">`;
   html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val, rawVal, tdId, src } of cols) {
-    const textVal = String(rawVal ?? val ?? '');
-    const cls     = textVal === '' ? 'sbp-empty' : src ? 'sbp-sheet' : 'sbp-derived';
-    const idAttr  = tdId ? ` id="${tdId}"` : '';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}"${idAttr}>${val}</td></tr>`;
+  for (const { col, val, rawVal, tdId, src, tdExtra } of cols) {
+    const textVal   = String(rawVal ?? val ?? '');
+    const cls       = textVal === '' ? 'sbp-empty' : src ? 'sbp-sheet' : 'sbp-derived';
+    const idAttr    = tdId    ? ` id="${tdId}"`  : '';
+    const extraAttr = tdExtra ? ` ${tdExtra}`    : '';
+    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}"${idAttr}${extraAttr}>${val}</td></tr>`;
   }
   html += `</tbody></table>`;
   html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
@@ -1520,96 +1720,222 @@ function renderProps(props) {
   for (const [k, [label, cls]] of Object.entries(labels)) {
     if (props[k] !== undefined && props[k] !== false) html += row(label, props[k], cls);
   }
+  const shown = new Set(Object.keys(labels));
+  for (const [k, v] of Object.entries(props)) {
+    if (!shown.has(k) && v !== undefined && v !== false) html += row(k, v, 'val-str');
+  }
   return html;
 }
 
-function renderAbility(parsed, depth, actorName) {
-  depth = depth ?? 0;
-  const sb = lookupSoulBreak(parsed.abilityId);
-  const other = !sb ? lookupOtherAbility(parsed.abilityId) : null;
+// ─── Crystal Commands sheet column preview ────────────────────────────────────
+function renderCFSheetPreview(parsed, cfParent, genEffects) {
+  // Shared helpers (same logic as renderSBSheetPreview, closed over this parsed)
+  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
+  function getFirstAtkSA() {
+    const exec = getExec();
+    const sa = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
+    if (sa.length) return sa[0];
+    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
+  }
+  function inferTypeFormula() {
+    const ATK_TYPE_MAP = {
+      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
+      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
+      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
+      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
+      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
+    };
+    const exec = getExec();
+    const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
+    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
+    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
+    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
+    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
+    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
+    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
+    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
+    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
+    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
+    return { type: '', formula: '' };
+  }
+  function parseSubActionTarget(targetStr) {
+    if (!targetStr) return { target: '', autoTarget: '' };
+    const t = String(targetStr).toUpperCase();
+    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
+    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
+    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
+    let target = '';
+    if      (isEnemy && isAllT) target = 'All enemies';
+    else if (isEnemy)           target = 'Single enemy';
+    else if (isAlly  && isAllT) target = 'All allies';
+    else if (isAlly)            target = 'Single ally';
+    else if (isAllT)            target = 'All';
+    let autoTarget = '';
+    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
+    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
+    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
+    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
+    return { target, autoTarget };
+  }
+  function inferTargetInfo() {
+    const sa = getFirstAtkSA();
+    if (sa) return parseSubActionTarget(sa.target);
+    const range = String(parsed.target.range ?? '').toUpperCase();
+    const seg   = String(parsed.target.segment ?? '').toUpperCase();
+    const isAllT = range.includes('ALL') || range === '4' || range === '5';
+    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
+    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
+  }
+  function inferMultiplier() {
+    const exec = getExec();
+    const sa   = getFirstAtkSA();
+    if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
+    const hits = sa.props.hits ?? 1;
+    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
+    if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
+    return '';
+  }
+  function inferElement() {
+    const sa = getFirstAtkSA();
+    if (!sa) return '';
+    const elems = sa.elements.map(fmtElement).filter(e => e && e !== 'NE');
+    return elems.length ? elems.join(', ') : 'NE';
+  }
 
+  const id                        = parsed.abilityId;
+  const { type, formula: rawFormula } = inferTypeFormula();
+  const { target, autoTarget }        = inferTargetInfo();
+  let formula    = rawFormula;
+  let multiplier = inferMultiplier();
+  if (type === 'NAT') {
+    formula    = multiplier ? 'Hybrid' : '';
+    multiplier = '';
+  }
+  const element                   = inferElement();
+  const counter                   = parsed.counterable === 'Yes' ? 'Y' : 'N';
+  const imgFormula                = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")`;
+
+  const colValues = {
+    'Character':   { val: cfParent?.character || '' },
+    'Source':      { val: cfParent?.sbName    || '' },
+    'SB Ver':      { val: 'CASB'                    },
+    'Name':        { val: 'Crystal Force I'         },
+    'Type':        { val: type                      },
+    'Target':      { val: target                    },
+    'Formula':     { val: formula                   },
+    'Multiplier':  { val: multiplier                },
+    'Element':     { val: element                   },
+    'Time':        { val: parsed.castTime ?? ''     },
+    'Effects':     { val: genEffects                },
+    'Counter':     { val: counter                   },
+    'Auto Target': { val: autoTarget                },
+    'SB':          { val: '-'                       },
+    'School':      { val: ''                        },
+    'Name (JP)':   { val: parsed.name               },
+    'ID':          { val: id                        },
+    'GL':          { val: ''                        },
+    '✓':           { val: ''                        },
+  };
+
+  const SHEET_COL_ORDER = [
+    'Character', 'Source', 'SB Ver', 'Img', 'Name', 'Type', 'Target',
+    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
+    'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'GL', '✓',
+  ];
+
+  const cols = SHEET_COL_ORDER.map(col => {
+    if (col === 'Img') return { col, val: imgFormula };
+    return { col, val: String(colValues[col]?.val ?? '') };
+  });
+
+  let html = `<details class="sb-preview-details"><summary>Crystal Commands tab columns</summary>`;
+  html += `<div class="sb-preview"><table class="sb-preview-table">`;
+  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
+  for (const { col, val } of cols) {
+    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
+    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+
+  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
+  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  html += `<div class="sbp-copy-row">`;
+  html += `<button class="sbp-copy-btn" onclick="
+    const v=this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
+      ()=>{this.nextElementSibling.select();document.execCommand('copy');
+           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
+    )">Copy row</button>`;
+  html += `<textarea class="sbp-tsv-area" id="cfp-tsv-${id}" readonly>${tsvSafe}</textarea>`;
+  html += `</div></div></details>`;
+  return html;
+}
+
+// Returns the top-level parsed ability followed by all sub-abilities, depth-first.
+function collectChain(parsed) {
+  const chain = [parsed];
+  for (const sub of parsed.subAbilities) chain.push(...collectChain(sub));
+  return chain;
+}
+
+// Renders the parsed-info table + sub-actions for a single ability object.
+function renderParsedInfoSection(p) {
   let html = '';
+  const pElemTags = p.elements.map(elementTag).join('');
 
-  // Soul Break / Other sheet match
-  if (sb) {
-    html += `<div class="sb-row">`;
-    html += `<span class="sb-name">${sb['Name'] ?? ''}</span> `;
-    html += `<span class="sb-meta">${sb['Character'] ?? ''} · ${sb['Realm'] ?? ''} · ${sb['Tier'] ?? ''}</span>`;
-    html += `</div>`;
-  } else if (other) {
-    html += `<div class="sb-row" style="border-left-color:#c586c0">`;
-    html += `<span class="sb-name">${other['Name'] ?? ''}</span>`;
-    if (other['Source']) html += ` <span class="sb-meta">from: ${other['Source']}</span>`;
-    html += `</div>`;
-  }
-
-  // Effects comparison block
-  const sheetEffects  = sb?.['Effects'] ?? other?.['Effects'] ?? null;
-  const sheetElement  = sb?.['Element'] ?? other?.['Element'] ?? null;
-  const genText = generateEffectsText(parsed);
-  html += `<div class="effects-block">`;
-  html += `<div class="effects-gen"><span class="effects-label">Generated:</span>${genText}</div>`;
-  if (sheetEffects) {
-    html += `<div class="effects-sheet"><span class="effects-label">Sheet:</span>${sheetEffects}</div>`;
-  }
-  html += `</div>`;
-
-  // Soul Break sheet column preview (depth 0 + has a SB sheet match or is an unrecognised SB)
-  if (depth === 0) {
-    html += renderSBSheetPreview(parsed, sb, actorName, genText, sheetElement);
-  }
-
-  // Element tags
-  const elemTags = parsed.elements.map(elementTag).join('');
-
-  // Parsed Info collapsible
-  html += `<details><summary>Parsed info — ${parsed.name} (ID: ${parsed.abilityId})</summary>`;
-  html += `<div class="parsed-info">`;
   html += `<table>`;
   html += `<tr><td colspan="2" class="section-header">Identification</td></tr>`;
-  html += row('Name', parsed.name, 'val-str');
-  html += row('Ability ID', parsed.abilityId, 'val-num');
-  html += row('Action ID', parsed.actionId, 'val-num');
-  html += row('Formula Class', parsed.formulaClass, 'val-str');
-  html += row('Exercise Type', parsed.exerciseType, 'val-str');
-  html += row('Ability Class', parsed.category, 'val-str');
-  html += row('Cast Time (s)', parsed.castTime, 'val-num');
-  html += row('SB Charge', parsed.sbCharge || null, 'val-num');
-  html += row('Counterable', parsed.counterable, 'val-str');
-  if (parsed.attachElements && parsed.attachElements.length > 0) {
-    const atElemTags = parsed.attachElements.map(id => elementTag(DB.elementTypes[id] ?? `ELEMENT_${id}`)).join('');
+  html += row('Name', p.name, 'val-str');
+  html += row('Ability ID', p.abilityId, 'val-num');
+  html += row('Action ID', p.actionId, 'val-num');
+  html += row('Formula Class', p.formulaClass, 'val-str');
+  html += row('Exercise Type', p.exerciseType, 'val-str');
+  html += row('Ability Class', p.category, 'val-str');
+  html += row('Cast Time (s)', p.castTime, 'val-num');
+  html += row('SB Charge', p.sbCharge || null, 'val-num');
+  html += row('Counterable', p.counterable, 'val-str');
+  if (p.attachElements && p.attachElements.length > 0) {
+    const atElemTags = p.attachElements.map(id => elementTag(DB.elementTypes[id] ?? `ELEMENT_${id}`)).join('');
     html += `<tr><th>Possible Attach Element(s)</th><td>${atElemTags}</td></tr>`;
   }
-  html += row('Attach Element Level', parsed.attachElementLevel, 'val-num');
-  html += row('Attach Element Add Max Level', parsed.attachElementAddMaxLevel, 'val-num');
-  if (parsed.kiwamiAbilityId) {
-    const kiwamiSb = DB.soulBreaksMap[parsed.kiwamiAbilityId];
-    const kiwamiLabel = kiwamiSb ? `${parsed.kiwamiAbilityId} — ${kiwamiSb['Name'] ?? ''}` : String(parsed.kiwamiAbilityId);
+  html += row('Attach Element Level', p.attachElementLevel, 'val-num');
+  html += row('Attach Element Add Max Level', p.attachElementAddMaxLevel, 'val-num');
+  if (p.kiwamiAbilityId) {
+    const kiwamiSb = DB.soulBreaksMap[p.kiwamiAbilityId];
+    const kiwamiLabel = kiwamiSb ? `${p.kiwamiAbilityId} — ${kiwamiSb['Name'] ?? ''}` : String(p.kiwamiAbilityId);
     html += row('Kiwami Ability ID', kiwamiLabel, 'val-num');
   }
-  if (parsed.replacePersonalAbilityId) {
-    const replaceSb = DB.soulBreaksMap[parsed.replacePersonalAbilityId];
-    const replaceLabel = replaceSb ? `${parsed.replacePersonalAbilityId} — ${replaceSb['Name'] ?? ''}` : String(parsed.replacePersonalAbilityId);
+  if (p.replacePersonalAbilityId) {
+    const replaceSb = DB.soulBreaksMap[p.replacePersonalAbilityId];
+    const replaceLabel = replaceSb ? `${p.replacePersonalAbilityId} — ${replaceSb['Name'] ?? ''}` : String(p.replacePersonalAbilityId);
     html += row('Replace Personal Ability ID', replaceLabel, 'val-num');
   }
 
-  html += `<tr><td colspan="2" class="section-header">Targeting</td></tr>`;
-  html += row('Range',  parsed.target.range,   'val-str');
-  html += row('Method', parsed.target.method,  'val-str');
-  html += row('Segment',parsed.target.segment, 'val-str');
-  html += row('Active Target', parsed.target.active, 'val-str');
+  if (p.actionArgs.length > 0) {
+    html += `<tr><td colspan="2" class="section-header">Action Args</td></tr>`;
+    for (const a of p.actionArgs) html += row(a.type ?? `arg${a.argNum}`, a.value, 'val-str');
+  }
 
-  if (elemTags) {
+  html += `<tr><td colspan="2" class="section-header">Targeting</td></tr>`;
+  html += row('Range',  p.target.range,   'val-str');
+  html += row('Method', p.target.method,  'val-str');
+  html += row('Segment',p.target.segment, 'val-str');
+  html += row('Active Target', p.target.active, 'val-str');
+
+  if (pElemTags) {
     html += `<tr><td colspan="2" class="section-header">Elements</td></tr>`;
-    html += `<tr><th>Element(s)</th><td>${elemTags}</td></tr>`;
+    html += `<tr><th>Element(s)</th><td>${pElemTags}</td></tr>`;
   }
 
   html += `<tr><td colspan="2" class="section-header">Properties</td></tr>`;
-  html += renderProps(parsed.props);
+  html += renderProps(p.props);
 
-  if (parsed.statuses.length > 0) {
+  if (p.statuses.length > 0) {
     html += `<tr><td colspan="2" class="section-header">Status Effects Applied</td></tr>`;
-    for (const s of parsed.statuses) {
+    for (const s of p.statuses) {
       const label = s.target ? `${s.target}` : 'default target';
       const dur = s.duration ? ` · ${s.duration}` : '';
       const effects = s.effects ? `<br><span style="color:#888;font-size:11px;">${s.effects}</span>` : '';
@@ -1618,25 +1944,22 @@ function renderAbility(parsed, depth, actorName) {
     }
   }
 
-  if (parsed.unknownArgs.length > 0) {
+  if (p.unknownArgs.length > 0) {
     html += `<tr><td colspan="2" class="section-header">Unrecognised Args</td></tr>`;
-    for (const u of parsed.unknownArgs) html += row(u.type, u.value, 'val-str');
+    for (const u of p.unknownArgs) html += row(u.type, u.value, 'val-str');
   }
 
   html += `</table>`;
 
-  // Sub-actions
-  if (parsed.subActions.length > 0) {
-    html += `<div class="section-header" style="margin-top:8px;">Sub-actions (${parsed.subActions.length})</div>`;
-    parsed.subActions.forEach((sa, i) => {
-      html += `<div class="subaction-block">`;
-      html += `<b>Sub-action ${i+1}</b>`;
-      html += `<table>`;
+  if (p.subActions.length > 0) {
+    html += `<div class="section-header" style="margin-top:8px;">Sub-actions (${p.subActions.length})</div>`;
+    p.subActions.forEach((sa, i) => {
+      html += `<div class="subaction-block"><b>Sub-action ${i+1}</b><table>`;
       html += row('Type', sa.type, 'val-str');
       html += row('Target', sa.target, 'val-str');
-      if (sa.conditionType)  html += row('Condition Type', sa.conditionType, 'val-str');
-      if (sa.controlType)    html += row('Control Statement', sa.controlType, 'val-str');
-      if (sa.conditionArg)   html += row('Condition Arg', sa.conditionArg, 'val-str');
+      if (sa.conditionType) html += row('Condition Type', sa.conditionType, 'val-str');
+      if (sa.controlType)   html += row('Control Statement', sa.controlType, 'val-str');
+      if (sa.conditionArg)  html += row('Condition Arg', sa.conditionArg, 'val-str');
       html += renderProps(sa.props);
       if (sa.elements.length) html += `<tr><th>Elements</th><td>${sa.elements.map(elementTag).join('')}</td></tr>`;
       if (sa.statuses.length) {
@@ -1654,17 +1977,68 @@ function renderAbility(parsed, depth, actorName) {
     });
   }
 
-  html += `</div></details>`;
+  return html;
+}
 
-  // Sub-abilities (recursion)
-  if (parsed.subAbilities.length > 0) {
-    for (const sub of parsed.subAbilities) {
-      html += `<div class="subability-block">`;
-      html += `<div style="color:#c586c0;font-size:11px;margin-bottom:4px;">${sub._label ?? 'Sub-ability'}</div>`;
-      html += renderAbility(sub, depth + 1);
-      html += `</div>`;
-    }
+function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '') {
+  depth = depth ?? 0;
+  const sb = lookupSoulBreak(parsed.abilityId);
+  const other = !sb ? lookupOtherAbility(parsed.abilityId) : null;
+
+  let html = '';
+
+  // Soul Break / Other sheet match
+  if (sb) {
+    html += `<div class="sb-row">`;
+    html += `<span class="sb-name">${sb['Name'] ?? ''}</span> `;
+    html += `<span class="sb-meta">${sb['Character'] ?? ''} · ${sb['Realm'] ?? ''} · ${sb['Tier'] ?? ''}</span>`;
+    html += `</div>`;
+  } else if (other) {
+    html += `<div class="sb-row" style="border-left-color:#c586c0">`;
+    html += `<span class="sb-name">${other['Name'] ?? ''}</span>`;
+    if (other['Source']) html += ` <span class="sb-meta">from: ${other['Source']}</span>`;
+    html += `</div>`;
+  } else {
+    html += `<div class="sb-row" style="border-left-color:#555">`;
+    html += `<span class="sb-name">${parsed.name}</span>`;
+    html += ` <span class="sb-meta">ID: ${parsed.abilityId}</span>`;
+    html += `</div>`;
   }
+
+  // Effects comparison block
+  const sheetEffects  = sb?.['Effects'] ?? other?.['Effects'] ?? null;
+  const sheetElement  = sb?.['Element'] ?? other?.['Element'] ?? null;
+  const genText = generateEffectsText(parsed);
+  html += `<div class="effects-block">`;
+  html += `<div class="effects-gen"><span class="effects-label">Generated:</span>${genText}</div>`;
+  if (sheetEffects) {
+    html += `<div class="effects-sheet"><span class="effects-label">Sheet:</span>${sheetEffects}</div>`;
+  }
+  html += `</div>`;
+
+  // Soul Break sheet column preview — only for depth-0 soul strikes
+  // (sheet match present, or soul_strike_category_id indicates it's a soul strike without a sheet entry)
+  if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null)) {
+    html += renderSBSheetPreview(parsed, sb, actorName, genText, sheetElement, actorRealm);
+  }
+
+  // Crystal Commands sheet column preview — for Crystal Force abilities
+  const cfParent = cfParentMap[parsed.abilityId];
+  if (cfParent) {
+    html += renderCFSheetPreview(parsed, cfParent, genText);
+  }
+
+  // Parsed Info collapsible — shows info for this ability and all wrapped sub-abilities
+  const chain = collectChain(parsed);
+  html += `<details><summary>Parsed info — ${parsed.name} (ID: ${parsed.abilityId})</summary>`;
+  html += `<div class="parsed-info">`;
+  for (const p of chain) {
+    if (chain.length > 1) {
+      html += `<div class="chain-header">${p.name} <span class="chain-ids">ID: ${p.abilityId} · Action: ${p.actionId}</span></div>`;
+    }
+    html += renderParsedInfoSection(p);
+  }
+  html += `</div></details>`;
 
   return html;
 }
@@ -1724,35 +2098,72 @@ function processBattleJson(jsonText) {
   resultsEl.innerHTML = '';
 
   for (const actor of actors) {
-    const actorName = actor.params?.[0]?.disp_name ?? `Actor ${actor.id}`;
+    const actorCharRow = DB.charactersMap[actor.id];
+    const actorName  = actorCharRow?.['Name']  ?? actor.params?.[0]?.disp_name ?? `Actor ${actor.id}`;
+    const actorRealm = actorCharRow?.['Realm'] ?? '';
     const parsedSet = new Set();
 
     let html = `<div class="ability-block">`;
     html += `<div class="actor-name">${actorName}</div>`;
 
-    // Soul Strikes
-    const strikes = actor.soul_strikes ?? [];
-    if (strikes.length > 0) {
-      html += `<h3>Soul Strikes (${strikes.length})</h3>`;
-      for (const ability of strikes) {
-        const parsed = parseAbility(ability, allAbilities, parsedSet);
-        if (parsed) html += renderAbility(parsed, 0, actorName);
-      }
-    }
+    // All abilities (soul_strikes + abilities) rendered flat in one section.
+    // Each gets a fresh parsedSet so internal sub-ability parsing for one card
+    // doesn't consume IDs needed by subsequent cards.
+    // renderedIds prevents the same ability_id appearing twice.
+    const allActorAbilities = [
+      ...(actor.soul_strikes ?? []),
+      ...(actor.abilities    ?? []),
+    ];
+    const renderedIds = new Set();
+    // cfParentMap: CF ability ID → { character, sbName } — built as we process soul breaks
+    // (soul_strikes come before abilities in allActorAbilities, so SBs are processed first)
+    const cfParentMap = {};
+    if (allActorAbilities.length > 0) {
+      html += `<h3>Abilities (${allActorAbilities.length})</h3>`;
+      for (const ability of allActorAbilities) {
+        if (renderedIds.has(ability.ability_id)) continue;
+        renderedIds.add(ability.ability_id);
+        const parsed = parseAbility(ability, allAbilities, new Set());
+        if (parsed) {
+          // Record parent SB info for any Crystal Force sub-abilities
+          const sbRow = lookupSoulBreak(parsed.abilityId);
+          if (sbRow) {
+            for (const sub of parsed.subAbilities) {
+              if (sub._label === 'crystalForceAbilityId') {
+                cfParentMap[sub.abilityId] = {
+                  character: sbRow['Character'] || actorName,
+                  sbName:    sbRow['Name']      || '',
+                };
+              }
+            }
+          }
 
-    // Abilities (skip already-parsed sub-abilities)
-    const abilities = (actor.abilities ?? []).filter(a => !parsedSet.has(a.ability_id));
-    if (abilities.length > 0) {
-      html += `<h3>Abilities (${abilities.length})</h3>`;
-      for (const ability of abilities) {
-        const parsed = parseAbility(ability, allAbilities, parsedSet);
-        if (parsed) html += renderAbility(parsed, 0, actorName);
+          // Suppress standalone cards only for pure wrapper/visual sub-abilities.
+          // Independent abilities (crystalForceAbilityId etc.) keep their own cards.
+          const suppressLabels = new Set(['wrappedAbilityId', 'cutinAbilityId']);
+          function suppressChain(p) {
+            for (const sub of p.subAbilities) {
+              if (suppressLabels.has(sub._label)) {
+                renderedIds.add(sub.abilityId);
+                suppressChain(sub);
+              }
+            }
+          }
+          suppressChain(parsed);
+          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm);
+        }
       }
     }
 
     html += `</div>`;
     resultsEl.innerHTML += html;
   }
+
+  // Auto-translate all JP names that were rendered
+  resultsEl.querySelectorAll('[data-translate-jp]').forEach(cell => {
+    const id = cell.id.replace('sbp-name-', '');
+    translateSBName(id, cell.dataset.translateJp);
+  });
 }
 
 // ─── Wire up UI ───────────────────────────────────────────────────────────────
@@ -1763,6 +2174,20 @@ document.getElementById('parse-btn').addEventListener('click', () => {
     processBattleJson(document.getElementById('json-input').value.trim());
   } catch(e) {
     errEl.textContent = `Parse error: ${e.message}`;
+  }
+});
+
+document.getElementById('reload-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('reload-btn');
+  btn.disabled = true;
+  await loadSheets();
+  btn.disabled = false;
+  const json = document.getElementById('json-input').value.trim();
+  if (json) {
+    const errEl = document.getElementById('parse-error');
+    errEl.textContent = '';
+    try { processBattleJson(json); }
+    catch(e) { errEl.textContent = `Parse error: ${e.message}`; }
   }
 });
 
