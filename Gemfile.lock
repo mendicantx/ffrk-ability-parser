@@ -285,6 +285,7 @@ DEPENDENCIES
   ed25519
   fiddle
   importmap-rails
+  logger
   puma (~> 5.0)
   rails (~> 7.0.3)
   sprockets-rails
