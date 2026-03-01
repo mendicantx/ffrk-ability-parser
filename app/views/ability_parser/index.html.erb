@@ -85,11 +85,6 @@
 <div class="ap-root">
 <h1>FFRK Ability Parser</h1>
 
-<div class="page-nav" style="display:flex;gap:12px;margin-bottom:14px;font-size:12px;">
-  <a href="/" style="color:#888;text-decoration:none;">Dashboard</a>
-  <a href="/ability_parser" style="color:#9cdcfe;text-decoration:none;">Ability Parser</a>
-  <a href="/status_decoder" style="color:#888;text-decoration:none;">Status Decoder</a>
-</div>
 
 <div id="load-status">
   <div class="load-item" id="li-battlejs">
@@ -789,7 +784,12 @@ function parseAbility(ability, allAbilities, parsedSet) {
       for (const [k, v] of Object.entries(subArgs)) {
         switch (k) {
           case 'factor':
-            sub.props.multiplier = Number(v) / 100;
+            // HEAL_HP (type 7) stores the healing factor raw; all other types store per-hit damage factor (/100).
+            if (sub.type === 'HEAL_HP' || String(sa.type) === '7') {
+              sub.props.healFactor = Number(v);
+            } else {
+              sub.props.multiplier = Number(v) / 100;
+            }
             break;
           case 'factorForHealHp':
             sub.props.healingMultiplier = Number(v);
@@ -1366,6 +1366,17 @@ function generateEffectsText(parsed) {
     } else {
       const topAtkSAs = parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
       if (topAtkSAs.length) segs.push(fmtAtk(topAtkSAs[0], null, resolvePerHit(topAtkSAs[0], parsed)) + hpStr);
+    }
+  }
+
+  // ── 1b. HEAL_HP sub-actions ──
+  {
+    const healSAs = exec.subActions.filter(sa => sa.props.healFactor != null);
+    const effectiveHealSAs = healSAs.length > 0
+      ? healSAs
+      : parsed.subActions.filter(sa => sa.props.healFactor != null);
+    for (const hsa of effectiveHealSAs) {
+      segs.push(`Restores HP (${hsa.props.healFactor})`);
     }
   }
 
@@ -2043,7 +2054,12 @@ function renderFollowUpSheetPreview(parsed, genEffects) {
     // Priority order: All enemies > Single enemy > All allies > Single ally > Self
     const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
     const found = new Set();
-    for (const sa of parsed.subActions) {
+    // Also scan the wrapped inner ability's sub-actions (e.g. Crystal Force follow-ups
+    // where the follow-up itself has no sub_actions but wraps another ability via arg1).
+    const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+    const execAb = parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label));
+    const sasToScan = execAb ? [...parsed.subActions, ...execAb.subActions] : parsed.subActions;
+    for (const sa of sasToScan) {
       if ((sa.controlTypeRaw ?? 0) !== 0) continue;
       const tStr = String(sa.target ?? '').toUpperCase();
       if (!tStr || tStr === '0') continue;
