@@ -32,6 +32,8 @@ gem "csv"
 gem "dotenv-rails"
 gem "tzinfo"
 gem "tzinfo-data"
+gem "fiddle"  # required explicitly in Ruby 4.0+ (no longer a default gem)
+gem "logger"  # required explicitly in Ruby 4.0+ (no longer a default gem)
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
@@ -41,6 +43,14 @@ end
 group :development do
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"
+
+  # Deployment
+  gem "capistrano",         require: false
+  gem "capistrano-rails",   require: false
+  gem "capistrano-bundler", require: false
+  gem "capistrano-asdf",    require: false
+  gem "ed25519",            require: false  # net-ssh ED25519 key support
+  gem "bcrypt_pbkdf",       require: false  # net-ssh ED25519 key support
 
   # Add speed badges [https://github.com/MiniProfiler/rack-mini-profiler]
   # gem "rack-mini-profiler"
