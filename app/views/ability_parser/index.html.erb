@@ -137,7 +137,8 @@ const DB = {
   bundleContents:     {},   // bundle_id → [status_id, ...]
   jobIds:             {},   // JOB_ID id → key (e.g. 600013 → 'WARRIOR_I')
 
-  abilityIdOf:    {},   // ABILITY_ID_OF: key → numeric id
+  abilityIdOf:        {},   // ABILITY_ID_OF: key → numeric id
+  chaseAbilityIdToKey:{},   // numeric chase ability id → 'CHASE_ABILITY_FOR_...' key
   // Sheet data
   statusMap:     {},   // id (number) → { commonName, effects, duration }
   actionMap:     [],   // array of row objects {action_id, className, arg1..arg30}
@@ -285,6 +286,9 @@ async function loadBattleJs() {
     DB.statusBundles       = invert(maps.STATUS_AILMENTS_BUNDLE);
     DB.jobIds              = invert(maps.JOB_ID);
     DB.abilityIdOf         = extractConstantMap(js, 'ABILITY_ID_OF');
+    for (const [k, v] of Object.entries(DB.abilityIdOf)) {
+      if (k.startsWith('CHASE_ABILITY_FOR_')) DB.chaseAbilityIdToKey[v] = k;
+    }
 
     // Extract bundle contents from StatusAilmentsConfig.setBundle calls
     // Pattern: setBundle(BUNDLE_ID,[id1,id2,...])
@@ -1989,6 +1993,158 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
   return html;
 }
 
+// ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
+function renderFollowUpSheetPreview(parsed, genEffects) {
+  function getFirstAtkSA() {
+    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
+  }
+  function inferTypeFormula() {
+    const ATK_TYPE_MAP = {
+      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
+      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
+      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
+      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
+      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
+    };
+    const atkTypeName = String(parsed.props.range ?? '').toUpperCase();
+    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
+    const exType = String(parsed.exerciseType ?? '').toUpperCase();
+    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
+    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
+    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
+    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
+    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
+    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
+    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
+    return { type: '', formula: '' };
+  }
+  function parseSubActionTarget(targetStr) {
+    if (!targetStr) return { target: '', autoTarget: '' };
+    const t = String(targetStr).toUpperCase();
+    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
+    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
+    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
+    let target = '';
+    if      (isEnemy && isAllT) target = 'All enemies';
+    else if (isEnemy)           target = 'Single enemy';
+    else if (isAlly  && isAllT) target = 'All allies';
+    else if (isAlly)            target = 'Single ally';
+    else if (isAllT)            target = 'All';
+    let autoTarget = '';
+    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
+    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
+    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
+    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
+    return { target, autoTarget };
+  }
+  function inferTargetInfo() {
+    // Priority scan across all non-control sub-actions
+    // Priority order: All enemies > Single enemy > All allies > Single ally > Self
+    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
+    const found = new Set();
+    for (const sa of parsed.subActions) {
+      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
+      const tStr = String(sa.target ?? '').toUpperCase();
+      if (!tStr || tStr === '0') continue;
+      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
+      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND') || tStr.includes('COLLEAGUE');
+      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
+      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
+      if      (isEnemy && isAllT) found.add('All enemies');
+      else if (isEnemy)           found.add('Single enemy');
+      else if (isAlly  && isAllT) found.add('All allies');
+      else if (isAlly)            found.add('Single ally');
+      else if (isSelf)            found.add('Self');
+    }
+    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
+    // Fallback: first attack SA, then ability-level target
+    const sa = getFirstAtkSA();
+    if (sa) return parseSubActionTarget(sa.target);
+    const range = String(parsed.target.range ?? '').toUpperCase();
+    const seg   = String(parsed.target.segment ?? '').toUpperCase();
+    const isAllT = range.includes('ALL') || range === '4' || range === '5';
+    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
+    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
+  }
+  function inferMultiplier() {
+    const sa = getFirstAtkSA();
+    if (!sa) return parsed.props.multiplier != null ? parsed.props.multiplier.toFixed(2) : '';
+    const hits = sa.props.hits ?? 1;
+    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
+    if (parsed.props.multiplier != null) return parsed.props.multiplier.toFixed(2);
+    return '';
+  }
+  function inferElement() {
+    const sa = getFirstAtkSA();
+    if (!sa) return '';
+    const elems = sa.elements.map(fmtElement).filter(e => e && e !== 'NE');
+    return elems.length ? elems.join(', ') : 'NE';
+  }
+
+  const id = parsed.abilityId;
+  const { type, formula: rawFormula } = inferTypeFormula();
+  const { target, autoTarget: _autoTarget } = inferTargetInfo();
+  const autoTarget = target; // Follow-ups: Auto Target always matches Target
+  let formula    = rawFormula;
+  let multiplier = inferMultiplier();
+  if (type === 'NAT') { formula = multiplier ? 'Hybrid' : ''; multiplier = ''; }
+  const element = inferElement();
+  const counter = parsed.counterable === 'Yes' ? 'Y' : 'N';
+
+  const colValues = {
+    'Source Type': { val: 'Follow-Up Status' },
+    'Source':      { val: ''                 },
+    'Name':        { val: parsed.name        },
+    'Type':        { val: type               },
+    'Target':      { val: target             },
+    'Formula':     { val: formula            },
+    'Multiplier':  { val: multiplier         },
+    'Element':     { val: element            },
+    'Time':        { val: '0.01'             },
+    'Effects':     { val: genEffects         },
+    'Counter':     { val: counter            },
+    'Auto Target': { val: autoTarget         },
+    'SB':          { val: '-'               },
+    'School':      { val: ''               },
+    'ID':          { val: String(id)        },
+    'GL':          { val: ''               },
+    '✓':           { val: '✓'             },
+  };
+
+  const SHEET_COL_ORDER = [
+    'Source Type', 'Source', 'Img', 'Name', 'Type', 'Target',
+    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
+    'Auto Target', 'SB', 'School', 'ID', 'GL', '✓',
+  ];
+
+  const cols    = SHEET_COL_ORDER.map(col => ({ col, val: col === 'Img' ? '' : String(colValues[col]?.val ?? '') }));
+  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
+  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let html = `<details class="sb-preview-details"><summary>Other tab columns (Follow-Up)</summary>`;
+  html += `<div class="sb-preview">`;
+  html += `<div class="sbp-copy-row">`;
+  html += `<button class="sbp-copy-btn" onclick="
+    const v=this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
+      ()=>{this.nextElementSibling.select();document.execCommand('copy');
+           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
+    )">Copy row</button>`;
+  html += `<textarea class="sbp-tsv-area" id="fup-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
+  html += `</div>`;
+  html += `<table class="sb-preview-table">`;
+  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
+  for (const { col, val } of cols) {
+    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
+    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+  html += `</div></details>`;
+  return html;
+}
+
 // Returns the top-level parsed ability followed by all sub-abilities, depth-first.
 function collectChain(parsed) {
   const chain = [parsed];
@@ -2143,6 +2299,11 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   const cfParent = cfParentMap[parsed.abilityId];
   if (cfParent) {
     html += renderCFSheetPreview(parsed, cfParent, genText);
+  }
+
+  // Other tab column preview — for follow-up (chase) abilities
+  if (DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]) {
+    html += renderFollowUpSheetPreview(parsed, genText);
   }
 
   // Parsed Info collapsible — shows info for this ability and all wrapped sub-abilities
