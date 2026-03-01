@@ -34,6 +34,7 @@ gem "tzinfo"
 gem "tzinfo-data"
 gem "fiddle"  # required explicitly in Ruby 4.0+ (no longer a default gem)
 gem "logger"  # required explicitly in Ruby 4.0+ (no longer a default gem)
+gem "tsort"   # will be removed from default gems in Ruby 4.1+
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
