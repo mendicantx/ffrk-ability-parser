@@ -41,4 +41,5 @@ class AbilityParserController < ApplicationController
   rescue => e
     render plain: "// Error fetching battle.js: #{e.message}", status: :internal_server_error
   end
+
 end

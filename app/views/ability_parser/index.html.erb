@@ -36,7 +36,7 @@
     .parsed-info { background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 3px; padding: 10px; margin-top: 6px; overflow-x: auto; }
     .parsed-info table { border-collapse: collapse; width: 100%; }
     .parsed-info td, .parsed-info th { padding: 3px 10px 3px 0; vertical-align: top; }
-    .parsed-info th { color: #888; font-weight: normal; min-width: 160px; white-space: nowrap; }
+    .parsed-info th { color: #888; font-weight: normal; min-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .parsed-info td { color: #d4d4d4; }
     .parsed-info td.val-num { color: #b5cea8; }
     .parsed-info td.val-str { color: #ce9178; }
@@ -104,6 +104,8 @@
   <br>
   <button id="parse-btn" disabled>Parse</button>
   <button id="reload-btn" style="background:#2d6a4f;margin-left:8px">Reload sheets &amp; re-parse</button>
+  <button id="copy-battlejs-btn" disabled style="background:#5a3e7a;margin-left:8px">Copy formatted battle.js</button>
+
   <div id="parse-error"></div>
 </div>
 
@@ -112,6 +114,8 @@
 
 <script>
 // ─── Data stores ────────────────────────────────────────────────────────────
+let rawBattleJs = null;
+
 const DB = {
   // battle.js reverse-lookup maps: ID (number) → name (string)
   elementTypes:       {},   // ELEMENT_TYPE
@@ -156,6 +160,7 @@ function checkAllLoaded() {
   const allOk = ['battlejs','sheets']
     .every(k => document.getElementById(`li-${k}-icon`).classList.contains('ok'));
   document.getElementById('parse-btn').disabled = !allOk;
+  document.getElementById('copy-battlejs-btn').disabled = (rawBattleJs === null);
 }
 
 // Simple CSV parser: handles quoted fields, embedded commas and newlines
@@ -251,7 +256,8 @@ async function loadBattleJs() {
   try {
     const resp = await fetch('/ability_parser/battle_js');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const js = await resp.text();
+    rawBattleJs = await resp.text();
+    const js = rawBattleJs;
     setLoadState('battlejs', 'loading', 'extracting constants…');
 
     const consts = [
@@ -2174,7 +2180,7 @@ function renderParsedInfoSection(p) {
   let html = '';
   const pElemTags = p.elements.map(elementTag).join('');
 
-  html += `<table>`;
+  html += `<table style="table-layout:fixed;width:100%"><colgroup><col style="width:240px"><col></colgroup>`;
   html += `<tr><td colspan="2" class="section-header">Identification</td></tr>`;
   html += row('Name', p.name, 'val-str');
   html += row('Ability ID', p.abilityId, 'val-num');
@@ -2243,7 +2249,7 @@ function renderParsedInfoSection(p) {
   if (p.subActions.length > 0) {
     html += `<div class="section-header" style="margin-top:8px;">Sub-actions (${p.subActions.length})</div>`;
     p.subActions.forEach((sa, i) => {
-      html += `<div class="subaction-block"><b>Sub-action ${i+1}</b><table>`;
+      html += `<div class="subaction-block"><b>Sub-action ${i+1}</b><table style="table-layout:fixed;width:100%"><colgroup><col style="width:240px"><col></colgroup>`;
       html += row('Type', sa.type, 'val-str');
       html += row('Target', sa.target, 'val-str');
       if (sa.conditionType) html += row('Condition Type', sa.conditionType, 'val-str');
@@ -2470,6 +2476,52 @@ document.getElementById('parse-btn').addEventListener('click', () => {
   } catch(e) {
     errEl.textContent = `Parse error: ${e.message}`;
   }
+});
+
+document.getElementById('copy-battlejs-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('copy-battlejs-btn');
+  btn.disabled = true;
+  btn.textContent = 'Formatting…';
+  try {
+    // Lazily load js-beautify from CDN
+    if (typeof js_beautify === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('Failed to load js-beautify'));
+        document.head.appendChild(s);
+      });
+    }
+    const beautifyOpts = {
+      brace_style: 'collapse',
+      break_chained_methods: false,
+      comma_first: false,
+      e4x: false,
+      end_with_newline: false,
+      indent_char: ' ',
+      indent_inner_html: false,
+      indent_scripts: 'normal',
+      indent_size: '4',
+      jslint_happy: false,
+      keep_array_indentation: false,
+      max_preserve_newlines: '5',
+      preserve_newlines: false,
+      space_before_conditional: true,
+      unescape_strings: false,
+      wrap_line_length: '0'
+    };
+    const formatted = js_beautify(rawBattleJs, beautifyOpts);
+    window.beautifiedBattleJs = formatted;
+    console.log('beautifiedBattleJs ready — length:', formatted.length, '— raw length:', rawBattleJs.length);
+    console.log(formatted);
+    btn.textContent = 'Done — see console';
+  } catch(e) {
+    btn.textContent = 'Error: ' + e.message;
+  }
+  await new Promise(r => setTimeout(r, 2000));
+  btn.textContent = 'Copy formatted battle.js';
+  btn.disabled = false;
 });
 
 document.getElementById('reload-btn').addEventListener('click', async () => {
