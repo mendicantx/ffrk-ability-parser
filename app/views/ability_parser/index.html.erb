@@ -104,7 +104,6 @@
   <br>
   <button id="parse-btn" disabled>Parse</button>
   <button id="reload-btn" style="background:#2d6a4f;margin-left:8px">Reload sheets &amp; re-parse</button>
-  <button id="copy-battlejs-btn" disabled style="background:#5a3e7a;margin-left:8px">Copy formatted battle.js</button>
 
   <div id="parse-error"></div>
 </div>
@@ -160,7 +159,6 @@ function checkAllLoaded() {
   const allOk = ['battlejs','sheets']
     .every(k => document.getElementById(`li-${k}-icon`).classList.contains('ok'));
   document.getElementById('parse-btn').disabled = !allOk;
-  document.getElementById('copy-battlejs-btn').disabled = (rawBattleJs === null);
 }
 
 // Simple CSV parser: handles quoted fields, embedded commas and newlines
@@ -858,6 +856,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
                 sub.synchroConditions.push({ slot: Number(slotKey), conditions });
               }
             }
+            if (v?.increaseLevel != null) sub.isStateLevelIncrement = true;
             break;
         }
       }
@@ -1017,6 +1016,7 @@ function generateEffectsText(parsed) {
   function subActionStatuses(ab) {
     const out = [];
     for (const sa of ab.subActions) {
+      if (sa.isStateLevelIncrement) continue;
       let target = sa.target;
       if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
         const m = sa.targetArgRaw.match(/processOrder\s*:\s*(\d+)/);
@@ -1199,6 +1199,16 @@ function generateEffectsText(parsed) {
       return { label: (lvl != null ? `Level ${lvl}+ ` : '') + names };
     }
     return null;
+  }
+
+  // Parse stateLevel.equal condition → number of uses before trigger.
+  // stateLevel.equal: N means the counter == N when the check fires; since the counter
+  // increments AFTER the check, the condition is true on use (N+1).
+  function parseStateLevelEqualCondition(condArgStr) {
+    if (!condArgStr) return null;
+    const m = condArgStr.match(/stateLevel\s*:\s*\{[^}]*equal\s*:\s*(\d+)/);
+    if (!m) return null;
+    return Number(m[1]) + 1;
   }
 
   // Detect a nested conditional:
@@ -1455,7 +1465,7 @@ function generateEffectsText(parsed) {
       const raw = sa.controlTypeRaw ?? 0;
       if      (raw === 1) { statDepth++; }
       else if (raw === 4) { statDepth--; }
-      else if (raw !== 3 && statDepth === 0) {
+      else if (raw !== 3 && statDepth === 0 && !sa.isStateLevelIncrement) {
         const tLabel = targetLabel(sa.target);
         for (const s of sa.statuses.filter(s => !isLevelTracker(s))) {
           if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
@@ -1491,9 +1501,10 @@ function generateEffectsText(parsed) {
         const parts    = [ifStr, elseStr].filter(Boolean);
         if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
       } else {
-        // One-sided: "grants [X] to self if condition"
-        const tLabel = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
-        if (ifStr) clauses.push(ifStr + tLabel + (statLabel ? ` if ${statLabel}` : ''));
+        // One-sided: "grants [X] to self if condition" or "after N uses" for stateLevel.equal
+        const tLabel   = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
+        const useCount = parseStateLevelEqualCondition(condStat.conditionArg);
+        if (ifStr) clauses.push(ifStr + tLabel + (useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : ''));
       }
     }
     if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
@@ -2478,51 +2489,6 @@ document.getElementById('parse-btn').addEventListener('click', () => {
   }
 });
 
-document.getElementById('copy-battlejs-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('copy-battlejs-btn');
-  btn.disabled = true;
-  btn.textContent = 'Formatting…';
-  try {
-    // Lazily load js-beautify from CDN
-    if (typeof js_beautify === 'undefined') {
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js';
-        s.onload = resolve;
-        s.onerror = () => reject(new Error('Failed to load js-beautify'));
-        document.head.appendChild(s);
-      });
-    }
-    const beautifyOpts = {
-      brace_style: 'collapse',
-      break_chained_methods: false,
-      comma_first: false,
-      e4x: false,
-      end_with_newline: false,
-      indent_char: ' ',
-      indent_inner_html: false,
-      indent_scripts: 'normal',
-      indent_size: '4',
-      jslint_happy: false,
-      keep_array_indentation: false,
-      max_preserve_newlines: '5',
-      preserve_newlines: false,
-      space_before_conditional: true,
-      unescape_strings: false,
-      wrap_line_length: '0'
-    };
-    const formatted = js_beautify(rawBattleJs, beautifyOpts);
-    window.beautifiedBattleJs = formatted;
-    console.log('beautifiedBattleJs ready — length:', formatted.length, '— raw length:', rawBattleJs.length);
-    console.log(formatted);
-    btn.textContent = 'Done — see console';
-  } catch(e) {
-    btn.textContent = 'Error: ' + e.message;
-  }
-  await new Promise(r => setTimeout(r, 2000));
-  btn.textContent = 'Copy formatted battle.js';
-  btn.disabled = false;
-});
 
 document.getElementById('reload-btn').addEventListener('click', async () => {
   const btn = document.getElementById('reload-btn');
