@@ -410,7 +410,6 @@ function statusTag(id) {
 // Special-case abilities that won't appear in the Other sheet tab.
 const HARDCODED_ABILITY_NAMES = {
   31545795: '111% ATB 1',
-  31545796: '125% ATB 1',
 };
 
 // Look up a display name for any ability ID: Other sheet first, then hardcoded map.
@@ -754,7 +753,7 @@ function tamBaseEffects(condDesc, repeatNum = 2) {
 
 // ─── decodeTamV: v() — ATB chase variant ──────────────────────────────────────
 // v(abilityCondition, options?)
-//   Adds REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE (default: 111% ATB 1, ID 31545795)
+//   Adds REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE (default: EXTRA_SMALL 111% ATB 1)
 //   after using matching abilities while the character has TACTICAL_AWAKE_MODE.
 //   Then calls p() for the standard TAM effects.
 function decodeTamV(statusKey, statusId, argsText) {
@@ -769,16 +768,13 @@ function decodeTamV(statusKey, statusId, argsText) {
     : '';
   const commonName = `Tactical Awoken Mode: ${charName}${elemQualifier}`;
 
-  // Chase ability — options may override the pre-weapon-skill chase; post-weapon-skill is always SMALL.
-  // Format: "triggers [EXTRA_SMALL]/[SMALL] after using X abilities before/after triggering Weapon Skill"
+  // Chase ability — options may override the default (EXTRA_SMALL = 111% ATB 1).
   let chaseId = DB.abilityIdOf['CHASE_ABILITY_FOR_INCREASE_ATB_TIME_EXTRA_SMALL_WHILE_TACTICAL_AWAKE_MODE'];
   const chaseKeyM = optsText.match(/chaseAbilityId\s*:\s*[a-zA-Z$_]\w*\.([A-Z_0-9]+)/);
   if (chaseKeyM) chaseId = DB.abilityIdOf[chaseKeyM[1]];
-  const chaseName   = abilityDisplayName(chaseId);
-  const wsChaseId   = DB.abilityIdOf['CHASE_ABILITY_FOR_INCREASE_ATB_TIME_SMALL_WHILE_TACTICAL_AWAKE_MODE'];
-  const wsChaseName = abilityDisplayName(wsChaseId);
+  const chaseName = abilityDisplayName(chaseId);
   const chaseStr = chaseName
-    ? `, triggers [${chaseName}]/[${wsChaseName ?? '?'}] after using ${condDesc} abilities before/after triggering Weapon Skill while in Tactical Awoken Mode`
+    ? `, triggers [${chaseName}] after using ${condDesc} abilities while in Tactical Awoken Mode`
     : '';
 
   // repeatNum — p() defaults to 2; parse override from options if present

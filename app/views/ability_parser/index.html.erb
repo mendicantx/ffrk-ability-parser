@@ -2205,7 +2205,7 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
     'Counter':     { val: counter            },
     'Auto Target': { val: autoTarget         },
     'SB':          { val: '-'               },
-    'School':      { val: ''               },
+    'School':      { val: parsed.category ?? '' },
     'ID':          { val: String(id)        },
     'GL':          { val: ''               },
     '✓':           { val: '✓'             },
