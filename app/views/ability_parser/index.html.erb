@@ -1137,33 +1137,40 @@ function generateEffectsText(parsed) {
     return null;
   }
 
-  // Detect an IF/ELSE/ENDIF conditional attack pair in a sub-action list.
-  // Returns { ifAtk, elseAtk, conditionArg } or null.
-  // Known controlTypeRaw values: 1=IF, 3=ELSE, 4=ENDIF.
-  // Tracks nesting depth to find top-level IF/ELSE/ENDIF blocks that contain attacks.
+  // Detect an IF/ELSE_IF/ELSE/ENDIF conditional attack block in a sub-action list.
+  // Returns { ifAtk, elseIfAtks, elseAtk, conditionArg } or null.
+  // Known controlTypeRaw values: 1=IF, 2=ELSE_IF, 3=ELSE, 4=ENDIF.
+  // Tracks nesting depth to find top-level IF blocks that contain attacks.
   // Returns the first such block (skipping blocks with no attack sub-actions, e.g. isNormalRegistered guards).
   function findConditionalAtk(sas) {
     const isAtk = sa => sa.props.hits != null || sa.props.multiplier != null;
-    let depth = 0, blockStart = -1, blockElse = -1;
+    let depth = 0, blockStart = -1, blockElse = -1, elseIfStarts = [];
     for (let i = 0; i < sas.length; i++) {
       const raw = sas[i].controlTypeRaw ?? 0;
       if (raw === 1) {                              // IF
-        if (depth === 0) { blockStart = i; blockElse = -1; }
+        if (depth === 0) { blockStart = i; blockElse = -1; elseIfStarts = []; }
         depth++;
+      } else if (raw === 2 && depth === 1) {        // ELSE_IF at top level
+        elseIfStarts.push(i);
       } else if (raw === 3 && depth === 1) {        // ELSE at top level
         blockElse = i;
       } else if (raw === 4) {                       // ENDIF
         depth--;
         if (depth === 0 && blockStart >= 0) {
-          const blockEnd = i;
-          const elseIdx  = blockElse >= 0 ? blockElse : blockEnd;
-          const ifAtk    = sas.slice(blockStart + 1, elseIdx).find(isAtk);
-          const elseAtk  = blockElse >= 0 ? sas.slice(blockElse + 1, blockEnd).find(isAtk) : null;
-          if (ifAtk || elseAtk) {
-            return { ifAtk: ifAtk ?? null, elseAtk: elseAtk ?? null,
+          const blockEnd   = i;
+          const ifEnd      = elseIfStarts.length > 0 ? elseIfStarts[0] : (blockElse >= 0 ? blockElse : blockEnd);
+          const ifAtk      = sas.slice(blockStart + 1, ifEnd).find(isAtk);
+          const elseIfAtks = elseIfStarts.map((start, idx) => {
+            const end = idx + 1 < elseIfStarts.length ? elseIfStarts[idx + 1] : (blockElse >= 0 ? blockElse : blockEnd);
+            return { atk: sas.slice(start + 1, end).find(isAtk) ?? null,
+                     conditionArg: sas[start].conditionArg ?? '' };
+          });
+          const elseAtk    = blockElse >= 0 ? sas.slice(blockElse + 1, blockEnd).find(isAtk) : null;
+          if (ifAtk || elseAtk || elseIfAtks.some(e => e.atk)) {
+            return { ifAtk: ifAtk ?? null, elseIfAtks, elseAtk: elseAtk ?? null,
                      conditionArg: sas[blockStart].conditionArg ?? '' };
           }
-          blockStart = -1; blockElse = -1;
+          blockStart = -1; blockElse = -1; elseIfStarts = [];
         }
       }
     }
@@ -1371,8 +1378,8 @@ function generateEffectsText(parsed) {
     segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
 
   } else if (condAtk) {
-    // Simple two-branch conditional: factor/cap difference, or element difference (same factor)
-    const { ifAtk, elseAtk, conditionArg } = condAtk;
+    // Simple two-branch (or multi-branch) conditional: factor/cap difference, or element difference (same factor)
+    const { ifAtk, elseIfAtks = [], elseAtk, conditionArg } = condAtk;
     const condLabel = parseStateConditionLabel(conditionArg);
     const statLabel = condLabel ? null : parseStatComparisonLabel(conditionArg);
     const enLabel   = (!condLabel && !statLabel) ? parseEnElementLabel(conditionArg) : null;
@@ -1384,19 +1391,26 @@ function generateEffectsText(parsed) {
     const baseCap   = atkCap(baseSA);
     const boostCap  = boostSA ? atkCap(boostSA) : null;
     const atkWord   = hits === 1 ? 'single attack' : 'single attacks';
-    // Detect element-conditional: both branches present, same factor, different elements
+    // Detect element-conditional: all branches same factor, any element differences
+    const elseIfAllSame = elseIfAtks.every(ei => {
+      if (!ei.atk) return true;
+      const f = resolvePerHit(ei.atk, exec);
+      return f != null && basePerHit != null && Math.abs(f - basePerHit) < 0.001;
+    });
     const sameFactors = boostSA && boostPerHit != null && basePerHit != null
-      && Math.abs(boostPerHit - basePerHit) < 0.001;
+      && Math.abs(boostPerHit - basePerHit) < 0.001 && elseIfAllSame;
     const ifElems   = ifAtk?.elements  ?? [];
     const elseElems = elseAtk?.elements ?? [];
     const elemsDiffer = JSON.stringify([...ifElems].sort()) !== JSON.stringify([...elseElems].sort());
     if (enLabel && sameFactors && elemsDiffer) {
-      // "One Dark/NE or Wind/NE single attack (1.00 each) capped at 199,999 based on EnDark"
-      const fmtEL       = sa => sa.elements.map(fmtElement).filter(Boolean).join('/') || 'NE';
-      const ifElemStr   = fmtEL(ifAtk);
-      const elseElemStr = fmtEL(elseAtk);
-      const perHitStr   = basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
-      segs.push(`${hitsWord(hits)} ${ifElemStr} or ${elseElemStr} ${atkWord}${perHitStr} capped at ${baseCap.toLocaleString()} based on ${enLabel.label}${hpStr}`);
+      // "One Fire/NE or Ice/NE or Lightning/NE single attack (34.60 each) capped at 199,999 based on EnFire or EnIce"
+      const fmtEL      = sa => sa?.elements?.map(fmtElement).filter(Boolean).join('/') || 'NE';
+      const allBranches = [ifAtk, ...elseIfAtks.map(e => e.atk), elseAtk].filter(Boolean);
+      const elemStrs   = [...new Set(allBranches.map(fmtEL))];
+      const perHitStr  = basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
+      const allEnLabels = [enLabel.label,
+        ...elseIfAtks.map(ei => parseEnElementLabel(ei.conditionArg)?.label).filter(Boolean)];
+      segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr} capped at ${baseCap.toLocaleString()} based on ${allEnLabels.join(' or ')}${hpStr}`);
     } else {
       const perHitStr = boostPerHit != null && basePerHit != null
         ? ` (${basePerHit.toFixed(2)}/${boostPerHit.toFixed(2)} each)`
@@ -1541,6 +1555,20 @@ function generateEffectsText(parsed) {
         const tLabel   = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const useCount = parseStateLevelEqualCondition(condStat.conditionArg);
         if (ifStr) clauses.push(ifStr + tLabel + (useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : ''));
+        // TACTICAL_AWAKE weapon skill: if the condition is an element infusion check without ELSE,
+        // battle.js implies the else branch grants "Attach <elements> <level> with Stacking" to user.
+        if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE') {
+          const anyM = condStat.conditionArg?.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+          const oneM = !anyM && condStat.conditionArg?.match(/hasAttachElementByElementId\s*:\s*(\d+)/);
+          if (anyM || oneM) {
+            const ids   = anyM ? anyM[1].split(',').map(s => s.trim()) : [oneM[1]];
+            const lvlM  = condStat.conditionArg?.match(/greaterEqual\s*:\s*(\d+)/);
+            const level = lvlM ? parseInt(lvlM[1]) : 2;
+            const lvlStr = level >= 2 ? ` ${level}` : '';
+            const tags = ids.map(id => { const n = DB.elementTypes[Number(id)]; const name = n ? fmtElement(n) : `Element${id}`; return `[Attach ${name}${lvlStr} with Stacking]`; });
+            clauses.push(`${tags.join('/')} to user if not`);
+          }
+        }
       }
     }
     if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
@@ -2061,7 +2089,7 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
 }
 
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
-function renderFollowUpSheetPreview(parsed, genEffects) {
+function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
   function getFirstAtkSA() {
     return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
   }
@@ -2165,7 +2193,7 @@ function renderFollowUpSheetPreview(parsed, genEffects) {
 
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },
-    'Source':      { val: ''                 },
+    'Source':      { val: source             },
     'Name':        { val: parsed.name        },
     'Type':        { val: type               },
     'Target':      { val: target             },
@@ -2387,8 +2415,9 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   }
 
   // Other tab column preview — for TAM tpMaxAbilityId / weaponSkillAbilityId
-  if (tamOtherMap[parseInt(parsed.abilityId)]) {
-    html += renderFollowUpSheetPreview(parsed, genText);
+  const tamSource = tamOtherMap[parseInt(parsed.abilityId)];
+  if (tamSource !== undefined) {
+    html += renderFollowUpSheetPreview(parsed, genText, tamSource);
   }
 
   // Parsed Info collapsible — shows info for this ability and all wrapped sub-abilities
@@ -2507,9 +2536,18 @@ function processBattleJson(jsonText) {
 
           // Record TAM other-tab ability (tpMaxAbilityId only)
           // Record weapon skill parent context for character/realm inheritance
+          const defaultAb = parsed.subAbilities.find(s => s._label === 'defaultAbilityId' || s._label === 'arg1');
+          let tamModeName = '';
+          if (defaultAb) {
+            outer: for (const sa of defaultAb.subActions) {
+              for (const s of sa.statuses) {
+                if ((s.commonName ?? '').startsWith('Tactical Awoken Mode')) { tamModeName = s.commonName; break outer; }
+              }
+            }
+          }
           for (const sub of parsed.subAbilities) {
             if (sub._label === 'tpMaxAbilityId') {
-              tamOtherMap[sub.abilityId] = sub._label;
+              tamOtherMap[sub.abilityId] = tamModeName;
             }
             if (sub._label === 'weaponSkillAbilityId') {
               weaponSkillParentMap[sub.abilityId] = {
