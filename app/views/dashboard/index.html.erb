@@ -1,149 +1,185 @@
 <div class="px-4 py-2">
 <div class="d-flex align-items-baseline gap-3 mb-3">
   <h4 class="mb-0">Dashboard</h4>
-  <% if @last_refreshed_at %>
-    <small class="text-secondary">Last refreshed: <%= @last_refreshed_at.strftime("%Y-%m-%d %H:%M:%S %Z") %></small>
-  <% else %>
-    <small class="text-warning">Data not loaded — run <code>rake data:refresh</code></small>
-  <% end %>
+  <small id="load-msg" class="text-secondary">Loading…</small>
 </div>
 
-<% if @sheets.any? %>
-  <% @sheets.each do |name, rows| %>
+<div id="sheets-area"></div>
+<div id="comparison-area"></div>
+<div id="battlejs-area"></div>
+</div>
+
+<script>
+// ── Constant map extraction (same logic as ability_parser) ───────────────────
+function extractConstantMap(js, name) {
+  const marker = name + ':{';
+  const merged = {};
+  let searchFrom = 0;
+  while (true) {
+    const idx = js.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+    let depth = 0, start = idx + name.length + 1, i = start;
+    for (; i < js.length; i++) {
+      if (js[i] === '{') depth++;
+      else if (js[i] === '}') { depth--; if (depth === 0) break; }
+    }
+    const block = js.slice(start + 1, i);
+    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
+      merged[m[1]] = parseInt(m[2]);
+    }
+    searchFrom = idx + 1;
+  }
+  return merged;
+}
+
+// ── Render sheet tabs ────────────────────────────────────────────────────────
+function renderSheets(sheetData) {
+  const area = document.getElementById('sheets-area');
+  let html = '';
+  for (const [name, rows] of Object.entries(sheetData)) {
+    const label = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    html += `<details class="mb-2">
+      <summary class="user-select-none fw-semibold py-1">
+        ${label}
+        <span class="badge bg-secondary fw-normal ms-1">${rows.length} rows</span>
+      </summary>`;
+    if (rows.length > 0) {
+      const cols = Object.keys(rows[0]);
+      const thead = cols.map(c => `<th class="text-nowrap">${c}</th>`).join('');
+      const tbody = rows.map(r =>
+        `<tr>${cols.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`
+      ).join('');
+      html += `<div class="overflow-auto mt-2 mb-3" style="max-height:400px">
+        <table class="table table-sm table-bordered table-striped-columns mb-0" style="font-size:12px">
+          <thead class="table-dark sticky-top"><tr>${thead}</tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>`;
+    } else {
+      html += `<p class="text-secondary fst-italic mt-2">No rows loaded for ${label}.</p>`;
+    }
+    html += `</details>`;
+  }
+  area.innerHTML = html || '<p class="text-secondary fst-italic">No sheet data loaded.</p>';
+}
+
+// ── Render status ailment comparison ────────────────────────────────────────
+function renderComparison(statusMap, statusRows) {
+  const normalize = s => s.toLowerCase().replace(/[\s_]+/g, '_');
+  const sample  = statusRows[0] ? Object.keys(statusRows[0]) : [];
+  const nameCol = sample.find(k => normalize(k) === 'coded_name');
+  const idCol   = sample.find(k => normalize(k) === 'id');
+
+  const csvByName = {};
+  for (const row of statusRows) {
+    const key = nameCol && row[nameCol]?.trim();
+    if (!key) continue;
+    csvByName[key] = idCol ? parseInt(row[idCol]) : null;
+  }
+
+  const matched = [], mismatch = [], jsOnly = [], csvOnly = [];
+  for (const [name, jsId] of Object.entries(statusMap)) {
+    if (name in csvByName) {
+      if (csvByName[name] === jsId) matched.push({ name, id: jsId });
+      else                          mismatch.push({ name, jsId, csvId: csvByName[name] });
+    } else {
+      jsOnly.push({ name, id: jsId });
+    }
+  }
+  for (const [name, csvId] of Object.entries(csvByName)) {
+    if (!(name in statusMap)) csvOnly.push({ name, id: csvId });
+  }
+  const sort = arr => arr.sort((a, b) => a.name < b.name ? -1 : 1);
+  sort(matched); sort(mismatch); sort(jsOnly); sort(csvOnly);
+
+  function twoColTable(rows) {
+    return `<table class="table table-sm table-bordered" style="font-size:12px">
+      <thead class="table-dark"><tr><th>Coded Name</th><th>ID</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td>${r.name}</td><td>${r.id}</td></tr>`).join('')}</tbody>
+    </table>`;
+  }
+
+  const badges = [
+    `<span class="badge bg-success fw-normal ms-1">✓ ${matched.length} matched</span>`,
+    mismatch.length ? `<span class="badge bg-warning text-dark fw-normal ms-1">⚠ ${mismatch.length} ID mismatch</span>` : '',
+    jsOnly.length   ? `<span class="badge bg-info fw-normal ms-1">● ${jsOnly.length} JS only</span>` : '',
+    csvOnly.length  ? `<span class="badge bg-secondary fw-normal ms-1">● ${csvOnly.length} CSV only</span>` : '',
+  ].join('');
+
+  let inner = '';
+  if (mismatch.length) {
+    inner += `<h6 class="text-warning">⚠ ID Mismatch (${mismatch.length})</h6>
+    <div class="overflow-auto mb-3">
+      <table class="table table-sm table-bordered" style="font-size:12px">
+        <thead class="table-dark"><tr><th>Coded Name</th><th>JS ID</th><th>CSV ID</th></tr></thead>
+        <tbody>${mismatch.map(r => `<tr><td>${r.name}</td><td>${r.jsId}</td><td>${r.csvId}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+  if (jsOnly.length) {
+    inner += `<h6 class="text-info">In JS only — not in Status CSV (${jsOnly.length})</h6>
+    <div class="overflow-auto mb-3">${twoColTable(jsOnly)}</div>`;
+  }
+  if (csvOnly.length) {
+    inner += `<h6 class="text-secondary">In CSV only — not in JS (${csvOnly.length})</h6>
+    <div class="overflow-auto mb-3">${twoColTable(csvOnly)}</div>`;
+  }
+  if (matched.length) {
+    inner += `<details>
+      <summary class="user-select-none text-success py-1">✓ Matched (${matched.length})</summary>
+      <div class="overflow-auto mt-2 mb-3" style="max-height:300px">${twoColTable(matched)}</div>
+    </details>`;
+  }
+
+  document.getElementById('comparison-area').innerHTML = `
     <details class="mb-2">
       <summary class="user-select-none fw-semibold py-1">
-        <%= name.to_s.tr('_', ' ').split.map(&:capitalize).join(' ') %>
-        <span class="badge bg-secondary fw-normal ms-1"><%= rows.size %> rows</span>
+        Status Ailment Comparison: JS vs CSV ${badges}
       </summary>
-      <% if rows.any? %>
-        <div class="overflow-auto mt-2 mb-3" style="max-height: 400px;">
-          <table class="table table-sm table-bordered table-striped-columns mb-0" style="font-size: 12px;">
-            <thead class="table-dark sticky-top">
-              <tr>
-                <% rows.first.keys.each do |col| %>
-                  <th class="text-nowrap"><%= col %></th>
-                <% end %>
-              </tr>
-            </thead>
-            <tbody>
-              <% rows.each do |row| %>
-                <tr>
-                  <% row.values.each do |val| %>
-                    <td><%= val %></td>
-                  <% end %>
-                </tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% else %>
-        <p class="text-secondary fst-italic mt-2">No rows loaded for <%= name %>.</p>
-      <% end %>
-    </details>
-  <% end %>
-<% else %>
-  <p class="text-secondary fst-italic">No sheet data loaded.</p>
-<% end %>
+      <div class="mt-2">${inner}</div>
+    </details>`;
+}
 
-<% cmp = @status_ailment_comparison %>
-<% if cmp %>
-  <details class="mb-2">
-    <summary class="user-select-none fw-semibold py-1">
-      Status Ailment Comparison: JS vs CSV
-      <span class="badge bg-success fw-normal ms-1">&#x2713; <%= cmp[:matched].size %> matched</span>
-      <% if cmp[:id_mismatch].any? %><span class="badge bg-warning text-dark fw-normal ms-1">&#x26A0; <%= cmp[:id_mismatch].size %> ID mismatch</span><% end %>
-      <% if cmp[:js_only].any? %><span class="badge bg-info fw-normal ms-1">&#x2B24; <%= cmp[:js_only].size %> JS only</span><% end %>
-      <% if cmp[:csv_only].any? %><span class="badge bg-secondary fw-normal ms-1">&#x2B24; <%= cmp[:csv_only].size %> CSV only</span><% end %>
-    </summary>
+// ── Render battle.js section ─────────────────────────────────────────────────
+function renderBattleJs(jsText) {
+  document.getElementById('battlejs-area').innerHTML = `
+    <details class="mb-2">
+      <summary class="user-select-none fw-semibold py-1">
+        battle.js
+        <span class="badge bg-secondary fw-normal ms-1">${jsText.length.toLocaleString()} chars</span>
+      </summary>
+      <p class="text-secondary fst-italic mt-2" style="font-size:13px">
+        Raw JS available in the browser console on the
+        <a href="/ability_parser">Ability Parser</a> page via <code>rawBattleJs</code>.
+      </p>
+    </details>`;
+}
 
-    <div class="mt-2">
-      <% if cmp[:id_mismatch].any? %>
-        <h6 class="text-warning">&#x26A0; ID Mismatch (<%= cmp[:id_mismatch].size %>)</h6>
-        <div class="overflow-auto mb-3">
-          <table class="table table-sm table-bordered" style="font-size: 12px;">
-            <thead class="table-dark"><tr><th>Coded Name</th><th>JS ID</th><th>CSV ID</th></tr></thead>
-            <tbody>
-              <% cmp[:id_mismatch].each do |r| %>
-                <tr><td><%= r[:name] %></td><td><%= r[:js_id] %></td><td><%= r[:csv_id] %></td></tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% end %>
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(async function init() {
+  const msgEl = document.getElementById('load-msg');
+  try {
+    const [sheetResp, jsResp] = await Promise.all([
+      fetch('/ability_parser/sheet_data'),
+      fetch('/ability_parser/battle_js'),
+    ]);
+    if (!sheetResp.ok) throw new Error(`sheet_data HTTP ${sheetResp.status}`);
+    if (!jsResp.ok)    throw new Error(`battle_js HTTP ${jsResp.status}`);
 
-      <% if cmp[:js_only].any? %>
-        <h6 class="text-info">In JS only — not in Status CSV (<%= cmp[:js_only].size %>)</h6>
-        <div class="overflow-auto mb-3">
-          <table class="table table-sm table-bordered" style="font-size: 12px;">
-            <thead class="table-dark"><tr><th>Coded Name</th><th>ID</th></tr></thead>
-            <tbody>
-              <% cmp[:js_only].each do |r| %>
-                <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% end %>
+    const sheetData = await sheetResp.json();
+    const jsText    = await jsResp.text();
 
-      <% if cmp[:csv_only].any? %>
-        <h6 class="text-secondary">In CSV only — not in JS (<%= cmp[:csv_only].size %>)</h6>
-        <div class="overflow-auto mb-3">
-          <table class="table table-sm table-bordered" style="font-size: 12px;">
-            <thead class="table-dark"><tr><th>Coded Name</th><th>ID</th></tr></thead>
-            <tbody>
-              <% cmp[:csv_only].each do |r| %>
-                <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% end %>
+    renderSheets(sheetData);
+    renderBattleJs(jsText);
 
-      <% if cmp[:matched].any? %>
-        <details>
-          <summary class="user-select-none text-success py-1">&#x2713; Matched (<%= cmp[:matched].size %>)</summary>
-          <div class="overflow-auto mt-2 mb-3" style="max-height: 300px;">
-            <table class="table table-sm table-bordered" style="font-size: 12px;">
-              <thead class="table-dark sticky-top"><tr><th>Coded Name</th><th>ID</th></tr></thead>
-              <tbody>
-                <% cmp[:matched].each do |r| %>
-                  <tr><td><%= r[:name] %></td><td><%= r[:id] %></td></tr>
-                <% end %>
-              </tbody>
-            </table>
-          </div>
-        </details>
-      <% end %>
-    </div>
-  </details>
-<% end %>
+    const statusMap = extractConstantMap(jsText, 'STATUS_AILMENTS_TYPE');
+    renderComparison(statusMap, sheetData.status ?? []);
 
-<details id="battle-js-details" class="mb-2">
-  <summary class="user-select-none fw-semibold py-1">
-    battle.js
-    <% if @battle_js_data %>
-      <span class="badge bg-secondary fw-normal ms-1"><%= @battle_js_data.length %> chars</span>
-    <% end %>
-  </summary>
-  <% if @battle_js_data %>
-    <pre id="battle-js-source" class="mt-2 p-3 border rounded" style="font-size: 11px; max-height: 500px; overflow: auto;"><%= @battle_js_data %></pre>
-  <% else %>
-    <p class="text-secondary fst-italic mt-2">No battle.js data loaded.</p>
-  <% end %>
-</details>
-
-<% if @battle_js_data %>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
-  <script>
-    document.getElementById('battle-js-details').addEventListener('toggle', function() {
-      if (this.open) {
-        var pre = document.getElementById('battle-js-source');
-        if (!pre.dataset.formatted) {
-          pre.textContent = js_beautify(pre.textContent, { indent_size: 2 });
-          pre.dataset.formatted = true;
-        }
-      }
-    });
-  </script>
-<% end %>
-</div><!-- /.px-4 -->
+    const totalRows = Object.values(sheetData).reduce((s, r) => s + r.length, 0);
+    msgEl.textContent = `${totalRows.toLocaleString()} rows across ${Object.keys(sheetData).length} sheets · ${jsText.length.toLocaleString()} chars JS`;
+  } catch(e) {
+    msgEl.textContent = 'Error: ' + e.message;
+    msgEl.className = 'text-danger';
+  }
+})();
+</script>

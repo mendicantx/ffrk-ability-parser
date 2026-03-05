@@ -134,6 +134,8 @@ const DB = {
   statusBundles:      {},   // STATUS_AILMENTS_BUNDLE id → coded name
   bundleContents:     {},   // bundle_id → [status_id, ...]
   jobIds:             {},   // JOB_ID id → key (e.g. 600013 → 'WARRIOR_I')
+  seriesIds:          {},   // SERIES_ID id → key (e.g. 108001 → 'FF8')
+  soulStrikeCategories: {}, // SOUL_STRIKE_CATEGORY id → name
 
   abilityIdOf:        {},   // ABILITY_ID_OF: key → numeric id
   chaseAbilityIdToKey:{},   // numeric chase ability id → 'CHASE_ABILITY_FOR_...' key
@@ -263,7 +265,7 @@ async function loadBattleJs() {
       'ATK_TYPE', 'TARGET_RANGE', 'TARGET_METHOD', 'TARGET_SEGMENT', 'ACTIVE_TARGET_METHOD',
       'SUB_ACTION_TYPE', 'SUB_ACTION_TARGET_TYPE', 'SUB_ACTION_CONDITION_TYPE',
       'SUB_ACTION_CONTROL_STATEMENT_TYPE', 'STATUS_AILMENTS_TYPE', 'STATUS_AILMENTS_BUNDLE',
-      'JOB_ID',
+      'JOB_ID', 'SERIES_ID', 'SOUL_STRIKE_CATEGORY',
     ];
     const maps = {};
     for (const c of consts) maps[c] = extractConstantMap(js, c);
@@ -284,6 +286,8 @@ async function loadBattleJs() {
     DB.statusAilments      = invert(maps.STATUS_AILMENTS_TYPE);
     DB.statusBundles       = invert(maps.STATUS_AILMENTS_BUNDLE);
     DB.jobIds              = invert(maps.JOB_ID);
+    DB.seriesIds           = invert(maps.SERIES_ID);
+    DB.soulStrikeCategories = invert(maps.SOUL_STRIKE_CATEGORY);
     DB.abilityIdOf         = extractConstantMap(js, 'ABILITY_ID_OF');
     for (const [k, v] of Object.entries(DB.abilityIdOf)) {
       if (k.startsWith('CHASE_ABILITY_FOR_')) DB.chaseAbilityIdToKey[v] = k;
@@ -653,6 +657,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'burstAbilityArgs':
         case 'wrappedAbilityId':
         case 'defaultAbility':
+        case 'defaultAbilityId':
+        case 'tpMaxAbilityId':
+        case 'weaponSkillAbilityId':
         case 'abilityId': {
           if (numVal > 0) {
             const sub = allAbilities.find(a => a.ability_id == rawVal);
@@ -921,7 +928,34 @@ function generateEffectsText(parsed) {
   }
 
   // Format a partyCondition object into a human-readable "if ..." clause.
-  // Handles countMatchedByBuddyCondition with anyJobId and greaterEqual count.
+  // Series ID → short display name (e.g. 108001 → 'FFVIII')
+  const _SERIES_DISPLAY = {
+    FF1:'FFI', FF2:'FFII', FF3:'FFIII', FF4:'FFIV', FF5:'FFV', FF6:'FFVI',
+    FF7:'FFVII', FF8:'FFVIII', FF9:'FFIX', FF10:'FFX', FF11:'FFXI', FF12:'FFXII',
+    FF13:'FFXIII', FF14:'FFXIV', FF15:'FFXV', FF16:'FFXVI',
+    FFT:'FFT', FF_TYPE0:'FF Type-0', KH:'KH', FF_GAIDEN:'Beyond', JOB:'Core',
+  };
+  function seriesDisplayName(id) {
+    const key = DB.seriesIds[id];
+    return key ? (_SERIES_DISPLAY[key] ?? key) : `Series #${id}`;
+  }
+
+  // Collect names (jobs + series) from a buddyCondition object.
+  // Handles both direct fields and the `any: { ... }` OR wrapper.
+  function buddyConditionNames(buddy) {
+    const src = buddy.any ?? buddy;  // `any:` is OR logic — treat same as flat
+    const names = [];
+    const jobIds = Array.isArray(src.anyJobId) ? src.anyJobId : (src.anyJobId != null ? [src.anyJobId] : []);
+    for (const id of jobIds) {
+      const key = DB.jobIds[id];
+      names.push(key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`);
+    }
+    const serIds = Array.isArray(src.anyBuddySeriesId) ? src.anyBuddySeriesId : (src.anyBuddySeriesId != null ? [src.anyBuddySeriesId] : []);
+    for (const id of serIds) names.push(seriesDisplayName(id));
+    return names;
+  }
+
+  // Handles countMatchedByBuddyCondition with anyJobId/anyBuddySeriesId (OR via `any:`) and greaterEqual count.
   function formatPartyCondition(pc) {
     if (!pc) return '';
     const cbbc = pc.countMatchedByBuddyCondition;
@@ -932,32 +966,34 @@ function generateEffectsText(parsed) {
                 : countCond.greaterThan   != null ? (countCond.greaterThan + 1)
                 : null;
     if (count == null) return '';
-    const ids    = Array.isArray(buddy.anyJobId) ? buddy.anyJobId : (buddy.anyJobId != null ? [buddy.anyJobId] : []);
-    if (!ids.length) return '';
-    const names  = ids.map(id => {
-      const key = DB.jobIds[id];
-      return key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`;
-    });
+    const names = buddyConditionNames(buddy);
+    if (!names.length) return '';
     const below = count <= 1 ? '0' : `0-${count - 1}`;
     return `if there are ${below}/${count}+ ${names.join('/')} allies in the party`;
   }
 
   // Parse a partyCondition directly from a raw condition_arg string using regex.
   // More reliable than nested parseDenaArg for deeply-nested objects with inline arrays.
-  // Returns "if there are 0-2/3+ Job allies in the party" style string, or null.
+  // Handles anyJobId and anyBuddySeriesId (OR logic via `any:` wrapper is transparent to regex).
+  // Returns "if there are 0-2/3+ Job/Series allies in the party" style string, or null.
   function parsePartyConditionLabel(condArgStr) {
     if (!condArgStr || !condArgStr.includes('partyCondition')) return null;
     const countM = condArgStr.match(/greaterEqual\s*:\s*(\d+)/);
     if (!countM) return null;
     const count = parseInt(countM[1]);
-    const jobM  = condArgStr.match(/anyJobId\s*:\s*\[([^\]]+)\]/);
-    if (!jobM) return null;
-    const ids   = (jobM[1].match(/\d+/g) ?? []).map(Number);
-    if (!ids.length) return null;
-    const names = ids.map(id => {
-      const key = DB.jobIds[id];
-      return key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`;
-    });
+    const names = [];
+    const jobM = condArgStr.match(/anyJobId\s*:\s*\[([^\]]+)\]/);
+    if (jobM) {
+      for (const id of (jobM[1].match(/\d+/g) ?? []).map(Number)) {
+        const key = DB.jobIds[id];
+        names.push(key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`);
+      }
+    }
+    const serM = condArgStr.match(/anyBuddySeriesId\s*:\s*\[([^\]]+)\]/);
+    if (serM) {
+      for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
+    }
+    if (!names.length) return null;
     const below = count <= 1 ? '0' : `0-${count - 1}`;
     return `if there are ${below}/${count}+ ${names.join('/')} allies in the party`;
   }
@@ -1086,7 +1122,7 @@ function generateEffectsText(parsed) {
 
   const segs = [];
 
-  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
   const wrapped  = parsed.subAbilities.find(s => wrappedLabels.has(s._label));
   const commands = parsed.subAbilities.filter(s => !wrappedLabels.has(s._label));
   const exec     = wrapped ?? parsed;
@@ -1511,7 +1547,9 @@ function generateEffectsText(parsed) {
   }
 
   // ── 3. Attach Element grant (conditional on entry element when multiple options) ──
-  if (parsed.attachElements && parsed.attachElements.length > 0) {
+  // Suppressed for TACTICAL_AWAKE: attachElement args are reserved for internal use in that type.
+  const isTacticalAwake = DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE';
+  if (!isTacticalAwake && parsed.attachElements && parsed.attachElements.length > 0) {
     const aeLevel      = parsed.attachElementLevel;
     const aeHasStack   = !!parsed.attachElementAddMaxLevel;
     const aeStatusName = (elemId) => {
@@ -1592,7 +1630,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
   }
 
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
   function getExec() {
     return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
@@ -1876,7 +1914,7 @@ function renderProps(props) {
 // ─── Crystal Commands sheet column preview ────────────────────────────────────
 function renderCFSheetPreview(parsed, cfParent, genEffects) {
   // Shared helpers (same logic as renderSBSheetPreview, closed over this parsed)
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
   function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
   function getFirstAtkSA() {
     const exec = getExec();
@@ -2073,7 +2111,7 @@ function renderFollowUpSheetPreview(parsed, genEffects) {
     const found = new Set();
     // Also scan the wrapped inner ability's sub-actions (e.g. Crystal Force follow-ups
     // where the follow-up itself has no sub_actions but wraps another ability via arg1).
-    const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'burstAbilityArgs', 'crystalForceAbilityId']);
+    const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
     const execAb = parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label));
     const sasToScan = execAb ? [...parsed.subActions, ...execAb.subActions] : parsed.subActions;
     for (const sa of sasToScan) {
@@ -2202,6 +2240,11 @@ function renderParsedInfoSection(p) {
   html += row('Cast Time (s)', p.castTime, 'val-num');
   html += row('SB Charge', p.sbCharge || null, 'val-num');
   html += row('Counterable', p.counterable, 'val-str');
+  if (p.soulStrikeCategory) {
+    const catName = DB.soulStrikeCategories[p.soulStrikeCategory] ?? null;
+    html += row('Soul Strike Category ID',   p.soulStrikeCategory, 'val-num');
+    html += row('Soul Strike Category Name', catName, 'val-str');
+  }
   if (p.attachElements && p.attachElements.length > 0) {
     const atElemTags = p.attachElements.map(id => elementTag(DB.elementTypes[id] ?? `ELEMENT_${id}`)).join('');
     html += `<tr><th>Possible Attach Element(s)</th><td>${atElemTags}</td></tr>`;
@@ -2287,7 +2330,7 @@ function renderParsedInfoSection(p) {
   return html;
 }
 
-function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '') {
+function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '', tamOtherMap = {}, weaponSkillParentMap = {}) {
   depth = depth ?? 0;
   const sb = lookupSoulBreak(parsed.abilityId);
   const other = !sb ? lookupOtherAbility(parsed.abilityId) : null;
@@ -2326,7 +2369,10 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   // Soul Break sheet column preview — only for depth-0 soul strikes
   // (sheet match present, or soul_strike_category_id indicates it's a soul strike without a sheet entry)
   if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null)) {
-    html += renderSBSheetPreview(parsed, sb, actorName, genText, sheetElement, actorRealm);
+    const wsParent = weaponSkillParentMap[parseInt(parsed.abilityId)];
+    const sbActorName  = wsParent?.character || actorName;
+    const sbActorRealm = wsParent?.realm     || actorRealm;
+    html += renderSBSheetPreview(parsed, sb, sbActorName, genText, sheetElement, sbActorRealm);
   }
 
   // Crystal Commands sheet column preview — for Crystal Force abilities
@@ -2337,6 +2383,11 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
 
   // Other tab column preview — for follow-up (chase) abilities
   if (DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]) {
+    html += renderFollowUpSheetPreview(parsed, genText);
+  }
+
+  // Other tab column preview — for TAM tpMaxAbilityId / weaponSkillAbilityId
+  if (tamOtherMap[parseInt(parsed.abilityId)]) {
     html += renderFollowUpSheetPreview(parsed, genText);
   }
 
@@ -2430,6 +2481,10 @@ function processBattleJson(jsonText) {
     // cfParentMap: CF ability ID → { character, sbName } — built as we process soul breaks
     // (soul_strikes come before abilities in allActorAbilities, so SBs are processed first)
     const cfParentMap = {};
+    // tamOtherMap: TAM tpMaxAbilityId → label — built as we process soul breaks
+    const tamOtherMap = {};
+    // weaponSkillParentMap: weaponSkillAbilityId → { character, realm } from parent SB
+    const weaponSkillParentMap = {};
     if (allActorAbilities.length > 0) {
       html += `<h3>Abilities (${allActorAbilities.length})</h3>`;
       for (const ability of allActorAbilities) {
@@ -2450,6 +2505,20 @@ function processBattleJson(jsonText) {
             }
           }
 
+          // Record TAM other-tab ability (tpMaxAbilityId only)
+          // Record weapon skill parent context for character/realm inheritance
+          for (const sub of parsed.subAbilities) {
+            if (sub._label === 'tpMaxAbilityId') {
+              tamOtherMap[sub.abilityId] = sub._label;
+            }
+            if (sub._label === 'weaponSkillAbilityId') {
+              weaponSkillParentMap[sub.abilityId] = {
+                character: sbRow?.['Character'] || actorName,
+                realm:     sbRow?.['Realm']     || actorRealm,
+              };
+            }
+          }
+
           // Suppress standalone cards only for pure wrapper/visual sub-abilities.
           // Independent abilities (crystalForceAbilityId etc.) keep their own cards.
           const suppressLabels = new Set(['wrappedAbilityId', 'cutinAbilityId']);
@@ -2462,7 +2531,7 @@ function processBattleJson(jsonText) {
             }
           }
           suppressChain(parsed);
-          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm);
+          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm, tamOtherMap, weaponSkillParentMap);
         }
       }
     }

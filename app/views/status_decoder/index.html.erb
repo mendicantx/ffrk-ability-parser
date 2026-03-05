@@ -339,6 +339,12 @@ function buildStatusAssignments() {
     'scenes/battle/statusAilmentsConfig/CrystalBuddyMode',
     /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
   );
+
+  // Tactical Awoken Mode block — assignments use h[o.KEY]=FUNC(
+  scanBlock(
+    'scenes/battle/statusAilmentsConfig/TacticalAwakeMode',
+    /h\[o\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
+  );
 }
 
 // ─── Argument splitting ───────────────────────────────────────────────────────
@@ -400,11 +406,24 @@ function statusTag(id) {
   return `<span class="status-tag">[Status #${id}]</span>`;
 }
 
+// ─── Hardcoded ability names ──────────────────────────────────────────────────
+// Special-case abilities that won't appear in the Other sheet tab.
+const HARDCODED_ABILITY_NAMES = {
+  31545795: '111% ATB 1',
+  31545796: '125% ATB 1',
+};
+
+// Look up a display name for any ability ID: Other sheet first, then hardcoded map.
+function abilityDisplayName(id) {
+  if (id == null) return null;
+  return DB.otherNameMap[id] ?? HARDCODED_ABILITY_NAMES[id] ?? null;
+}
+
 // ─── Chase ability name lookup ────────────────────────────────────────────────
 function chaseAbilityName(statusKey) {
   const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + statusKey];
   if (id == null) return null;
-  return DB.otherNameMap[id] ?? '<ability missing from Other Tab>';
+  return abilityDisplayName(id) ?? '<ability missing from Other Tab>';
 }
 
 // ─── nt decoder ──────────────────────────────────────────────────────────────
@@ -692,6 +711,146 @@ function decodeCbmD(statusKey, statusId, argsText) {
   };
 }
 
+// ─── Tactical Awoken Mode shared helpers ──────────────────────────────────────
+// Extract char name and key-level element qualifier from a TAM status key.
+function tamCharInfo(statusKey) {
+  const suffix = statusKey.replace(/^TACTICAL_AWAKE_MODE_/, '');
+  const parts = suffix.split('_');
+  const keyElemKeys = [];
+  while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
+    keyElemKeys.unshift(parts.pop());
+  }
+  const MINOR_WORDS = new Set(['of', 'the', 'a', 'an']);
+  const charRaw = parts.map((p, i) => {
+    const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
+  }).join(' ');
+  const charName = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  return { charName, keyElemKeys };
+}
+
+// Parse element condition desc from a TAM abilityCondition arg string.
+function tamCondDesc(condText) {
+  const anyElemM = condText.match(/anyElementIds\s*:\s*\[([^\]]+)\]/);
+  if (anyElemM) {
+    const keys = [...anyElemM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => m[1]);
+    if (keys.length >= CBM_ALL_ELEMENTS.length) return 'All elemental';
+    return keys.map(k => elementDisplayName(k)).join('/');
+  }
+  const elemM = condText.match(/\belementId\b[^,}]*?ELEMENT_TYPE\.([A-Z_]+)/);
+  if (elemM) return elementDisplayName(elemM[1]);
+  return 'All';
+}
+
+// Standard effects from p() — shared by both v and d.
+// ABILITY_BOOST MEDIUM (5/10/15/20/30%), REGISTER_SEQ (repeatNum additional triggers),
+// INFINITY_ABILITY_NUM, INCREASE_DAMAGE_THRESHOLD_LV:1 (+10k cap),
+// INCREASE_EXECUTED_DAMAGE MEDIUM (30%).
+// repeatNum defaults to 2 (p()'s default s.repeatNum).
+function tamBaseEffects(condDesc, repeatNum = 2) {
+  const times = repeatNum === 1 ? '1 additional time' : `${repeatNum} additional times`;
+  return `${condDesc} abilities deal 30% more damage, have +10,000 damage cap, deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5, trigger ${times}, have zero hone cost`;
+}
+
+// ─── decodeTamV: v() — ATB chase variant ──────────────────────────────────────
+// v(abilityCondition, options?)
+//   Adds REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE (default: 111% ATB 1, ID 31545795)
+//   after using matching abilities while the character has TACTICAL_AWAKE_MODE.
+//   Then calls p() for the standard TAM effects.
+function decodeTamV(statusKey, statusId, argsText) {
+  const { charName, keyElemKeys } = tamCharInfo(statusKey);
+  const args     = splitTopLevelArgs(argsText);
+  const condText = args[0] ?? '';
+  const optsText = args[1] ?? '';
+
+  const condDesc      = tamCondDesc(condText);
+  const elemQualifier = keyElemKeys.length > 0
+    ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
+    : '';
+  const commonName = `Tactical Awoken Mode: ${charName}${elemQualifier}`;
+
+  // Chase ability — options may override the pre-weapon-skill chase; post-weapon-skill is always SMALL.
+  // Format: "triggers [EXTRA_SMALL]/[SMALL] after using X abilities before/after triggering Weapon Skill"
+  let chaseId = DB.abilityIdOf['CHASE_ABILITY_FOR_INCREASE_ATB_TIME_EXTRA_SMALL_WHILE_TACTICAL_AWAKE_MODE'];
+  const chaseKeyM = optsText.match(/chaseAbilityId\s*:\s*[a-zA-Z$_]\w*\.([A-Z_0-9]+)/);
+  if (chaseKeyM) chaseId = DB.abilityIdOf[chaseKeyM[1]];
+  const chaseName   = abilityDisplayName(chaseId);
+  const wsChaseId   = DB.abilityIdOf['CHASE_ABILITY_FOR_INCREASE_ATB_TIME_SMALL_WHILE_TACTICAL_AWAKE_MODE'];
+  const wsChaseName = abilityDisplayName(wsChaseId);
+  const chaseStr = chaseName
+    ? `, triggers [${chaseName}]/[${wsChaseName ?? '?'}] after using ${condDesc} abilities before/after triggering Weapon Skill while in Tactical Awoken Mode`
+    : '';
+
+  // repeatNum — p() defaults to 2; parse override from options if present
+  const repeatM  = optsText.match(/repeatNum\s*:\s*(\d+)/);
+  const repeatNum = repeatM ? parseInt(repeatM[1]) : 2;
+
+  // Flight (e.g. Kain): flightDuration:N means character can take flight for N turns
+  const flightM   = optsText.match(/flightDuration\s*:\s*(\d+)/);
+  const flightStr = flightM ? ', No air time for jump abilities' : '';
+
+  const effects = `${tamBaseEffects(condDesc, repeatNum)}${chaseStr}${flightStr}; removed if the character hasn't [Tactical Awoken Mode]`;
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'v (TAM)',
+    decoded:         true,
+  };
+}
+
+// ─── decodeTamD: d() — DEF/MDEF penetration variant ──────────────────────────
+// d(abilityCondition, options?)
+//   Adds DEF_AND_MDEF_PENETRATION (default SMALL = 20%) for matching abilities.
+//   Then calls p() for the standard TAM effects.
+function decodeTamD(statusKey, statusId, argsText) {
+  const { charName, keyElemKeys } = tamCharInfo(statusKey);
+  const args     = splitTopLevelArgs(argsText);
+  const condText = args[0] ?? '';
+  const optsText = args[1] ?? '';
+
+  const condDesc      = tamCondDesc(condText);
+  const elemQualifier = keyElemKeys.length > 0
+    ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
+    : '';
+  const commonName = `Tactical Awoken Mode: ${charName}${elemQualifier}`;
+
+  // Penetration % — default SMALL=20; parse override if present
+  const PEN_FACTOR = { SMALL: 20, MEDIUM: 25, EXTRA_MEDIUM: 30, LARGE: 50, EXTRA_LARGE: 75 };
+  let penPct = 20;
+  const penM = optsText.match(/PENETRATION_FACTOR\.([A-Z_]+)/);
+  if (penM) penPct = PEN_FACTOR[penM[1]] ?? 20;
+
+  // repeatNum — p() defaults to 2; parse override from options if present
+  const repeatM  = optsText.match(/repeatNum\s*:\s*(\d+)/);
+  const repeatNum = repeatM ? parseInt(repeatM[1]) : 2;
+
+  // Flight (same as v-type)
+  const flightM   = optsText.match(/flightDuration\s*:\s*(\d+)/);
+  const flightStr = flightM ? ', No air time for jump abilities' : '';
+
+  const effects = `${tamBaseEffects(condDesc, repeatNum)}, penetrate ${penPct}% DEF and RES${flightStr}; removed if the character hasn't [Tactical Awoken Mode]`;
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'd (TAM)',
+    decoded:         true,
+  };
+}
+
 // ─── Or decoder ───────────────────────────────────────────────────────────────
 // Or("learningModeXxx", condition?) → character-specific Learning Mode status
 function decodeOr(statusKey, statusId, argsText) {
@@ -790,10 +949,14 @@ function decodeStatus(statusKey) {
   let decoded = null;
   const isCbm = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
 
+  const isTam = defineModule === 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
+
   if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
   if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
   if (isCbm && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
   if (isCbm && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
+  if (isTam && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);
+  if (isTam && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
 
   if (decoded) return decoded;
 
