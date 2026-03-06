@@ -660,6 +660,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'defaultAbilityId':
         case 'tpMaxAbilityId':
         case 'weaponSkillAbilityId':
+        case 'repeatSkillAbilityId':
         case 'abilityId': {
           if (numVal > 0) {
             const sub = allAbilities.find(a => a.ability_id == rawVal);
@@ -852,6 +853,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
           case 'partyCondition':
             sub.partyCondition = v;
             break;
+          case 'maxLv':
+            sub.props.maxLevel = Number(v);
+            break;
           case 'option':
             if (v?.synchroConditions) {
               for (const [slotKey, cond] of Object.entries(v.synchroConditions)) {
@@ -909,9 +913,13 @@ function generateEffectsText(parsed) {
   ];
   function hitsWord(n) { return NUM_WORDS[n] ?? String(n); }
 
-  // Damage cap for an attack sub-action (accounts for secondaryDamageThresholdLv and damageCapBoost).
+  // Damage cap for an attack sub-action.
+  // overflow (shouldEnableOverflow) → 99,999
+  // secondaryDamageThresholdLv     → 199,999
+  // damageCapBoost                 → 9,999 + boost (e.g. +10,000 → 19,999)
   function atkCap(sa) {
     if (!sa) return 9999;
+    if (sa.props.overflow) return 99999;
     if (sa.props.secondaryDamageThresholdLv) return 199999;
     return 9999 + (sa.props.damageCapBoost ?? 0);
   }
@@ -1032,12 +1040,12 @@ function generateEffectsText(parsed) {
     const fac     = factorOverride ?? sa.props.multiplier;
     const elemStr = '';
     const perHit  = fac ? ` (${fac.toFixed(2)} each)` : '';
-    const capVal  = sa.props.secondaryDamageThresholdLv ? 199999
+    const capVal  = sa.props.overflow ? 99999
+                  : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
     const capStr  = capVal ? ` capped at ${capVal.toLocaleString()}` : '';
     const flags   = [
       // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
-      sa.props.overflow ? 'overflow damage'  : null,
       sa.props.ranged   ? 'ranged'           : null,
       sa.props.jump     ? 'jump'             : null,
       extraNote         ?? null,
@@ -1372,7 +1380,7 @@ function generateEffectsText(parsed) {
       : (atkPerHitBase != null && mndPerHitBase != null)
         ? ` (${atkPerHitBase.toFixed(2)} or ${mndPerHitBase.toFixed(2)} each)`
         : '';
-    const capStr    = boostCap !== baseCap ? ` capped at ${baseCap}/${boostCap}` : ` capped at ${baseCap}`;
+    const capStr    = boostCap !== baseCap ? ` capped at ${baseCap}/${boostCap}` : (baseCap !== 9999 ? ` capped at ${baseCap}` : '');
     const afterStr  = usageLabel ? ` after ${usageLabel.elseLabel}/${usageLabel.ifLabel} uses` : '';
     const basedStr  = statLabel  ? ` based on ${statLabel}` : '';
     segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
@@ -1410,14 +1418,15 @@ function generateEffectsText(parsed) {
       const perHitStr  = basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
       const allEnLabels = [enLabel.label,
         ...elseIfAtks.map(ei => parseEnElementLabel(ei.conditionArg)?.label).filter(Boolean)];
-      segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr} capped at ${baseCap.toLocaleString()} based on ${allEnLabels.join(' or ')}${hpStr}`);
+      const capStr = baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '';
+      segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr}${capStr} based on ${allEnLabels.join(' or ')}${hpStr}`);
     } else {
       const perHitStr = boostPerHit != null && basePerHit != null
         ? ` (${basePerHit.toFixed(2)}/${boostPerHit.toFixed(2)} each)`
         : basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
       const capStr    = boostCap != null && baseCap !== boostCap
         ? ` capped at ${baseCap.toLocaleString()}/${boostCap.toLocaleString()}`
-        : ` capped at ${baseCap.toLocaleString()}`;
+        : (baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '');
       const afterStr  = condLabel ? ` after ${condLabel.elseLabel}/${condLabel.ifLabel} uses` : '';
       const basedStr  = statLabel ? ` based on ${statLabel}` : (enLabel ? ` based on ${enLabel.label}` : '');
       segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
@@ -1594,6 +1603,20 @@ function generateEffectsText(parsed) {
         .map(id => DB.elementTypes[id] ? fmtElement(DB.elementTypes[id]) : `ELEMENT_${id}`)
         .join('/');
       segs.push(`Grants ${statusTags.join('/')} based on if entry damage was ${elemLabels}`);
+    }
+  }
+
+  // ── 3a. ATTACH_ELEMENT_BY_ATTACK_ELEMENT sub-actions (type 18) ──
+  // Grants [Attach <element>] or [Attach <element> with Secondary Stacking] (when maxLv is set).
+  // Scans both parsed and exec sub-actions: type 18 may sit on the outer ability while the
+  // inner (exec) wraps a chase ability — both need to be checked to avoid missed effects.
+  const attachSAsSeen = new Set();
+  for (const sa of [...parsed.subActions, ...(exec !== parsed ? exec.subActions : [])]) {
+    if ((sa.type === 'ATTACH_ELEMENT_BY_ATTACK_ELEMENT' || sa.type === '18') && !attachSAsSeen.has(sa)) {
+      attachSAsSeen.add(sa);
+      const stackStr  = sa.props.maxLevel != null ? ' with Secondary Stacking' : '';
+      const elemTags  = sa.elements.filter(e => e && e !== 'NE').map(e => `[Attach ${e}${stackStr}]`);
+      if (elemTags.length) segs.push(`Grants ${elemTags.join('/')}`);
     }
   }
 
@@ -2358,7 +2381,7 @@ function renderParsedInfoSection(p) {
   return html;
 }
 
-function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '', tamOtherMap = {}, weaponSkillParentMap = {}) {
+function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '', tamOtherMap = {}, weaponSkillParentMap = {}, busterShingiParentMap = {}, busterShingiOtherMap = {}) {
   depth = depth ?? 0;
   const sb = lookupSoulBreak(parsed.abilityId);
   const other = !sb ? lookupOtherAbility(parsed.abilityId) : null;
@@ -2396,8 +2419,10 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
 
   // Soul Break sheet column preview — only for depth-0 soul strikes
   // (sheet match present, or soul_strike_category_id indicates it's a soul strike without a sheet entry)
-  if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null)) {
-    const wsParent = weaponSkillParentMap[parseInt(parsed.abilityId)];
+  // Also forced for BUSTER_SHINGI sub-abilities (defaultAbilityId / repeatSkillAbilityId) via busterShingiParentMap.
+  const busterShingiParent = busterShingiParentMap[parseInt(parsed.abilityId)];
+  if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
+    const wsParent = weaponSkillParentMap[parseInt(parsed.abilityId)] ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
     const sbActorRealm = wsParent?.realm     || actorRealm;
     html += renderSBSheetPreview(parsed, sb, sbActorName, genText, sheetElement, sbActorRealm);
@@ -2418,6 +2443,12 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   const tamSource = tamOtherMap[parseInt(parsed.abilityId)];
   if (tamSource !== undefined) {
     html += renderFollowUpSheetPreview(parsed, genText, tamSource);
+  }
+
+  // Other tab column preview — for BUSTER_SHINGI chase/other sub-abilities
+  const busterOtherSource = busterShingiOtherMap[parseInt(parsed.abilityId)];
+  if (busterOtherSource !== undefined && !DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]) {
+    html += renderFollowUpSheetPreview(parsed, genText, busterOtherSource);
   }
 
   // Parsed Info collapsible — shows info for this ability and all wrapped sub-abilities
@@ -2514,6 +2545,10 @@ function processBattleJson(jsonText) {
     const tamOtherMap = {};
     // weaponSkillParentMap: weaponSkillAbilityId → { character, realm } from parent SB
     const weaponSkillParentMap = {};
+    // busterShingiParentMap: BUSTER_SHINGI defaultAbilityId/repeatSkillAbilityId → { character, realm }
+    const busterShingiParentMap = {};
+    // busterShingiOtherMap: BUSTER_SHINGI chase/other sub-abilities → source label (chase mode status name)
+    const busterShingiOtherMap = {};
     if (allActorAbilities.length > 0) {
       html += `<h3>Abilities (${allActorAbilities.length})</h3>`;
       for (const ability of allActorAbilities) {
@@ -2555,11 +2590,41 @@ function processBattleJson(jsonText) {
                 realm:     sbRow?.['Realm']     || actorRealm,
               };
             }
+            if (sub._label === 'defaultAbilityId' || sub._label === 'repeatSkillAbilityId') {
+              if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
+                busterShingiParentMap[sub.abilityId] = {
+                  character: sbRow?.['Character'] || actorName,
+                  realm:     sbRow?.['Realm']     || actorRealm,
+                };
+                // Chase/other sub-abilities of defaultAbilityId go to the Other tab.
+                // Source = first CHASE_MODE_* status found in defaultAbilityId's sub-actions.
+                if (sub._label === 'defaultAbilityId') {
+                  let chaseModeSource = '';
+                  outer: for (const sa of sub.subActions) {
+                    for (const s of sa.statuses) {
+                      const ck = (s.codedName ?? '').toUpperCase();
+                      const cn = s.commonName ?? '';
+                      if (ck.startsWith('CHASE') || cn.toLowerCase().includes('chase')) {
+                        chaseModeSource = cn || ck;
+                        break outer;
+                      }
+                    }
+                  }
+                  for (const chase of sub.subAbilities) {
+                    busterShingiOtherMap[chase.abilityId] = chaseModeSource;
+                  }
+                }
+              }
+            }
           }
 
           // Suppress standalone cards only for pure wrapper/visual sub-abilities.
           // Independent abilities (crystalForceAbilityId etc.) keep their own cards.
+          // For BUSTER_SHINGI, defaultAbilityId is covered by the parent SB card.
           const suppressLabels = new Set(['wrappedAbilityId', 'cutinAbilityId']);
+          if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
+            suppressLabels.add('defaultAbilityId');
+          }
           function suppressChain(p) {
             for (const sub of p.subAbilities) {
               if (suppressLabels.has(sub._label)) {
@@ -2569,7 +2634,7 @@ function processBattleJson(jsonText) {
             }
           }
           suppressChain(parsed);
-          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm, tamOtherMap, weaponSkillParentMap);
+          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm, tamOtherMap, weaponSkillParentMap, busterShingiParentMap, busterShingiOtherMap);
         }
       }
     }

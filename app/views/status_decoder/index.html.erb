@@ -345,6 +345,12 @@ function buildStatusAssignments() {
     'scenes/battle/statusAilmentsConfig/TacticalAwakeMode',
     /h\[o\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
   );
+
+  // Buster Attack block — assignments use c[s.KEY]=FUNC(
+  scanBlock(
+    'scenes/battle/statusAilmentsConfig/BusterAttack',
+    /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
+  );
 }
 
 // ─── Argument splitting ───────────────────────────────────────────────────────
@@ -930,6 +936,68 @@ function decodeOr(statusKey, statusId, argsText) {
   };
 }
 
+// ─── decodeBusterP: p() — BusterAttack chase mode ────────────────────────────
+// p(abilityCondition, options?)
+//   abilityCondition: { anyElementIds: [ELEMENT_TYPE.X, ...] }
+//   options:          { chaseAbilityId: ABILITY_ID_OF.CHASE_ABILITY_FOR_BUSTER_ATTACK_* }
+//   chaseAbilityDoneCountForIsDone always defaults to 5 (never overridden).
+//   Duration wraps via h() → STATUS_AILMENTS_PARAM_DURATION_TYPE.TIME → TIME.MEDIUM = 15s.
+function decodeBusterP(statusKey, statusId, argsText) {
+  // ── Character name from key ──
+  const suffix = statusKey.replace(/^CHASE_MODE_FOR_BUSTER_ATTACK_/, '');
+  const parts  = suffix.split('_');
+  const keyElemKeys = [];
+  while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
+    keyElemKeys.unshift(parts.pop());
+  }
+  const MINOR_WORDS = new Set(['of', 'the', 'a', 'an']);
+  const charRaw = parts.map((p, i) => {
+    const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
+  }).join(' ');
+  const charName = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  const elemQualifier = keyElemKeys.length > 0
+    ? ` (${keyElemKeys.map(k => elementDisplayName(k)).join('/')})`
+    : '';
+  const commonName = `Buster Chase Mode: ${charName}${elemQualifier}`;
+
+  // ── Ability condition — anyElementIds ──
+  const args     = splitTopLevelArgs(argsText);
+  const condText = args[0] ?? '';
+  const optsText = args[1] ?? '';
+  const anyElemM = condText.match(/anyElementIds\s*:\s*\[([^\]]+)\]/);
+  const elemKeys = anyElemM
+    ? [...anyElemM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => m[1])
+    : [];
+  const condDesc = elemKeys.length >= CBM_ALL_ELEMENTS.length
+    ? 'all elemental'
+    : elemKeys.map(k => elementDisplayName(k)).join('/');
+
+  // ── Chase ability ──
+  const chaseKeyM = optsText.match(/chaseAbilityId\s*:\s*[a-zA-Z$_]\w*\.([A-Z_0-9]+)/);
+  const chaseId   = chaseKeyM ? DB.abilityIdOf[chaseKeyM[1]] : null;
+  const chaseName = abilityDisplayName(chaseId) ?? chaseKeyM?.[1] ?? '?';
+
+  // ── Max count (always 5, but check for explicit override) ──
+  const maxM     = optsText.match(/chaseAbilityDoneCountForIsDone\s*:\s*(\d+)/);
+  const maxCount = maxM ? parseInt(maxM[1]) : 5;
+
+  const effects = `Triggers [${chaseName}] when using ${condDesc} abilities (max ${maxCount})`;
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '15 seconds',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'p (BusterAttack)',
+    decoded:         true,
+  };
+}
+
 // ─── Decoder dispatcher ───────────────────────────────────────────────────────
 function decodeStatus(statusKey) {
   const id = DB.statusAilmentsForward[statusKey];
@@ -943,16 +1011,17 @@ function decodeStatus(statusKey) {
   // Decoders receive `block` so they can look up any helper function bodies
   // within the correct define() namespace — never cross-referencing other blocks.
   let decoded = null;
-  const isCbm = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
-
-  const isTam = defineModule === 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
+  const isCbm    = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
+  const isTam    = defineModule === 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
+  const isBuster = defineModule === 'scenes/battle/statusAilmentsConfig/BusterAttack';
 
   if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
   if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
-  if (isCbm && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
-  if (isCbm && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
-  if (isTam && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);
-  if (isTam && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
+  if (isCbm    && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
+  if (isCbm    && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
+  if (isTam    && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);
+  if (isTam    && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
+  if (isBuster && funcName === 'p') decoded = decodeBusterP(statusKey, id, argsText);
 
   if (decoded) return decoded;
 
