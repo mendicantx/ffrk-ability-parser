@@ -1784,15 +1784,33 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
   }
 
   function inferTargetInfo() {
+    // Priority scan across all non-control sub-actions (exec + parsed)
+    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
+    const found = new Set();
+    const exec = getExec();
+    const sasToScan = exec !== parsed
+      ? [...parsed.subActions, ...exec.subActions]
+      : parsed.subActions;
+    for (const sa of sasToScan) {
+      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
+      const tStr = String(sa.target ?? '').toUpperCase();
+      if (!tStr || tStr === '0') continue;
+      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
+      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND');
+      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
+      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
+      if      (isEnemy && isAllT) found.add('All enemies');
+      else if (isEnemy)           found.add('Single enemy');
+      else if (isAlly  && isAllT) found.add('All allies');
+      else if (isAlly)            found.add('Single ally');
+      else if (isSelf)            found.add('Self');
+    }
+    // If attack SAs exist, use parseSubActionTarget for auto-target logic too
     const sa = getFirstAtkSA();
     if (sa) return parseSubActionTarget(sa.target);
-    // No attack sub-action: fall back to ability-level targeting
-    const range  = String(parsed.target.range   ?? '').toUpperCase();
-    const seg    = String(parsed.target.segment  ?? '').toUpperCase();
-    const isAllT = range.includes('ALL') || range === '4' || range === '5';
-    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
-    const target = isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy');
-    return { target, autoTarget: '' };
+    // No attacks: use highest-priority found target
+    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
+    return { target: '', autoTarget: '' };
   }
 
   function inferMultiplier() {
