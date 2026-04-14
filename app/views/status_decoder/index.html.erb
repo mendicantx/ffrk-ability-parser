@@ -937,6 +937,46 @@ function decodeOr(statusKey, statusId, argsText) {
   };
 }
 
+// ─── decodeXr: Xr() — SS gauge cost reduction for a specific Soul Strike ──────
+// Xr(gauges, parentSaKey, soulStrikeIdKey)
+//   gauges:        number of SS gauges to reduce cost by (e.g. 1)
+//   parentSaKey:   v.ENHANCE_* key this status is tied to (duration condition)
+//   soulStrikeIdKey: p.Conf.SOUL_STRIKE_ID_OF.KEY — the Soul Strike whose cost is reduced
+function decodeXr(statusKey, statusId, argsText) {
+  const args      = splitTopLevelArgs(argsText);
+  const gauges    = parseInt(args[0] ?? '1') || 1;
+  const ssKeyM    = (args[2] ?? '').match(/SOUL_STRIKE_ID_OF\.([A-Z_0-9]+)/);
+  const ssKeyName = ssKeyM ? ssKeyM[1] : null;
+  const ssId      = ssKeyName ? DB.abilityIdOf[ssKeyName] : null;
+  const ssName    = abilityDisplayName(ssId) ?? ssKeyName ?? '?';
+
+  // Derive a human-readable name from the status key
+  // e.g. REDUCE_CONSUME_POINT_SHIN_OUGI_FOR_GORDON → "Gordon"
+  const MINOR_WORDS = new Set(['of', 'the', 'a', 'an', 'for']);
+  const suffix    = statusKey.replace(/^REDUCE_CONSUME_POINT_/, '');
+  const charParts = suffix.split('_');
+  const commonName = 'Reduced SS Cost: ' + charParts.map((p, i) => {
+    const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
+  }).join(' ');
+
+  const gaugeStr = gauges === 1 ? '1 gauge' : `${gauges} gauges`;
+  const effects  = `Reduces SS gauge cost by ${gaugeStr} for [${ssName}]`;
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects,
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'Xr',
+    decoded:         true,
+  };
+}
+
 // ─── decodeBusterP: p() — BusterAttack chase mode ────────────────────────────
 // p(abilityCondition, options?)
 //   abilityCondition: { anyElementIds: [ELEMENT_TYPE.X, ...] }
@@ -1018,6 +1058,7 @@ function decodeStatus(statusKey) {
 
   if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
   if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
+  if (funcName === 'Xr') decoded = decodeXr(statusKey, id, argsText);
   if (isCbm    && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
   if (isCbm    && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
   if (isTam    && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);

@@ -1948,7 +1948,10 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
 
 function renderStatusList(statuses, label) {
   if (!statuses || statuses.length === 0) return '';
-  const tags = statuses.map(s => statusTag(s)).join('');
+  const tags = statuses.map(s => {
+    const idLabel = s.id != null ? ` <span style="color:#888;font-size:11px;">(${s.id})</span>` : '';
+    return statusTag(s) + idLabel;
+  }).join('');
   return `<tr><th>${label}</th><td>${tags}</td></tr>`;
 }
 
@@ -2391,7 +2394,8 @@ function renderParsedInfoSection(p) {
       const dur = s.duration ? ` · ${s.duration}` : '';
       const effText = statusEffectsText(s);
       const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
-      html += `<tr><th>Status (${label}${dur})</th><td>${statusTag(s)}${effects}</td></tr>`;
+      const idLabel = s.id != null ? ` <span style="color:#888;font-size:11px;">(${s.id})</span>` : '';
+      html += `<tr><th>Status (${label}${dur})</th><td>${statusTag(s)}${idLabel}${effects}</td></tr>`;
       if (s.fromBundle) html += row('  (from bundle)', DB.statusBundles[s.fromBundle] ?? s.fromBundle, 'val-str');
     }
   }
@@ -2418,7 +2422,8 @@ function renderParsedInfoSection(p) {
         for (const s of sa.statuses) {
           const effText = statusEffectsText(s);
           const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
-          html += `<tr><th>Status</th><td>${statusTag(s)}${effects}</td></tr>`;
+          const idLabel = s.id != null ? ` <span style="color:#888;font-size:11px;">(${s.id})</span>` : '';
+          html += `<tr><th>Status</th><td>${statusTag(s)}${idLabel}${effects}</td></tr>`;
         }
       }
       if (sa.synchroConditions.length) {
