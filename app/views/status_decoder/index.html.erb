@@ -1045,7 +1045,28 @@ function decodeStatus(statusKey) {
   if (id == null) return { error: `Status key not found in battle.js: ${statusKey}` };
 
   const assignment = DB.statusAssignments[statusKey];
-  if (!assignment) return { error: `No assignment found for ${statusKey}` };
+  if (!assignment) {
+    const raw = findRawAssignment(statusKey);
+    return {
+      id,
+      codedName:       statusKey,
+      warning:         `Assignment not in any scanned block${raw ? ` (found in: ${raw.defineModule})` : ' (not found in battle.js)'}`,
+      commonName:      null,
+      effects:         null,
+      defaultDuration: null,
+      mndModifier:     '-',
+      exclusiveStatus: '-',
+      notes:           '',
+      funcName:        raw?.funcName ?? null,
+      argsText:        raw?.argsText ?? null,
+      defineModule:    raw?.defineModule ?? null,
+      _block:          raw?.block ?? null,
+      _funcName:       raw?.funcName ?? null,
+      _argsText:       raw?.argsText ?? null,
+      _statusKey:      statusKey,
+      decoded:         false,
+    };
+  }
 
   const { funcName, argsText, defineModule, block } = assignment;
 
@@ -1065,7 +1086,13 @@ function decodeStatus(statusKey) {
   if (isTam    && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
   if (isBuster && funcName === 'p') decoded = decodeBusterP(statusKey, id, argsText);
 
-  if (decoded) return decoded;
+  if (decoded) {
+    decoded._block      = block;
+    decoded._funcName   = funcName;
+    decoded._argsText   = argsText;
+    decoded._statusKey  = statusKey;
+    return decoded;
+  }
 
   // Fallback: not yet implemented
   return {
@@ -1080,8 +1107,166 @@ function decodeStatus(statusKey) {
     funcName,
     argsText,
     defineModule,
+    _block:      block,
+    _funcName:   funcName,
+    _argsText:   argsText,
+    _statusKey:  statusKey,
     decoded:         false,
   };
+}
+
+// ─── Raw battle.js fallback search ───────────────────────────────────────────
+// Used when a status key is found in STATUS_AILMENTS_TYPE but not in any scanned block.
+function findRawAssignment(statusKey) {
+  if (!_rawBattleJs) return null;
+  const re = new RegExp(`[^A-Z_0-9]${statusKey}\\]\\s*=\\s*([a-zA-Z$_][a-zA-Z0-9$_]*)\\s*\\(`);
+  const m = re.exec(_rawBattleJs);
+  if (!m) return null;
+  const funcName  = m[1];
+  const argsStart = m.index + m[0].length;
+  let pdepth = 1, i = argsStart;
+  while (i < _rawBattleJs.length && pdepth > 0) {
+    if      (_rawBattleJs[i] === '(') pdepth++;
+    else if (_rawBattleJs[i] === ')') pdepth--;
+    i++;
+  }
+  const argsText = _rawBattleJs.slice(argsStart, i - 1);
+  // Find nearest preceding define() to get module name and block
+  const defineRe = /define\("([^"]+)"/g;
+  let lastDefine = null, dm;
+  while ((dm = defineRe.exec(_rawBattleJs)) !== null && dm.index < m.index) lastDefine = dm;
+  let block = '', defineModule = 'unknown';
+  if (lastDefine) {
+    defineModule = lastDefine[1];
+    const fnStart = _rawBattleJs.indexOf('function', lastDefine.index + lastDefine[0].length);
+    if (fnStart !== -1) {
+      const brace = _rawBattleJs.indexOf('{', fnStart);
+      if (brace !== -1) {
+        let bd = 1, bi = brace + 1;
+        while (bi < _rawBattleJs.length && bd > 0) {
+          if      (_rawBattleJs[bi] === '{') bd++;
+          else if (_rawBattleJs[bi] === '}') bd--;
+          bi++;
+        }
+        block = _rawBattleJs.slice(brace, bi);
+      }
+    }
+  }
+  return { funcName, argsText, block, defineModule };
+}
+
+// ─── JS prettifier ───────────────────────────────────────────────────────────
+// Simple formatter for minified battle.js snippets.
+function prettyJs(src) {
+  const TAB = '    ';
+  let out = '';
+  let depth = 0;
+  let i = 0;
+  const stack = []; // tracks '{', '[', '('
+
+  function trimEnd() { out = out.replace(/[ \t]+$/, ''); }
+  function nl()      { trimEnd(); out += '\n' + TAB.repeat(depth); }
+  function skipWs()  { while (i < src.length && ' \t\n\r'.includes(src[i])) i++; }
+
+  while (i < src.length) {
+    const ch = src[i];
+
+    // String literals
+    if (ch === '"' || ch === "'") {
+      const q = ch; out += q; i++;
+      while (i < src.length) {
+        if (src[i] === '\\') { out += src[i] + (src[i + 1] ?? ''); i += 2; continue; }
+        if (src[i] === q)    { out += q; i++; break; }
+        out += src[i++];
+      }
+      continue;
+    }
+
+    if (ch === '{') {
+      if (out.length && !' \n('.includes(out[out.length - 1])) out += ' ';
+      out += '{'; stack.push('{'); depth++; i++; skipWs();
+      if (i < src.length && src[i] !== '}') nl();
+      continue;
+    }
+    if (ch === '}') {
+      stack.pop(); depth = Math.max(0, depth - 1); nl(); out += '}'; i++;
+      continue;
+    }
+    if (ch === '[') { stack.push('['); out += '['; i++; continue; }
+    if (ch === ']') { stack.pop();    out += ']'; i++; continue; }
+    if (ch === '(') { stack.push('('); out += '('; i++; continue; }
+    if (ch === ')') { stack.pop();    out += ')'; i++; continue; }
+
+    if (ch === ';') { out += ';'; i++; skipWs(); nl(); continue; }
+
+    if (ch === ',') {
+      out += ','; i++; skipWs();
+      if (stack[stack.length - 1] === '{') nl();
+      else out += ' ';
+      continue;
+    }
+
+    if (ch === ':' && stack[stack.length - 1] === '{') {
+      out += ': '; i++; skipWs(); continue;
+    }
+
+    // Pad = assignment (not ==, !=, <=, >=)
+    if (ch === '=' && src[i + 1] !== '=' && !'!<>'.includes(src[i - 1] ?? '')) {
+      out += ' = '; i++; skipWs(); continue;
+    }
+
+    // Whitespace normalisation
+    if (' \t\n\r'.includes(ch)) {
+      const last = out[out.length - 1] ?? '';
+      if (last !== ' ' && last !== '\n') out += ' ';
+      i++; continue;
+    }
+
+    out += ch; i++;
+  }
+  return out.trim();
+}
+
+// ─── Source code extraction ───────────────────────────────────────────────────
+// Extract the full definition of a named function from a define() block body.
+function extractFuncDef(name, block) {
+  // Matches: var NAME=function(...){  or  NAME=function(...){  or  function NAME(...){
+  const escaped = name.replace(/[$]/g, '\\$');
+  const re = new RegExp(
+    `(?:var\\s+${escaped}\\s*=\\s*function|\\b${escaped}\\s*=\\s*function|function\\s+${escaped})\\s*\\([^)]*\\)\\s*\\{`
+  );
+  const m = re.exec(block);
+  if (!m) return null;
+  const braceStart = block.indexOf('{', m.index + m[0].length - 1);
+  if (braceStart === -1) return null;
+  let depth = 1, i = braceStart + 1;
+  while (i < block.length && depth > 0) {
+    if      (block[i] === '{') depth++;
+    else if (block[i] === '}') depth--;
+    i++;
+  }
+  return block.slice(m.index, i);
+}
+
+// Collect function definition + all callees defined in the same block, recursively.
+function collectSourceDefs(rootName, block) {
+  const seen = new Set();
+  const defs = [];
+  function collect(name) {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const def = extractFuncDef(name, block);
+    if (!def) return;
+    defs.push({ name, def });
+    // Find all identifiers immediately followed by '(' — potential callees
+    const callRe = /\b([a-zA-Z$_][a-zA-Z0-9$_]*)\s*\(/g;
+    let cm;
+    while ((cm = callRe.exec(def)) !== null) {
+      if (cm[1] !== name) collect(cm[1]);
+    }
+  }
+  collect(rootName);
+  return defs;
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
@@ -1089,6 +1274,13 @@ function renderResult(result) {
   if (result.error) {
     document.getElementById('output').innerHTML = `<div class="err-box">${escHtml(result.error)}</div>`;
     return;
+  }
+  if (result.warning) {
+    // Show warning inline but continue rendering the card
+    let warnHtml = `<div class="err-box" style="margin-bottom:8px;">${escHtml(result.warning)}</div>`;
+    document.getElementById('output').innerHTML = warnHtml;
+  } else {
+    document.getElementById('output').innerHTML = '';
   }
 
   const sheetRow = DB.statusMap[result.id];
@@ -1140,11 +1332,19 @@ function renderResult(result) {
     html += `<div class="decoder-note">Decoded via <strong>${escHtml(result.funcName)}</strong>()</div>`;
   }
 
-  // Raw call expandable
-  if (result.argsText != null) {
+  // Source code expandable
+  if (result._block != null && result._funcName != null) {
+    const defs = collectSourceDefs(result._funcName, result._block);
+    const assignVar = result._statusKey ?? '?';
+    const rawCall   = `${result._funcName}(${result._argsText ?? ''})`;
+    let srcText = `// Assignment\n${assignVar} = ${rawCall}`;
+    if (defs.length > 0) {
+      srcText += '\n\n// Function definition(s)\n';
+      srcText += defs.map(d => prettyJs(d.def)).join('\n\n');
+    }
     html += `<div class="raw-section"><details>`;
-    html += `<summary>Raw function call</summary>`;
-    html += `<div class="raw-block"><span class="raw-func">${escHtml(result.funcName)}</span>(<span class="raw-args">${escHtml(result.argsText)}</span>)</div>`;
+    html += `<summary>Source code</summary>`;
+    html += `<div class="raw-block">${escHtml(srcText)}</div>`;
     html += `</details></div>`;
   }
 
@@ -1157,7 +1357,7 @@ function renderResult(result) {
   }
 
   html += `</div>`;
-  document.getElementById('output').innerHTML = html;
+  document.getElementById('output').innerHTML += html;
 }
 
 function copyTsv(btn) {
