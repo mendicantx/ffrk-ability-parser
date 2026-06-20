@@ -328,10 +328,11 @@ function buildStatusAssignments() {
     return count;
   }
 
-  // Main StatusAilmentsConfig block — assignments use A[v.KEY]=FUNC(
+  // Main StatusAilmentsConfig block — assignments use O[m.KEY]=FUNC(
+  // (previously A[v.KEY] — variable names change between battle.js repacks)
   const mainCount = scanBlock(
     'scenes/battle/StatusAilmentsConfig',
-    /A\[v\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
+    /O\[m\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
   );
   if (mainCount === 0) throw new Error('StatusAilmentsConfig block not found or empty');
 
@@ -352,6 +353,28 @@ function buildStatusAssignments() {
     'scenes/battle/statusAilmentsConfig/BusterAttack',
     /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
   );
+
+  // Extra Buddy Mode — scan raw JS directly for EXTRA_BUDDY_MODE_* assignments.
+  // extractDefineBlock is unreliable for this module; the key prefix is unique enough
+  // that a raw scan won't pick up false positives.
+  {
+    const ebmModule = 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
+    const ebmPat    = /c\[s\.(EXTRA_BUDDY_MODE_[A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g;
+    let em;
+    while ((em = ebmPat.exec(_rawBattleJs)) !== null) {
+      const statusKey = em[1];
+      const funcName  = em[2];
+      const argsStart = em.index + em[0].length;
+      let pdepth = 1, ei = argsStart;
+      while (ei < _rawBattleJs.length && pdepth > 0) {
+        if (_rawBattleJs[ei] === '(') pdepth++;
+        else if (_rawBattleJs[ei] === ')') pdepth--;
+        ei++;
+      }
+      const argsText = _rawBattleJs.slice(argsStart, ei - 1);
+      DB.statusAssignments[statusKey] = { funcName, argsText, defineModule: ebmModule, block: '' };
+    }
+  }
 }
 
 // ─── Argument splitting ───────────────────────────────────────────────────────
@@ -1039,6 +1062,121 @@ function decodeBusterP(statusKey, statusId, argsText) {
   };
 }
 
+// ─── Extra Buddy Mode p() decoder ────────────────────────────────────────────
+// p({attachElementIds, abilityCondition, repeatNum?, extraRepeat?, increaseExecutedDamage?,
+//    increaseCastTimeFactor?, chaseAbilityAtb?, flightDuration?})
+// p() is a thin wrapper that adds repeatNum:1 as default then calls h().
+// All per-character statuses: attach elements to extra kiwami abilities, trigger once extra.
+// Optional: extra kiwami re-trigger (extraRepeat), damage boost, quick cast, ATB chase, flight.
+function decodeEbmP(statusKey, statusId, argsText) {
+  // ── 1. Character name from status key (strip EXTRA_BUDDY_MODE_ prefix) ──
+  const suffix = statusKey.replace(/^EXTRA_BUDDY_MODE_/, '');
+  const parts  = suffix.split('_');
+  const keyElemKeys = [];
+  while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
+    keyElemKeys.unshift(parts.pop());
+  }
+  const MINOR_WORDS = new Set(['of', 'the', 'a', 'an']);
+  const charRaw = parts.map((w, i) => {
+    const word = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    return (i > 0 && MINOR_WORDS.has(word.toLowerCase())) ? word.toLowerCase() : word;
+  }).join(' ');
+  const charName      = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  const elemQualifier = keyElemKeys.length > 0
+    ? ` (${keyElemKeys.map(k => elementDisplayName(k)).join('/')})`
+    : '';
+  const commonName    = `Extra Mode: ${charName}${elemQualifier}`;
+
+  // ── 2. Ability condition (anyElementIds inside abilityCondition:{...}) ──
+  const anyElemM     = argsText.match(/abilityCondition\s*:\s*\{[^}]*anyElementIds\s*:\s*\[([^\]]+)\]/);
+  const condElemKeys = anyElemM
+    ? [...anyElemM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => m[1])
+    : [];
+  const condDesc = condElemKeys.length >= CBM_ALL_ELEMENTS.length
+    ? 'all elemental'
+    : condElemKeys.map(k => elementDisplayName(k)).join('/');
+
+  // ── 3. attachElementIds ──
+  const attachM    = argsText.match(/attachElementIds\s*:\s*\[([^\]]+)\]/);
+  const attachKeys = attachM
+    ? [...attachM[1].matchAll(/ELEMENT_TYPE\.([A-Z_]+)/g)].map(m => m[1])
+    : [];
+  const attachDesc = attachKeys.map(k => elementDisplayName(k)).join('/');
+
+  // ── 4. Build effects list ──
+  const effectParts = [];
+
+  // Always (ATTACH_ELEMENT_EXTRA_KIWAMI): damage boost based on element attachment level
+  if (attachDesc) {
+    const ekMapM = _rawBattleJs.match(/ATTACH_ELEMENT_EXTRA_KIWAMI\s*\]\s*=\s*\{[^}]*DAMAGE_FACTOR_MAP\s*:\s*\{([^}]+)\}/);
+    let ekPcts = '10/20/30/40/50';
+    if (ekMapM) {
+      const entries = [...ekMapM[1].matchAll(/\d+\s*:\s*(\d+)/g)].map(m => m[1]);
+      if (entries.length) ekPcts = entries.join('/');
+    }
+    effectParts.push(`Increases ${attachDesc} ability damage by ${ekPcts}% at Attach ${attachDesc} level 1/2/3/4/5`);
+  }
+
+  // Always (repeatNum:1 from p, REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE):
+  // condition is t.abilityCondition (e.g. anyElementIds:[EARTH]) — not extra-kiwami-specific
+  effectParts.push(`${condDesc} abilities trigger 1 additional time`);
+
+  // extraRepeat: another seq trigger for isExtraKiwamiAbility (default repeatNum:1, max 5)
+  if (/extraRepeat\s*:\s*!0/.test(argsText) || /extraRepeat\s*:\s*\{/.test(argsText)) {
+    const rptM     = argsText.match(/extraRepeat\s*:\s*\{[^}]*repeatNum\s*:\s*(\d+)/);
+    const maxM     = argsText.match(/extraRepeat\s*:\s*\{[^}]*seqAbilityDoneCountForIsDone\s*:\s*(\d+)/);
+    const rptNum   = rptM ? parseInt(rptM[1])   : 1;
+    const maxCount = maxM ? parseInt(maxM[1])   : 5;
+    const timesStr = rptNum === 1 ? '1 additional time' : `${rptNum} additional times`;
+    effectParts.push(`${condDesc} abilities trigger ${timesStr} (max ${maxCount})`);
+  }
+
+  // increaseExecutedDamage: MEDIUM (+30%) for matching element abilities (+ isAbility)
+  if (/increaseExecutedDamage\s*:\s*!0/.test(argsText) || /increaseExecutedDamage\s*:\s*\{/.test(argsText)) {
+    const sizeM    = argsText.match(/increaseExecutedDamage\s*:\s*\{[^}]*DAMAGE_FACTOR\.([A-Z_0-9]+)/);
+    const sizeName = sizeM?.[1] ?? 'MEDIUM';
+    const factorVal = DB.damageFactor[sizeName];
+    const pct      = factorVal != null ? factorVal - 100 : 30;
+    effectParts.push(`${condDesc} abilities deal ${pct}% more damage`);
+  }
+
+  // increaseCastTimeFactor: Quick Cast MAX for matching element abilities (+ isAbility)
+  if (/increaseCastTimeFactor\s*:\s*!0/.test(argsText) || /increaseCastTimeFactor\s*:\s*\{/.test(argsText)) {
+    effectParts.push(`${condDesc} abilities have Quick Cast`);
+  }
+
+  // chaseAbilityAtb: ATB chase (default MEDIUM ATB 1, max 3) after matching element abilities
+  if (/chaseAbilityAtb\s*:\s*!0/.test(argsText) || /chaseAbilityAtb\s*:\s*\{/.test(argsText)) {
+    const chaseKeyM = argsText.match(/chaseAbilityAtb\s*:\s*\{[^}]*chaseAbilityId\s*:\s*[a-zA-Z$_]\w*\.([A-Z_0-9]+)/);
+    const chaseKey  = chaseKeyM?.[1] ?? 'INFLICT_SA_TO_EXECUTER_OF_SET_ATB_TIME_FACTOR_MEDIUM_1';
+    const chaseId   = DB.abilityIdOf[chaseKey];
+    const chaseName = abilityDisplayName(chaseId) ?? 'ATB Up';
+    const maxM      = argsText.match(/chaseAbilityAtb\s*:\s*\{[^}]*chaseAbilityDoneCountForIsDone\s*:\s*(\d+)/);
+    const maxCount  = maxM ? parseInt(maxM[1]) : 3;
+    effectParts.push(`triggers [${chaseName}] after using ${condDesc} abilities (max ${maxCount})`);
+  }
+
+  // flightDuration: no wait time for jumps
+  if (/flightDuration\s*:\s*\d+/.test(argsText)) effectParts.push('No air time for jump abilities');
+
+  const ebmBaseId   = DB.statusAilmentsForward['EXTRA_BUDDY_MODE'];
+  const ebmBaseName = DB.statusMap[ebmBaseId]?.commonName || 'Extra Buddy Mode';
+  effectParts.push(`removed if user hasn't [${ebmBaseName}]`);
+
+  return {
+    id:              statusId,
+    codedName:       statusKey,
+    commonName,
+    effects:         effectParts.join(', '),
+    defaultDuration: '-',
+    mndModifier:     '-',
+    exclusiveStatus: '-',
+    notes:           '',
+    funcName:        'p (ExtraBuddyMode)',
+    decoded:         true,
+  };
+}
+
 // ─── Decoder dispatcher ───────────────────────────────────────────────────────
 function decodeStatus(statusKey) {
   const id = DB.statusAilmentsForward[statusKey];
@@ -1076,6 +1214,7 @@ function decodeStatus(statusKey) {
   const isCbm    = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
   const isTam    = defineModule === 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
   const isBuster = defineModule === 'scenes/battle/statusAilmentsConfig/BusterAttack';
+  const isEbm    = defineModule === 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
 
   if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
   if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
@@ -1085,6 +1224,7 @@ function decodeStatus(statusKey) {
   if (isTam    && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);
   if (isTam    && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
   if (isBuster && funcName === 'p') decoded = decodeBusterP(statusKey, id, argsText);
+  if (isEbm    && funcName === 'p') decoded = decodeEbmP(statusKey, id, argsText);
 
   if (decoded) {
     decoded._block      = block;
