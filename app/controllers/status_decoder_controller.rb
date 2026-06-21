@@ -15,6 +15,8 @@ class StatusDecoderController < ApplicationController
     result = { status: SheetsImporter.fetch(url) }
     other_url = ENV['OTHER_SHEET_URL']
     result[:other] = SheetsImporter.fetch(other_url) if other_url.present?
+    extra_url = ENV['EXTRA_SHEET_URL']
+    result[:extra] = SheetsImporter.fetch(extra_url) if extra_url.present?
     render json: result
   rescue => e
     render json: { error: e.message }, status: :internal_server_error

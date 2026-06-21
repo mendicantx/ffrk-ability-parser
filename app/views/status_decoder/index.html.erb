@@ -130,6 +130,7 @@ const DB = {
   // Sheets
   statusMap:             {},   // id → { commonName, effects, duration, codedName }
   otherNameMap:          {},   // other ability id → name
+  extraByCharacter:      {},   // character name → [ability Name strings] from Extra sheet
 };
 
 // ─── Load state helpers ──────────────────────────────────────────────────────
@@ -261,6 +262,17 @@ async function loadSheets() {
     for (const r of (data.other || [])) {
       const id = parseInt(r['ID']);
       if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
+    }
+
+    // Extra sheet: build character → [ability names] lookup for extraRepeat descriptions
+    DB.extraByCharacter = {};
+    for (const r of (data.extra || [])) {
+      const char = (r['Character'] || '').trim();
+      const name = (r['Name'] || '').trim();
+      if (char && name) {
+        if (!DB.extraByCharacter[char]) DB.extraByCharacter[char] = [];
+        if (!DB.extraByCharacter[char].includes(name)) DB.extraByCharacter[char].push(name);
+      }
     }
 
     setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows (live)`);
@@ -1122,14 +1134,18 @@ function decodeEbmP(statusKey, statusId, argsText) {
   // condition is t.abilityCondition (e.g. anyElementIds:[EARTH]) — not extra-kiwami-specific
   effectParts.push(`${condDesc} abilities trigger 1 additional time`);
 
-  // extraRepeat: another seq trigger for isExtraKiwamiAbility (default repeatNum:1, max 5)
+  // extraRepeat: seq trigger for isExtraKiwamiAbility (default repeatNum:1, max 5)
+  // Condition is isExtraKiwamiAbility:true — fires only for the extra kiwami abilities,
+  // not all element abilities. Look up their names from the Extra sheet by character.
   if (/extraRepeat\s*:\s*!0/.test(argsText) || /extraRepeat\s*:\s*\{/.test(argsText)) {
     const rptM     = argsText.match(/extraRepeat\s*:\s*\{[^}]*repeatNum\s*:\s*(\d+)/);
     const maxM     = argsText.match(/extraRepeat\s*:\s*\{[^}]*seqAbilityDoneCountForIsDone\s*:\s*(\d+)/);
     const rptNum   = rptM ? parseInt(rptM[1])   : 1;
     const maxCount = maxM ? parseInt(maxM[1])   : 5;
     const timesStr = rptNum === 1 ? '1 additional time' : `${rptNum} additional times`;
-    effectParts.push(`${condDesc} abilities trigger ${timesStr} (max ${maxCount})`);
+    const ekNames  = DB.extraByCharacter[charName] ?? [];
+    const subject  = ekNames.length > 0 ? ekNames.join('/') : `${condDesc} extra kiwami abilities`;
+    effectParts.push(`${subject} trigger${rptNum === 1 ? 's' : ''} ${timesStr} (max ${maxCount})`);
   }
 
   // increaseExecutedDamage: MEDIUM (+30%) for matching element abilities (+ isAbility)
