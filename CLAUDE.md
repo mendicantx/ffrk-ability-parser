@@ -2,6 +2,10 @@
 
 A Rails 7 data mashup and analysis app for FFRK community data, intended to eventually serve as a public-facing website.
 
+## Decisions log
+
+Decisions made during development — field meanings, naming conventions, sheet column mappings, and parsing choices — are tracked in [`docs/decisions.md`](docs/decisions.md). When a new decision is made (e.g. "this field means X in the sheet", "we call this mechanic Y"), add it there so future sessions have context.
+
 ## Project decisions
 
 | Aspect | Decision | Reason |
