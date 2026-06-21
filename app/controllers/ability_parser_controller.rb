@@ -9,11 +9,13 @@ class AbilityParserController < ApplicationController
   # GET /ability_parser/sheet_data
   # Fetches all required sheets live from their configured URLs on every request.
   SHEET_VARS = {
-    status:      'STATUS_SHEET_URL',
-    action_args: 'ACTION_ARGS_SHEET_URL',
-    soul_breaks: 'SOUL_BREAKS_SHEET_URL',
-    other:       'OTHER_SHEET_URL',
-    characters:  'CHARACTERS_SHEET_URL',
+    status:          'STATUS_SHEET_URL',
+    action_args:     'ACTION_ARGS_SHEET_URL',
+    soul_breaks:     'SOUL_BREAKS_SHEET_URL',
+    other:           'OTHER_SHEET_URL',
+    characters:      'CHARACTERS_SHEET_URL',
+    hero_abilities:  'HERO_ABILITIES_SHEET_URL',
+    extra:           'EXTRA_SHEET_URL',
   }.freeze
 
   def sheet_data
