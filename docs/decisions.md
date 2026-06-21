@@ -137,6 +137,60 @@ for this module's structure. Decoded by `decodeEbmP`.
   - `decodeEbmP`: decodes `EXTRA_BUDDY_MODE_*` statuses
   - EBM scan in `buildStatusAssignments`: raw JS scan for `c[s.(EXTRA_BUDDY_MODE_*)]` pattern
 
+---
+
+## Status terminology
+
+### "Zenith" = `ULTIMATE_BUDDY_MODE`
+The status coded name family `ULTIMATE_BUDDY_MODE_*` corresponds to what the community calls **Zenith Mode** (ゼニス in JP). When the codebase or sheet uses "Zenith", it refers to these statuses. The status decoder module is `scenes/battle/statusAilmentsConfig/UltimateBuddyMode`.
+
+### "Accel Mode" = `ACCEL_BUDDY_MODE`
+Coded name family `ACCEL_BUDDY_MODE_*`. The JP term is アクセル. Community name: Accel Mode.
+
+### "Extra Mode" = `EXTRA_BUDDY_MODE`
+Coded name family `EXTRA_BUDDY_MODE_*`. Base status id: 56415. Community name: Extra Mode.
+The status decoder `decodeEbmP` handles these; see XSB section above for full detail.
+
+---
+
+## infer_statuses.py decisions
+
+### Accel Mode: fingerprint detection for minified function names
+The `ACCEL_BUDDY_MODE` config in battle.js uses four helper functions whose single-letter variable names **change every time battle.js is repacked**. The parser cannot rely on names like `var p = function(...)`.
+
+Decision: detect function types by **body content fingerprints**:
+| Fingerprint in body | Function type |
+|---------------------|---------------|
+| `chaseAbilityId:void 0` | d-type (chase) |
+| `CAST_TIME_FACTOR.MEDIUM` | m-type (cast) |
+| `COUNT_ABILITY_USED` | v-type (boost) |
+| `.each(r.effects` | p-type (pass) |
+
+If battle.js is repacked and Accel Mode inference breaks, check that these fingerprints still appear in the corresponding function bodies. They are stable game-logic strings, not minifier artifacts.
+
+### `CHARACTER_NAMES` corrections (infer_statuses.py)
+Title-casing coded name suffixes produces wrong display names for some characters. These are explicitly corrected in the `CHARACTER_NAMES` dict in `infer_statuses.py`:
+
+| Coded fragment | Display name | Reason |
+|----------------|--------------|--------|
+| `ARTIMISIA` | Ultimecia | JP romanization differs from EN localisation |
+| `WOR` | Wol | Abbreviation in coded name |
+| `CAIN` | Kain | JP romanization |
+| `BUTS` | Bartz | JP romanization |
+| `MASH` | Sabin | JP romanization (Mash) |
+| `TINA` | Terra | JP name (Tina) |
+| `DRMOG` | Dr. Mog | Compound word, needs period |
+| `DESHI` | Tyro | JP name (Deshi = "apprentice") |
+
+Add new entries here whenever a coded name suffix title-cases incorrectly.
+
+### `_cap_word` — CID is not a Roman numeral
+The original `_cap_word` implementation checked if a word was a Roman numeral using character-class matching (`set(w) ⊆ {I,V,X,L,C,D,M}`). This incorrectly preserved "CID" as all-caps.
+
+Decision: changed to explicit **set membership** (`w in _ROMAN_NUMERALS_SET`) where the set contains only known game-relevant numerals: `{II, III, IV, V, VI, VII, VIII, IX, X, XI, XII, XIII, XIV, XV, XVI}`. Words like CID, DID, MIX are no longer mistaken for Roman numerals.
+
+---
+
 ### Google Sheets
 | Sheet | Env var | gid | Contents |
 |-------|---------|-----|----------|
