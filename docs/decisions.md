@@ -113,9 +113,12 @@ Status decoder (`buildStatusAssignments`) scans this module by searching the raw
 for `c\[s\.(EXTRA_BUDDY_MODE_[A-Z_0-9]+)\]=` — bypasses `extractDefineBlock` which was unreliable
 for this module's structure. Decoded by `decodeEbmP`.
 
-### extraRepeat names extra kiwami abilities by name, not by element
+### extraRepeat always says "Extra Abilities"
 The `extraRepeat: !0` effect uses `abilityCondition:{isExtraKiwamiAbility:true}` — it fires for the specific extra kiwami abilities defined in the soul strike (arg3/5/7/9/11), NOT for all element-matching abilities.
-Description format: `<AbilityName> triggers 1 additional time (max 5)` — ability name comes from the Extra sheet, looked up by character name. Falls back to "Earth extra kiwami abilities" if the sheet isn't populated.
+
+**Decision**: always render as `Extra Abilities trigger 1 additional time (max 5)`. Reason: new extra kiwami abilities are added over time and a dynamic name lookup would go stale without re-parsing every affected soul break.
+
+**Discarded approach**: an earlier implementation looked up ability names from the Extra sheet via `DB.extraByCharacter[charName]` (character → [Name] from the Extra sheet). The infrastructure is still in place (the Extra sheet is loaded into `DB.extraByCharacter` in the status decoder) in case it becomes useful elsewhere.
 
 ### Key effect parameters (h() function in ExtraBuddyMode config)
 | Parameter | Effect |

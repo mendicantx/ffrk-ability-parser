@@ -1143,9 +1143,7 @@ function decodeEbmP(statusKey, statusId, argsText) {
     const rptNum   = rptM ? parseInt(rptM[1])   : 1;
     const maxCount = maxM ? parseInt(maxM[1])   : 5;
     const timesStr = rptNum === 1 ? '1 additional time' : `${rptNum} additional times`;
-    const ekNames  = DB.extraByCharacter[charName] ?? [];
-    const subject  = ekNames.length > 0 ? ekNames.join('/') : `${condDesc} extra kiwami abilities`;
-    effectParts.push(`${subject} trigger${rptNum === 1 ? 's' : ''} ${timesStr} (max ${maxCount})`);
+    effectParts.push(`Extra Abilities trigger ${timesStr} (max ${maxCount})`);
   }
 
   // increaseExecutedDamage: MEDIUM (+30%) for matching element abilities (+ isAbility)
