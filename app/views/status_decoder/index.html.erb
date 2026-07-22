@@ -1232,8 +1232,10 @@ function decodeStatus(statusKey) {
   const isEbm    = defineModule === 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
 
   if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
-  if (funcName === 'Or') decoded = decodeOr(statusKey, id, argsText);
-  if (funcName === 'Xr') decoded = decodeXr(statusKey, id, argsText);
+  if (['qr', 'Rr', 'zr'].includes(funcName)) decoded = decodeOr(statusKey, id, argsText);
+  // Note: 'Xr' was previously REDUCE_CONSUME_POINT — it was repurposed to INCREASE_ELEMENT_ATK in the last repack.
+  // REDUCE_CONSUME_POINT now uses 'oi' (same args as old Xr) and 'ni' (empty args, no decoder yet).
+  if (funcName === 'oi') decoded = decodeXr(statusKey, id, argsText);
   if (isCbm    && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
   if (isCbm    && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
   if (isTam    && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);

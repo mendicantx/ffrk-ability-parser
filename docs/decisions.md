@@ -51,6 +51,18 @@ This was previously `A[v.KEY]=FUNC(`. Variable names shift each time battle.js i
 If `buildStatusAssignments` throws "StatusAilmentsConfig block not found or empty", check the pattern.
 To find the current pattern: search for `STATUS_AILMENTS_TYPE:{` in the unpacked JS, then look for `VAR[SHORT_VAR.KEY]=FUNC(` assignments nearby.
 
+### Function name dispatch (main StatusAilmentsConfig block)
+The local function names change on every repack. `decodeStatus` dispatches by funcName; update these if statuses stop decoding after a repack:
+
+| Status type | Old funcName | Current funcName (July 2026) | Decoder |
+|-------------|-------------|------------------------------|---------|
+| General damage boost | `nt` | `nt` (unchanged) | `decodeNt` |
+| Learning Mode (`LEARNING_MODE_*`) | `Or` | `qr` / `Rr` / `zr` | `decodeOr` |
+| SS gauge cost reduction (`REDUCE_CONSUME_POINT_*`) | `Xr` | `oi` (+ `ni` with no args) | `decodeXr` (for `oi` only) |
+| Element ATK debuffs (`INCREASE_ELEMENT_ATK_*`) | *(new)* | `Xr` | no decoder yet |
+
+The per-module scanners (CrystalBuddyMode `c[s.]`, TacticalAwakeMode `h[o.]`, BusterAttack `c[s.]`, ExtraBuddyMode raw scan) and their internal function names (`p`, `d`, `v`, `h`) were unchanged in this repack.
+
 ---
 
 ## Extra Zetsugi (XSB) parsing — `ExtraZetsugiAction` (action_id: 243)
