@@ -1975,6 +1975,10 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     26: 'Buster',
   };
 
+  // Counter is N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
+  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
+  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+
   const colValues = {
     'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
     'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
@@ -1988,7 +1992,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'Element':        { val: element,                                                                                     src: false },
     'Time':           { val: parsed.castTime ?? '',                                                                      src: false },
     'Effects':        { val: genEffects,                                                                                  src: false },
-    'Counter':        { val: parsed.counterable === 'Yes' ? 'Y' : 'N',                                                   src: false },
+    'Counter':        { val: counter,                                                                                     src: false },
     'Auto Target':    { val: autoTarget,                                                                                  src: false },
     'Points':         { val: parsed.sbCost ?? '',                                                                        src: false },
     'Mastery Bonus':  { val: '',                                                                                          src: false },
@@ -2196,7 +2200,8 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     multiplier = '';
   }
   const element                   = inferElement();
-  const counter                   = parsed.counterable === 'Yes' ? 'Y' : 'N';
+  const hasIgnoreReflect          = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
+  const counter                   = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
   const imgFormula                = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")`;
 
   const colValues = {
