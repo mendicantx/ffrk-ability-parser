@@ -826,7 +826,10 @@ function parseAbility(ability, allAbilities, parsedSet) {
                 sub.synchroConditions.push({ slot: Number(slotKey), conditions });
               }
             }
-            if (v?.increaseLevel != null) sub.isStateLevelIncrement = true;
+            if (v?.increaseLevel != null) {
+              sub.isStateLevelIncrement = true;
+              sub.levelIncrease = { key: v.key, by: Number(v.increaseLevel) };
+            }
             break;
         }
       }
@@ -1479,6 +1482,13 @@ function generateEffectsText(parsed) {
     }
   }
 
+  // ── 1c. Level increases: "increases Hero Boost level by 1" (Master Mode Star Strikes) ──
+  for (const sa of exec.subActions) {
+    const level = sa.levelIncrease;
+    const name = level && LEVEL_KEY_NAMES[level.key];
+    if (name) segs.push(`increases ${name} level by ${level.by}`);
+  }
+
   // ── 2. Activation statuses ──
   if (wrapped) {
     // Soul break / wrapped ability: formula-level statuses activate on the user ('default');
@@ -1780,6 +1790,11 @@ async function translateSBName(abilityId, jpText) {
 // the same way for every sheet tab (Soul Breaks, Crystal Commands, Extra, Other).
 // Each rule follows the community sheet's most common convention (docs/decisions.md
 // "Sheet conventions"); the preview builders only choose their tab's columns.
+
+// Level-tracker keys (a status option's `key` with `increaseLevel`) the sheet names in
+// effects text: "increases Hero Boost level by 1". Others are left out until the sheet
+// shows how it words them.
+const LEVEL_KEY_NAMES = { masterBuddyModeEnhance: 'Hero Boost' };
 
 // Sub-abilities listed as a second Soul Breaks row under their soul break's ID.
 const SECOND_ROWS = {

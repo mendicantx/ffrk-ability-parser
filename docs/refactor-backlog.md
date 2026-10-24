@@ -204,7 +204,11 @@ Next, largest first among the statuses the sheet is missing:
 - Accel modes.
 - Single follow-ups with extra fields.
 
-These are multi-effect modes, which need per-family composition rules. The parser's Tactical mode-row summary will come from the same work.
+These are multi-effect modes, which need per-family composition rules.
+
+**Tactical mode-row summary (settled by the owner's style decision):** some Tactical mode rows hold a hand-written summary ("Tactical Awoken Mode & +500 ATK to user Tactical Awoken Mode: Dark Ability Boost, …"). The owner prefers the broken-out style (statuses named on the soul break row, each described in its own Status-tab row), which is what the parser produces; the parser's "Not on the Status tab" section supplies the status rows.
+
+**Hero Boost (done):** Master Mode Star Strikes now end with "increases Hero Boost level by 1", from the sub-action's `increaseLevel` on the `masterBuddyModeEnhance` level. Other level keys are left out until the sheet shows how it words them (`LEVEL_KEY_NAMES` in `ability_parser.js`).
 
 ## Known bug to fix
 
