@@ -31,6 +31,12 @@ class BattleJsImporterTest < ActiveSupport::TestCase
     js = "a={STATUS_AILMENTS_TYPE:{HASTE:10,BRAVE:2e3}};b={STATUS_AILMENTS_TYPE:{PROTECT:7}}"
     assert_equal({ "HASTE" => 10, "BRAVE" => 2000, "PROTECT" => 7 }, BattleJsImporter.extract_status_ailments(js))
   end
+
+  test "extract_status_ailments keeps keys with lower-case letters whole" do
+    js = "a={STATUS_AILMENTS_TYPE:{CHASE_MODE_FOR_WE_Of_LAST_ILLUSION:51121,HASTE:10}}"
+    assert_equal({ "CHASE_MODE_FOR_WE_Of_LAST_ILLUSION" => 51121, "HASTE" => 10 },
+                 BattleJsImporter.extract_status_ailments(js))
+  end
 end
 
 class SheetsImporterTest < ActiveSupport::TestCase
