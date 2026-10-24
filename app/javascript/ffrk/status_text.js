@@ -398,7 +398,135 @@ function describeSoulDriveMode(params, ctx) {
   return { name, effects: clauses.join(', '), defaultDuration: durations.duration };
 }
 
-const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode];
+// Dual Awoken <subject> Mode I/II (<character>) — "Sharpshooter abilities deal 5/10/15/20/30%
+// more damage at ability rank 1/2/3/4/5, Sharpshooter abilities trigger 2 additional times,
+// cast speed x2.00/x2.50/x3.00 and critical chance =50%/75%/100% for equipped Sharpshooter
+// abilities after casting 1/2/3+ Sharpshooter abilities". Clauses go in the sheet's most
+// common order.
+const DUAL_AWAKE_ORDER = ['cap', 'rank', 'seq', 'cast', 'tiers', 'damage', 'crit', 'chase', 'onRemove'];
+const tierValues = (map, field, fmt) => [...map].sort((a, b) => a.numberCondition.greaterEqual - b.numberCondition.greaterEqual).map(m => fmt(m[field]));
+const tierCounts = map => {
+  const counts = [...map].map(m => m.numberCondition.greaterEqual).sort((a, b) => a - b);
+  return counts.map((n, k) => (k === counts.length - 1 ? `${n}+` : `${n}`)).join('/');
+};
+// "Ice and Water abilities": the sheet joins subjects with "and" (79 rows vs 76 with slashes).
+const dualSubject = (cond, ctx) => {
+  if (!cond) return '';
+  const ids = [].concat(cond.elementId ?? cond.anyElementIds ?? []);
+  // Elements keep the game's order ("Dark and Fire"), as most Dual Awoken sheet rows do.
+  if (ids.length > 1 && Object.keys(cond).every(k => ['elementId', 'anyElementIds', 'isAbility', 'hasDamage'].includes(k))) {
+    return joinList(ids.map(id => ctx.element(nameOf(ctx.conf.ELEMENT_TYPE, id))), 'and');
+  }
+  return conditionSubject(cond, ctx, 'and');
+};
+const DUAL_AWAKE_CLAUSES = {
+  DUAL_AWAKE_MODE_FIRST: () => ['none'],
+  DUAL_AWAKE_MODE_SECOND: () => ['none'],
+  COUNT_ABILITY_USED: () => ['none'],   // read by the tiered effects below
+  INCREASE_DAMAGE_THRESHOLD_LV: e => (e.abilityCondition ? null : ['cap', `Increases the damage/healing cap by ${e.damageThresholdLv * 10000}`]),
+  ABILITY_BOOST: (e, ctx) => {
+    const subject = dualSubject(e.abilityCondition, ctx);
+    return subject && e.damageFactorMapType === 1
+      ? ['rank', `${subject} abilities deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5`] : null;
+  },
+  REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    if (e.repeatNum === 0) return ['none'];
+    const subject = dualSubject(e.abilityCondition, ctx);
+    const n = e.repeatNum ?? 1;
+    return subject ? ['seq', `${subject} abilities trigger ${n} additional time${n === 1 ? '' : 's'}`] : null;
+  },
+  INCREASE_CAST_TIME_FACTOR: (e, ctx) => {
+    if (e.generalValueToCastTimeFactorMap) return ['tierCast', tierValues(e.generalValueToCastTimeFactorMap, 'castTimeFactor', f => `x${(f / 100).toFixed(2)}`).join('/')];
+    if (e.castTimeFactor == null) return null;
+    const subject = e.abilityCondition ? dualSubject(e.abilityCondition, ctx) : '';
+    if (subject == null) return null;
+    // "for X abilities": the sheet's Mode I rows split 30/30 with "for equipped X
+    // abilities", and Mode II rows use the plain form.
+    const what = subject ? ` for ${subject} abilities` : '';
+    return ['cast', e.castTimeFactor >= INSTANT_CAST ? `instant cast speed${what}` : `cast speed x${(e.castTimeFactor / 100).toFixed(2)}${what}`];
+  },
+  INCREASE_CRITICAL_RATE: e => (e.generalValueToCriticalRateMap
+    ? ['tierCrit', tierValues(e.generalValueToCriticalRateMap, 'rate', r => `${r}%`).join('/')]
+    : e.rate != null && !e.abilityCondition && !e.generalValueKey ? ['crit', `critical chance =${e.rate}%`] : null),
+  INCREASE_EXECUTED_DAMAGE: (e, ctx) => {
+    const subject = dualSubject(e.abilityCondition, ctx);
+    if (!subject) return null;
+    if (e.generalValueToAbilityDamageRateMap) {
+      const map = e.generalValueToAbilityDamageRateMap;
+      if (!map.every(m => m.damageFactor != null)) return null;
+      return ['damage', `${subject} abilities deal ${tierValues(map, 'damageFactor', f => `${percent(f)}%`).join('/')} more damage after casting ${tierCounts(map)} ${subject} abilities`];
+    }
+    return e.damageFactor ? ['damage', `${subject} abilities deal ${percent(e.damageFactor)}% more damage`] : null;
+  },
+  // "casts Dual Arrow Force after using Sharpshooter abilities", or "after using two Ice
+  // abilities" when it takes several uses.
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    const subject = dualSubject(e.abilityCondition, ctx);
+    const uses = e.abilityUseCountCondition?.multiple ?? 1;
+    if (!e.chaseAbilityId || !subject || e.generalValueKey || !COUNT_WORDS[uses]) return null;
+    const after = uses === 1 ? `${subject} abilities` : `${COUNT_WORDS[uses]} ${subject} abilities`;
+    return ['chase', `casts ${ctx.abilityName(e.chaseAbilityId)} after using ${after}`];
+  },
+  REGISTER_ABILITY_WHEN_UNSET_SA: (e, ctx) => (e.abilityId ? ['onRemove', `casts ${ctx.abilityName(e.abilityId)} when removed`] : null),
+};
+
+// The sheet name, from the Other-tab Source of the mode's chase ("Dual Awoken Sharpshooter
+// Mode II (Trey)"). Mode I has no chase of its own, so it borrows its Mode II partner's.
+function dualAwakeName(params, ctx, roman) {
+  const fromChases = p => p?.effects.map(e => e.chaseAbilityId ?? e.abilityId).filter(Boolean)
+    .flatMap(id => ctx.abilitySources?.(id) ?? []).find(s => /^Dual Awoken .* Mode II? \(/.test(s));
+  const own = fromChases(params);
+  if (own) return own.replace(/ Mode II? \(/, ` Mode ${roman} (`);
+  const partner = ctx.selfKey.replace(/^DUAL_AWAKE_MODE_FIRST_/, 'DUAL_AWAKE_MODE_SECOND_');
+  const fromPartner = partner !== ctx.selfKey && fromChases(ctx.statusParams(partner));
+  if (fromPartner) return fromPartner.replace(/ Mode II? \(/, ` Mode ${roman} (`);
+  // Not on the Other tab: "DUAL_AWAKE_MODE_FIRST_BIGGS_EARTH" → "Dual Awoken Earth Mode I (Biggs)".
+  const words = ctx.selfKey.replace(/^DUAL_AWAKE_MODE_(FIRST|SECOND)_/, '').split('_');
+  // A character's second Dual Awoken soul break ends in II: "(Fang v2)", the sheet's usual form.
+  const version = { II: ' v2', III: ' v3' }[words[words.length - 1]] ?? '';
+  if (version) words.pop();
+  const last = words[words.length - 1];
+  const subject = ELEMENT_KEYS.includes(last) ? ctx.element(last)
+    : ctx.conf.ABILITY_CATEGORY_ID?.[last] != null ? ctx.category(last) : null;
+  if (!subject || words.length < 2) return null;
+  return `Dual Awoken ${subject} Mode ${roman} (${ctx.characterName(words.slice(0, -1).join('_'))}${version})`;
+}
+
+function describeDualAwakeMode(params, ctx) {
+  const m = /^DUAL_AWAKE_MODE_(FIRST|SECOND)_/.exec(ctx.selfKey ?? '');
+  if (!m) return null;
+  const roman = m[1] === 'FIRST' ? 'I' : 'II';
+  const found = [];
+  for (const e of params.effects) {
+    const clause = DUAL_AWAKE_CLAUSES[effectName(e, ctx)]?.(e, ctx);
+    if (!clause) return null;
+    if (clause[0] !== 'none') found.push(clause);
+  }
+  // Use-count tiers: "cast speed x2.00/x2.50/x3.00 and critical chance =50%/75%/100% for
+  // equipped Sharpshooter abilities after casting 1/2/3+ Sharpshooter abilities"
+  const tierCast = found.find(c => c[0] === 'tierCast'), tierCrit = found.find(c => c[0] === 'tierCrit');
+  if (tierCast || tierCrit) {
+    const counted = params.effects.find(e => effectName(e, ctx) === 'COUNT_ABILITY_USED');
+    const mapOf = params.effects.find(e => e.generalValueToCastTimeFactorMap ?? e.generalValueToCriticalRateMap);
+    const subject = counted && dualSubject(counted.abilityCondition, ctx);
+    if (!subject) return null;
+    const parts = [tierCast && `cast speed ${tierCast[1]}`, tierCrit && `critical chance =${tierCrit[1]}`].filter(Boolean);
+    const map = mapOf.generalValueToCastTimeFactorMap ?? mapOf.generalValueToCriticalRateMap;
+    found.push(['tiers', `${parts.join(' and ')} for equipped ${subject} abilities after casting ${tierCounts(map)} ${subject} abilities`]);
+  }
+  const clauses = DUAL_AWAKE_ORDER.flatMap(kind => found.filter(c => c[0] === kind).map(c => c[1]));
+  if (!clauses.length) return null;
+  clauses[0] = clauses[0].charAt(0).toUpperCase() + clauses[0].slice(1);
+
+  // Mode I lasts 15 seconds. Mode II lasts as long as its soul break's Dual Shift pattern
+  // (arg4: [3,3,2,1,0] or [1] turns), which the status doesn't know; "1 turn" is the
+  // sheet's most common.
+  const time = (params.durations ?? []).find(d => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type) === 'TIME')?.time;
+  const defaultDuration = time ? plural(time / 1000, 'second') : roman === 'II' ? '1 turn' : '-';
+  return { name: dualAwakeName(params, ctx, roman), effects: clauses.join(', '), defaultDuration };
+}
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode];
 
 // { name, effects, defaultDuration } in the sheet's wording (name may be null), or null when any part of the
 // status isn't understood yet.
