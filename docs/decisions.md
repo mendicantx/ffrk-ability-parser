@@ -267,6 +267,9 @@ The parser shows the Dual Shift under the soul break's ID and "(Dual Shift)" nam
 ### Action 226 arg1 is not a wrapped ability
 `SubActionAction` (action 226) never reads its own arg1: battle.js uses only arg6 and the parent ability's args. arg1 points at a related ability, such as a mode's chase (Trey's Dual Shift points at the Dual Awoken Mode II chase, Rain's Zenith at its Spirit Attack). `ACTION_ARG_SUPPLEMENTS` names it `relatedAbilityId`, so the parser no longer describes the related ability's effects as the ability's own.
 
+### Party conditions on Infusions
+A party condition that counts allies with an Infusion reads "…if there are 0-1/2+ allies with Attach Dark" (the sheet writes "2+ allies with Attach Earth"). A wrapped ability's party-condition IF/ELSE is one conditional clause, like a direct ability's. Crystal Force I is a Crystal soul break's arg2 and Crystal Force II its arg3.
+
 ### Party conditions with several thresholds
 IF / ELSE IF / ELSE blocks on the same kind of ally are listed fewest allies first, as in the sheet's "0-3/4/5 VII allies": "Grants [A] to the user/[A], [B] to the user/[A], [C] to the user if there are 0-2/3/4+ Sharpshooter allies in the party". Job names use the sheet's school names (`schoolName()` in `ffrk/names.js`: SHOOTER is "Sharpshooter"), in both tools.
 
@@ -330,6 +333,7 @@ Statuses without a Status-tab row are marked and listed for pasting:
 - **Stat changes:** stats are ATK, MAG, DEF, RES, MND; equal values are grouped in the order they appear, increases first ("MND +30%, DEF and RES -30%"). Older statuses with no game config (`CUSTOM_PARAM_MULTI_*`, `CUSTOM_ATK_*`, `CUSTOM_CRITICAL_*`) are read from the coded name: a trailing number is milliseconds or turns, LARGE is 25 seconds, MEDIUM 15 seconds, and no duration means 25 seconds (the sheet's most common). Templates without a value read "ATK and DEF +X%".
 - **Names of stat changes:** "ATK +30%, DEF -30% (8s)", "100% Critical 2". Many older rows have names from the English Global version's localization ("Dark Bargain", "Focus") that can't be derived; statuses added after Global closed have none, so the generated form is what new rows use.
 - **Resonance:** "Fire abilities deal 5% more damage", named "Fire Resonance +5% Boost"; several elements read "Wind and Dark abilities…" and "(Wind/Dark) Resonance +5% Boost"; healing: "Dancer abilities restore 5% more HP", "Dancer Healing Resonance +5% Boost".
+- **Damage by elemental buff level:** "Increases damage dealt by 5/10/15/20/25/30% at Dark Elemental Buff Level 1/2/3/4/5/6", named "Dark Buff Damage Boost (15s)" (each 10% of the element's attack buff is one level).
 - **Damage boosts on attacks:** "Ranged attacks deal 30% more damage" ("Ranged +30% Boost 2"); all nine elements are "Prismatic +30% Boost".
 - **Follow-up use counters** (`COUNT_ABILITY_DONE` + `IS_DONE_WHEN_SPECIFIC_ABILITY_DONE`): "Keeps track of the number of uses of Kindred Guidance: Cloud (0~2), removed after reaching 2", named "Kindred Guidance: Cloud Uses".
 - **Master Mode conditional follow-ups:** "casts Auto Revenge if any enemy gains a DEF/RES/MND buff" / "if the user gains an ATK/DEF/MAG/RES debuff", after the North Star clause. A flat damage cap (no per-chase steps) is left out, as in most sheet rows (8 of 15).

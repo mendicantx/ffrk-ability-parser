@@ -164,6 +164,13 @@ const EFFECTS = {
   },
   // "Critical chance =10%"
   INCREASE_CRITICAL_RATE: e => (e.rate == null || e.abilityCondition || e.generalValueKey ? null : `Critical chance =${e.rate}%`),
+  // "Increases damage dealt by 5/10/15/20/25/30% at Dark Elemental Buff Level 1/2/3/4/5/6":
+  // each step of the element's attack buff (10%, 20%, …) picks the next factor.
+  INCREASE_EXECUTED_DAMAGE_BY_ELEMENT_ATK_ATTRIBUTE: (e, ctx) => {
+    const elements = [].concat(e.elementIds ?? e.elementId ?? []).map(id => ctx.element(nameOf(ctx.conf.ELEMENT_TYPE, id)));
+    if (!elements.length || !e.damageFactors?.length || Object.keys(e.abilityCondition ?? {}).some(k => k !== 'hasDamage')) return null;
+    return `Increases damage dealt by ${e.damageFactors.map(percent).join('/')}% at ${joinList(elements, 'or')} Elemental Buff Level ${e.damageFactors.map((_, i) => i + 1).join('/')}`;
+  },
 };
 
 // ─── Names ───────────────────────────────────────────────────────────────────
@@ -245,6 +252,11 @@ const NAMES = {
   },
   // "10% Critical 3"
   INCREASE_CRITICAL_RATE: (e, ctx, t) => (e.rate == null || e.abilityCondition ? null : `${e.rate}% Critical${t.suffix || t.timeSuffix}`),
+  // "Dark Buff Damage Boost (15s)", "Holy, Water Buff Damage Boost (15s)"
+  INCREASE_EXECUTED_DAMAGE_BY_ELEMENT_ATK_ATTRIBUTE: (e, ctx, t) => {
+    const elements = [].concat(e.elementIds ?? e.elementId ?? []).map(id => ctx.element(nameOf(ctx.conf.ELEMENT_TYPE, id)));
+    return elements.length ? `${elements.join(', ')} Buff Damage Boost${t.suffix || t.timeSuffix}` : null;
+  },
   // "Fire, Lightning, Earth Ability DEF and RES 30% Piercing (Tactical)"
   DEF_AND_MDEF_PENETRATION: (e, ctx, t) => {
     if (!e.abilityCondition) return `DEF and RES ${e.penetrationFactorMapType}% Piercing${t.suffix || t.timeSuffix}`;

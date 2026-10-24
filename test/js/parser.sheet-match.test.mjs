@@ -16,7 +16,7 @@ import { loadPage, snapshot, FIXTURES } from './harness.mjs';
 const TABS = { sbp: 'soul_breaks', ekp: 'extra', fup: 'other' };
 
 // Matching generated cells, as of the last improvement.
-const FLOOR_TOTAL = 274;
+const FLOOR_TOTAL = 282;
 
 const decode = s => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
