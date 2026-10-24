@@ -98,6 +98,7 @@ As the maintainer, I want the decoder's JavaScript in `app/javascript/pages/stat
 - The code moves unchanged and is pinned in `config/importmap.rb`. Inline handlers become `addEventListener`.
 - The harness loads the module instead of the view.
 - **Test:** `node --test "test/js/*.test.mjs"; $env:RAILS_ENV='production'; bin/rails assets:precompile`
+- **Status:** done (`task/decoder-module`). Also adds `test/browser/smoke.mjs`, which drives both tools in headless Edge.
 
 ### 11. Move the Ability Parser script into a module
 As the maintainer, I want the same for the parser, in `app/javascript/pages/ability_parser.js`.
