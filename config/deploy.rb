@@ -1,7 +1,9 @@
 lock '~> 3.19'
 
 set :application, 'ffrk-ability-parser'
-set :repo_url,    'git@github.com:mendicantx/ffrk-ability-parser.git'
+# The repo is public, so the server clones it over HTTPS with no key (if it ever goes
+# private, switch back to SSH and add a read-only deploy key on GitHub).
+set :repo_url,    'https://github.com/mendicantx/ffrk-ability-parser.git'
 set :branch,      'main'
 
 set :deploy_to, '/data/www/ffrk-ability-parser'

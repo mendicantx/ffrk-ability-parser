@@ -1,0 +1,60 @@
+name: Deploy
+
+# Deploys main to production with Capistrano, the same `cap production deploy` that
+# works locally. It runs after the Tests workflow passes for a push to main, or when
+# started by hand (Actions → Deploy → Run workflow).
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY      private key whose public half is in jason's authorized_keys
+#   DEPLOY_KNOWN_HOSTS  `ssh-keyscan mendicant.com` output, checked against the server
+# The server clones the public repo over HTTPS, so GitHub needs no deploy key.
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a second one waits instead of cancelling the first.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Manual runs always deploy; automatic runs only after Tests passed on a push to main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit the Tests run checked (workflow_run), or the branch run by hand.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Reads .ruby-version. Installs every Gemfile group, so the Capistrano gems
+      # (in :development) are available; don't set BUNDLE_WITHOUT here.
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      # Host key checking stays on: only the recorded mendicant.com keys are trusted.
+      - name: Trust the server's host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: bundle exec cap production deploy

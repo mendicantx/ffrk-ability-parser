@@ -23,7 +23,8 @@ These are the owner's standing decisions. Follow them without asking again.
 - The current work is the parser/decoder refactor. Its backlog, open questions and findings are in [`docs/refactor-backlog.md`](docs/refactor-backlog.md).
 - Work happens on `feature/parser-decoder-refactor`, with one `task/<short-name>` branch per piece of work. When a task's tests pass, merge it into the feature branch with `--no-ff` and push.
 - `main` gets the feature branch only after the owner has tested it end to end. Don't merge to `main` or deploy on your own.
-- The owner deploys with `bundle exec cap production deploy`; it needs a typed password, so never run it. Give any command the owner must run as one copy-pasteable block that starts with `cd E:\workspaces\ffrk-ability-parser`.
+- Deploys: a push to `main` deploys automatically once the Tests workflow passes (`.github/workflows/deploy.yml`). The owner can also deploy by hand with `bundle exec cap production deploy`, which needs a typed password, so never run it yourself. Give any command the owner must run as one copy-pasteable block that starts with `cd E:\workspaces\ffrk-ability-parser`.
+- The GitHub CLI (`gh`) is signed in with the owner's fine-grained token: their own repositories only, no organizations or gists, and no access to repository secrets. Secrets are added by the owner in the browser.
 - Run the automated tests yourself and keep going between tasks; the owner tests at the end.
 
 ### Soul break fixtures
@@ -99,6 +100,9 @@ Maps `action_id` → formula class name + named parameter list (e.g. `damageFact
 | `public/vendor/` | underscore 1.13.7, loaded only inside the battle.js Worker |
 | `docs/decisions.md` | Every rule about meanings, names and wording, with evidence |
 | `docs/refactor-backlog.md` | Stories, findings, open questions for the owner, release steps |
+| `.github/workflows/test.yml` | CI: Ruby, JavaScript and Python tests on every push |
+| `.github/workflows/deploy.yml` | Deploys `main` with Capistrano after Tests pass, or by hand (needs the `DEPLOY_SSH_KEY` and `DEPLOY_KNOWN_HOSTS` secrets) |
+| `config/deploy.rb`, `config/deploy/production.rb` | Capistrano: `mendicant.com` as `jason`, repo cloned over HTTPS, no agent forwarding |
 | `test/js/harness.mjs` | Runs both pages unchanged in Node with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
 | `test/browser/smoke.mjs` | Browser smoke test: drives both tools in headless Edge/Chrome over the DevTools Protocol |
 | `test/fixtures/battles/` | Soul break JSON pasted by the owner, one fixture per soul break |
@@ -163,7 +167,9 @@ node test/browser/smoke.mjs http://localhost:3000
 - Second Soul Breaks rows under the same ID — a Tactical soul break's "(Weapon Skill)" and a Dual Awoken soul break's "(Dual Shift)" — come from `SECOND_ROWS` in `ability_parser.js`, with `-ws` / `-ds` on-page ids.
 - The dashboard formats battle.js in the browser using js-beautify (CDN) on first expand of the `<details>` element.
 
-## Production data
+## Production
+
+The site runs on `mendicant.com` (Passenger) from `/data/www/ffrk-ability-parser`. GitHub Actions deploys it after Tests pass on a push to `main`; manual deploys use the same command locally. Setup and checks for the Actions deploy are in the backlog under "Release: deploy from GitHub Actions".
 
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
@@ -187,7 +193,7 @@ The shell is Git Bash on Windows. These cost real time in past sessions:
 The live list is in `docs/refactor-backlog.md`. In short:
 
 - **Owner:** end-to-end testing of the feature branch, merge to `main`, deploy, then press **Refresh data** once in production so its cache gets the Japanese text.
-- **Owner:** the GitHub Actions deploy needs an SSH key and repository secrets (backlog: "Release: deploy from GitHub Actions").
+- **Owner:** the GitHub Actions deploy is built; it needs the one-time key and secrets setup in the backlog ("Release: deploy from GitHub Actions") before its first run.
 - **Waiting on JSON:** Lasswell's AASB (八垓抜刀 軌ら星, 23500020), Enna Kros's ASB (轟・Aの力, 23280023), Tama's SASB (99プラザの日常, 23290014).
 - **Open question:** the 34 Tactical rows that say "[ATB_10%]" (backlog).
 - **Requested features:** a link from `<ability missing from Other Tab>` to a page that parses that item; reloading only the Status and Other sheets.
