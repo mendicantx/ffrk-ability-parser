@@ -92,6 +92,16 @@ python -I -m unittest discover -s test/python
 rake data:snapshot
 ```
 
+## Production data
+
+`data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
+
+To refresh daily, add a cron entry for the deploy user on the server:
+
+```
+0 6 * * * cd /data/www/ffrk-ability-parser/current && RAILS_ENV=production /data/www/ffrk-ability-parser/shared/asdf-wrapper bundle exec rake data:refresh
+```
+
 ## Architecture notes
 
 - `DataStore` uses Ruby's `Singleton` module — one instance per Rails process.
