@@ -23,13 +23,14 @@ module TestHelpers
   end
 
   # Temporarily replaces what DataStore.instance holds, without touching data/.
-  def with_data_store(sheets: {}, battle_js: nil, last_refreshed_at: nil)
+  def with_data_store(sheets: {}, battle_js: nil, last_refreshed_at: nil, sheets_refreshed_at: nil)
     store = DataStore.instance
-    ivars = %i[@sheets @battle_js_data @last_refreshed_at @loaded_metadata_mtime]
+    ivars = %i[@sheets @battle_js_data @last_refreshed_at @sheets_refreshed_at @loaded_metadata_mtime]
     saved = ivars.to_h { |iv| [iv, store.instance_variable_get(iv)] }
     store.instance_variable_set(:@sheets, sheets)
     store.instance_variable_set(:@battle_js_data, battle_js)
     store.instance_variable_set(:@last_refreshed_at, last_refreshed_at)
+    store.instance_variable_set(:@sheets_refreshed_at, sheets_refreshed_at)
     # Match the on-disk metadata so reload_if_changed! keeps these values.
     store.instance_variable_set(:@loaded_metadata_mtime, store.send(:metadata_mtime))
     yield store

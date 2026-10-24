@@ -182,6 +182,8 @@ The server's settings live in `shared/.env` (a Capistrano linked file). It must 
 
 A refresh checks each download before it replaces the cached file: a sheet must have rows, its key column (`REQUIRED_COLUMNS` in `lib/data_loader.rb`) and at least half its previous rows; battle.js must have status entries and at least half its previous size. A source that fails keeps its previous data, the error is saved in `metadata.json` and shown in `/data/status` (`refresh_errors`) and by the Refresh data button, and `rake data:refresh` exits non-zero so cron and the deploy hook notice.
 
+After rows are added to the Status or Other tab, **Reload Status & Other tabs** (on both tools) re-fetches just those two sheets with the same checks (`POST /data/refresh?sheets=status,other`, `DataLoader.refresh_sheets`, at most once a minute). It keeps battle.js and the full refresh time; `/data/status` shows the reload as `sheets_refreshed_at`.
+
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
 To refresh daily, add a cron entry for the deploy user on the server:
@@ -207,5 +209,5 @@ The live list is in `docs/refactor-backlog.md`. In short:
 - **Owner:** the GitHub Actions deploy is built; it needs the one-time key and secrets setup in the backlog ("Release: deploy from GitHub Actions") before its first run.
 - **Waiting on JSON:** Lasswell's AASB (八垓抜刀 軌ら星, 23500020), Enna Kros's ASB (轟・Aの力, 23280023), Tama's SASB (99プラザの日常, 23290014).
 - **Open question:** the 34 Tactical rows that say "[ATB_10%]" (backlog).
-- **Requested features:** a link from `<ability missing from Other Tab>` to a page that parses that item; reloading only the Status and Other sheets.
+- **Requested feature:** a link from `<ability missing from Other Tab>` to a page that parses that item.
 - **Decoder:** about 230 statuses missing from the Status tab still don't decode — mostly one-offs, debug entries and damage trackers whose names only the localization has.

@@ -439,16 +439,19 @@ document.getElementById('output').addEventListener('click', e => {
 
 // Asks the server to re-fetch the sheets and battle.js (rate-limited server-side),
 // then reloads the page so every derived map is rebuilt from the new data.
-document.getElementById('refresh-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('refresh-btn');
+// "Reload Status & Other tabs" does the same for just those two sheets, after rows
+// have been added to them.
+async function refreshAndReload(btn, sheets) {
   const detail = document.getElementById('refresh-detail');
   btn.disabled = true;
-  detail.textContent = 'refreshing on the server…';
-  const error = await refreshServerData();
+  detail.textContent = sheets ? 'reloading the Status and Other tabs on the server…' : 'refreshing on the server…';
+  const error = await refreshServerData(sheets);
   if (!error) { location.reload(); return; }
   detail.textContent = error;
   btn.disabled = false;
-});
+}
+document.getElementById('refresh-btn').addEventListener('click', () => refreshAndReload(document.getElementById('refresh-btn')));
+document.getElementById('reload-statuses-btn').addEventListener('click', () => refreshAndReload(document.getElementById('reload-statuses-btn'), ['status', 'other']));
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 Promise.all([loadBattleJs(), loadSheets()]);

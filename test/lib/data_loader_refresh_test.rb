@@ -94,4 +94,28 @@ class DataLoaderRefreshTest < ActiveSupport::TestCase
       assert_equal 5, JSON.parse(File.read(root.join("sheets/status.json"))).size
     end
   end
+
+  test "reloading only the Status sheet keeps the full refresh time and other sources' errors" do
+    with_temp_data_dir do |root|
+      File.write(root.join("metadata.json"), JSON.generate(
+        "last_refreshed_at" => "2026-10-24T06:00:00Z",
+        "errors" => { "status" => "no ID column", "battle_js" => "HTTP 404" }))
+      only_status_sheet do
+        with_env("BATTLE_JS_URL" => "https://example.test/battle.js") do
+          rows = status_rows(5)
+          stub_singleton(SheetsImporter, :fetch, ->(_url) { rows }) do
+            stub_singleton(BattleJsImporter, :fetch, ->(_url) { raise "battle.js must not be fetched" }) do
+              assert_equal({}, DataLoader.refresh_sheets(%i[status]))
+            end
+          end
+        end
+      end
+      meta = JSON.parse(File.read(root.join("metadata.json")))
+      assert_equal "2026-10-24T06:00:00Z", meta["last_refreshed_at"]
+      assert_equal({ "battle_js" => "HTTP 404" }, meta["errors"])
+      assert meta["sheets_refreshed_at"]
+      assert_equal 5, DataStore.instance.sheet(:status).size
+      assert DataStore.instance.sheets_refreshed_at
+    end
+  end
 end

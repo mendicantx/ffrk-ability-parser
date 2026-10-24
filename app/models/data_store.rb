@@ -9,7 +9,8 @@
 #   DataStore.instance.sheets                    # => { soul_breaks: [...], ... }
 #   DataStore.instance.battle_js_data            # => Unpacked JS string
 #   DataStore.instance.status_ailments_from_js  # => { "KEY" => id, ... }
-#   DataStore.instance.last_refreshed_at        # => Time or nil
+#   DataStore.instance.last_refreshed_at        # => Time or nil (last full refresh)
+#   DataStore.instance.sheets_refreshed_at      # => Time or nil (last quick reload of some sheets)
 
 require 'singleton'
 require 'json'
@@ -23,7 +24,7 @@ class DataStore
   AILMENTS_FILE  = DATA_DIR.join('status_ailments.json').freeze
   METADATA_FILE  = DATA_DIR.join('metadata.json').freeze
 
-  attr_reader :sheets, :battle_js_data, :status_ailments_from_js, :last_refreshed_at, :refresh_errors
+  attr_reader :sheets, :battle_js_data, :status_ailments_from_js, :last_refreshed_at, :sheets_refreshed_at, :refresh_errors
 
   def initialize
     @mutex = Mutex.new
@@ -55,8 +56,10 @@ class DataStore
     @sheets                  = load_sheets
     @battle_js_data          = load_text(BATTLE_JS_FILE)
     @status_ailments_from_js = load_json(AILMENTS_FILE) || {}
-    @last_refreshed_at       = load_timestamp
-    @refresh_errors          = load_json(METADATA_FILE)&.dig('errors') || {}
+    meta                     = load_json(METADATA_FILE) || {}
+    @last_refreshed_at       = parse_time(meta['last_refreshed_at'])
+    @sheets_refreshed_at     = parse_time(meta['sheets_refreshed_at'])
+    @refresh_errors          = meta['errors'] || {}
   end
 
   def load_sheets
@@ -87,10 +90,8 @@ class DataStore
     File.read(path, encoding: 'UTF-8')
   end
 
-  def load_timestamp
-    meta = load_json(METADATA_FILE)
-    return nil unless meta && meta['last_refreshed_at']
-    Time.parse(meta['last_refreshed_at'])
+  def parse_time(value)
+    value && Time.parse(value)
   rescue ArgumentError
     nil
   end
