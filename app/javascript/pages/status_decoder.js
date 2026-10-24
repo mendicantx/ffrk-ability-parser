@@ -537,6 +537,8 @@ function decodeCbmP(statusKey, statusId, argsText) {
   // ── 1. Character name and key-level element qualifier from the status key ──
   const suffix = statusKey.replace(/^CRYSTAL_BUDDY_MODE_/, '');
   const parts = suffix.split('_');
+  // A character's second Crystal Force mode ends in II: "Nabaat (Dark) II", as in the sheet.
+  const numeral = parts.length > 1 && /^(II|III)$/.test(parts[parts.length - 1]) ? ` ${parts.pop()}` : '';
   const keyElemKeys = [];
   // Strip trailing element tokens (always leave at least one part for the char name)
   while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
@@ -552,7 +554,7 @@ function decodeCbmP(statusKey, statusId, argsText) {
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
     : '';
-  const commonName = `Crystal Force Mode: ${charName}${elemQualifier}`;
+  const commonName = `Crystal Force Mode: ${charName}${elemQualifier}${numeral}`;
 
   // ── 2. Ability condition descriptor (for effects text) from p() first arg ──
   const args = splitTopLevelArgs(argsText);
@@ -622,6 +624,8 @@ function decodeCbmD(statusKey, statusId, argsText) {
   // ── 1. Character name (same logic as decodeCbmP) ──
   const suffix = statusKey.replace(/^CRYSTAL_BUDDY_MODE_/, '');
   const parts = suffix.split('_');
+  // A character's second Crystal Force mode ends in II: "Nabaat (Dark) II", as in the sheet.
+  const numeral = parts.length > 1 && /^(II|III)$/.test(parts[parts.length - 1]) ? ` ${parts.pop()}` : '';
   const keyElemKeys = [];
   while (parts.length > 1 && CBM_ELEMENT_KEYS.has(parts[parts.length - 1])) {
     keyElemKeys.unshift(parts.pop());
@@ -635,7 +639,7 @@ function decodeCbmD(statusKey, statusId, argsText) {
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
     : '';
-  const commonName = `Crystal Force Mode: ${charName}${elemQualifier}`;
+  const commonName = `Crystal Force Mode: ${charName}${elemQualifier}${numeral}`;
 
   // ── 2. Ability condition descriptor ──
   const args = splitTopLevelArgs(argsText);
