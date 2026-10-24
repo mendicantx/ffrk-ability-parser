@@ -217,6 +217,8 @@ These are multi-effect modes, which need per-family composition rules.
 
 **ATB follow-up names (owner decision):** the Tactical ATB follow-ups 31545795 and 31545796 keep the Other tab's names, "ATB短縮_10%" and "ATB短縮_20%". A follow-up and the status it grants are different things (31545795 grants [111% ATB 1]); the "[ATB_10%]" / "[ATB_20%]" in 34 Status-tab Tactical rows is shown as the tab has it; only the decoder's generated text for those rows differs (the sheet-match floor counts 2062 effects).
 
+**Open question for the owner (waiting on a definitive answer; no change until then):** 34 Tactical Awoken Mode rows say "…triggers [ATB_10%] after using Wind abilities…". In the game data each casts follow-up 31545795 ("ATB短縮_10%"), which grants [111% ATB 1] (status 55765). "ATB_10%" looks like the follow-up's name with the Japanese stripped, inside the sheet's own text. About 52 similar rows, such as 55763 "Lightning 125% ATB Quick Cycle (Tactical)", name the granted status instead: "Grants [125% ATB 1] after using a Lightning ability". Options: reword the 34 rows to "grants [111% ATB 1] after using …" (and have the decoder write that wording), or name the follow-up as "[ATB短縮_10%]".
+
 ## Release: deploy from GitHub Actions (when the feature branch is ready to ship)
 
 ### What the current config shows
