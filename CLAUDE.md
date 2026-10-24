@@ -57,7 +57,8 @@ Used by the ability translator to know what each arg in an ability's JSON option
 | `lib/data_loader.rb` | `DataLoader.refresh_all`; defines `GOOGLE_SHEETS` config table; used by initializer and rake |
 | `lib/importers/sheets_importer.rb` | Fetches and parses Google Sheets CSV |
 | `lib/importers/battle_js_importer.rb` | Fetches battle.js, unpacks p,a,c,k,e,r JS (supports base 62), returns raw JS string |
-| `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status` |
+| `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
+| `lib/data_snapshot.rb` | Writes the gzipped test snapshot of `data/` with a SHA-256 manifest |
 | `config/initializers/data_refresh.rb` | Triggers `DataLoader.refresh_all` on server boot (skipped during rake tasks) |
 | `app/controllers/dashboard_controller.rb` | Root page; reads from DataStore |
 | `app/views/dashboard/index.html.erb` | Collapsible sections per sheet + battle.js; js-beautify formats JS in browser |
@@ -79,6 +80,9 @@ rake data:status
 
 # Run the Ruby tests
 bin/rails test
+
+# Freeze data/ into the gzipped test snapshot (test/fixtures/snapshot)
+rake data:snapshot
 ```
 
 ## Architecture notes
