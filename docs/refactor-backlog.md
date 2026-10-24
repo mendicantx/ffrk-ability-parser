@@ -215,7 +215,7 @@ These are multi-effect modes, which need per-family composition rules.
 ### Keep Japanese text when importing the sheets (done)
 `SheetsImporter.parse_csv` (`lib/importers/sheets_importer.rb`) used to re-encode the downloaded CSV from "binary", which deleted every non-ASCII character (Name (JP) "覚醒チャージAショット" became "A"). It now reads the body as UTF-8, drops only invalid bytes and a leading byte-order mark, and has tests for both. The cache and the test snapshot were refreshed: the parser now matches the Name (JP) column (274 of 306 cells).
 
-**ATB follow-up names (owner decision):** the Other tab names Tactical ATB follow-ups 31545795 and 31545796 "ATB短縮_10%" and "ATB短縮_20%", but the Status tab calls them "[ATB_10%]" and "[ATB_20%]" (34 rows). The owner prefers the names without Japanese, so `ABILITY_NAME_CORRECTIONS` in `ffrk/status_context.js` uses "ATB_10%" / "ATB_20%" for them in both tools.
+**ATB follow-up names (owner decision):** the Tactical ATB follow-ups 31545795 and 31545796 keep the Other tab's names, "ATB短縮_10%" and "ATB短縮_20%". A follow-up and the status it grants are different things (31545795 grants [111% ATB 1]); the "[ATB_10%]" / "[ATB_20%]" in 34 Status-tab Tactical rows is shown as the tab has it; only the decoder's generated text for those rows differs (the sheet-match floor counts 2062 effects).
 
 ## Release: deploy from GitHub Actions (when the feature branch is ready to ship)
 
