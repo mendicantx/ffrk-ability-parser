@@ -182,8 +182,8 @@ A battle capture holds every soul break for every party member, so one or two ca
 ## Describing statuses from game data (in progress)
 
 Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
-- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 975 of 1259.
-- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 2570 names and 1977 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
+- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 1026 of 1259.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 2633 names and 2062 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
 
 Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, Zenith Mode, Soul Drive Mode, Dual Awoken Mode, Awoken Mode, and simple ATB, stat, Resonance and piercing statuses.
 

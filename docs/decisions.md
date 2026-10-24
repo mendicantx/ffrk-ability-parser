@@ -326,6 +326,9 @@ Statuses without a Status-tab row are marked and listed for pasting:
 - **Stat changes:** stats are ATK, MAG, DEF, RES, MND; equal values are grouped in the order they appear, increases first ("MND +30%, DEF and RES -30%"). Older statuses with no game config (`CUSTOM_PARAM_MULTI_*`, `CUSTOM_ATK_*`, `CUSTOM_CRITICAL_*`) are read from the coded name: a trailing number is milliseconds or turns, LARGE is 25 seconds, MEDIUM 15 seconds, and no duration means 25 seconds (the sheet's most common). Templates without a value read "ATK and DEF +X%".
 - **Names of stat changes:** "ATK +30%, DEF -30% (8s)", "100% Critical 2". Many older rows have names from the English Global version's localization ("Dark Bargain", "Focus") that can't be derived; statuses added after Global closed have none, so the generated form is what new rows use.
 - **Resonance:** "Fire abilities deal 5% more damage", named "Fire Resonance +5% Boost"; several elements read "Wind and Dark abilities…" and "(Wind/Dark) Resonance +5% Boost"; healing: "Dancer abilities restore 5% more HP", "Dancer Healing Resonance +5% Boost".
+- **Damage boosts on attacks:** "Ranged attacks deal 30% more damage" ("Ranged +30% Boost 2"); all nine elements are "Prismatic +30% Boost".
+- **Follow-up use counters** (`COUNT_ABILITY_DONE` + `IS_DONE_WHEN_SPECIFIC_ABILITY_DONE`): "Keeps track of the number of uses of Kindred Guidance: Cloud (0~2), removed after reaching 2", named "Kindred Guidance: Cloud Uses".
+- **Master Mode conditional follow-ups:** "casts Auto Revenge if any enemy gains a DEF/RES/MND buff" / "if the user gains an ATK/DEF/MAG/RES debuff", after the North Star clause. A flat damage cap (no per-chase steps) is left out, as in most sheet rows (8 of 15).
 - **Piercing for some abilities:** "Fire abilities ignore 30% of the target's DEF and RES", named "Fire Ability DEF and RES 30% Piercing (Tactical)" ("Prismatic" for all elements).
 
 ### Soul Drive Mode wording (decoder)
