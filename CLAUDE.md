@@ -85,6 +85,9 @@ bin/rails test
 # Run the JavaScript tests (page scripts run in Node against the test snapshot)
 node --test "test/js/*.test.mjs"
 
+# Run the Python tests (scripts/infer_statuses.py)
+python -I -m unittest discover -s test/python
+
 # Freeze data/ into the gzipped test snapshot (test/fixtures/snapshot)
 rake data:snapshot
 ```

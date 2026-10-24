@@ -88,7 +88,7 @@ ABILITY_CATEGORY_ID_NAMES = {
 # Argument parsing helpers
 # ---------------------------------------------------------------------------
 
-_ROMAN_NUMERALS_SET = {'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'XI', 'XII'}
+_ROMAN_NUMERALS_SET = {'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI'}
 
 def _cap_word(w):
     """Title-case a word, but keep known Roman numerals (II, III …) uppercase."""
