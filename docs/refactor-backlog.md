@@ -182,10 +182,10 @@ A battle capture holds every soul break for every party member, so one or two ca
 ## Describing statuses from game data (in progress)
 
 Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
-- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 945 of 1259.
-- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 2459 names and 1876 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
+- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 975 of 1259.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 2570 names and 1977 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
 
-Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, Zenith Mode, Soul Drive Mode, and Dual Awoken Mode.
+Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, Zenith Mode, Soul Drive Mode, Dual Awoken Mode, Awoken Mode, and simple ATB, stat, Resonance and piercing statuses.
 
 **Zenith Mode** (`ULTIMATE_BUDDY_MODE_*`): 291 of 311 decode. Of the 284 with sheet rows, 268 names and 137 effects match the sheet. The rest differ because:
 - 55 Spirit Attacks aren't on the Other tab yet, so they show `<ability missing from Other Tab>`.
@@ -201,7 +201,6 @@ Zenith statuses still undecoded (20): healers (`INCREASE_EXECUTED_HEAL`, "WHT ac
 
 Next, largest first among the statuses the sheet is missing:
 - Chase modes.
-- Awoken modes.
 - Accel modes.
 - Single follow-ups with extra fields.
 

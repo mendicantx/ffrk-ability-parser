@@ -604,7 +604,73 @@ function describeDualAwakeMode(params, ctx) {
   return { name: dualAwakeName(params, ctx, roman), effects: clauses.join(', '), defaultDuration };
 }
 
-const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode];
+// Awoken <subject> — "Sharpshooter abilities don't consume uses and deal 5/10/15/20/30%
+// more damage at ability rank 1/2/3/4/5, Sharpshooter abilities trigger 1 additional
+// time" for 15 seconds. The name comes from the Other-tab Source of the mode's chase
+// ("Awoken Savior"), else from the coded name ("Awoken Fire", "Awoken Sharpshooter").
+const RANK_BOOST = 'deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5';
+const AWAKE_CLAUSES = {
+  AWAKE_MODE: () => ['none'],
+  INFINITY_ABILITY_NUM: (e, ctx) => dualSubject(e.abilityCondition, ctx) && ['infinity', dualSubject(e.abilityCondition, ctx)],
+  ABILITY_BOOST: (e, ctx) => (e.damageFactorMapType === 1 && dualSubject(e.abilityCondition, ctx) ? ['boost', dualSubject(e.abilityCondition, ctx)] : null),
+  INCREASE_CAST_TIME_FACTOR: (e, ctx) => {
+    const cond = e.abilityCondition ?? {};
+    if (cond.isFlightAttack && e.castTimeFactor >= INSTANT_CAST) return ['cast', 'instant cast speed for Jump attacks'];
+    const subject = dualSubject(cond, ctx);
+    if (!subject) return null;
+    if (e.gradeToCastTimeFactorMapType === 1) return ['cast', `cast speed x2.00/2.25/2.50/2.75/3.00 for ${subject} abilities at ability rank 1/2/3/4/5`];
+    if (e.castTimeFactor == null) return null;
+    return ['cast', e.castTimeFactor >= INSTANT_CAST ? `instant cast speed for ${subject} abilities` : `cast speed x${(e.castTimeFactor / 100).toFixed(2)} for ${subject} abilities`];
+  },
+  REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    const subject = dualSubject(e.abilityCondition, ctx);
+    const n = e.repeatNum ?? 1;
+    return subject ? ['seq', `${subject} abilities trigger ${n} additional time${n === 1 ? '' : 's'}`] : null;
+  },
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    const subject = dualSubject(e.abilityCondition, ctx);
+    if (!e.chaseAbilityId || !subject) return null;
+    // "after using two Summoning or Bard abilities" when it takes several uses.
+    const uses = e.abilityUseCountCondition?.multiple ?? 1;
+    if (!COUNT_WORDS[uses]) return null;
+    const after = uses > 1 ? `after using ${COUNT_WORDS[uses]} ${conditionSubject(e.abilityCondition, ctx, 'or')} abilities` : `after using ${subject} abilities`;
+    const grants = grantsToUser(ctx.abilityEffects?.(e.chaseAbilityId));
+    return ['chase', grants ? `grants ${grants} ${after}` : `casts ${ctx.abilityName(e.chaseAbilityId)} ${after}`];
+  },
+};
+
+function describeAwakeMode(params, ctx) {
+  if (!/^AWAKE_MODE_/.test(ctx.selfKey ?? '')) return null;
+  const found = [];
+  for (const e of params.effects) {
+    const clause = AWAKE_CLAUSES[effectName(e, ctx)]?.(e, ctx);
+    if (!clause) return null;
+    if (clause[0] !== 'none') found.push(clause);
+  }
+  const infinity = found.find(c => c[0] === 'infinity'), boost = found.find(c => c[0] === 'boost');
+  const clauses = [];
+  if (infinity && boost && infinity[1] === boost[1]) clauses.push(`${infinity[1]} abilities don't consume uses and ${RANK_BOOST}`);
+  else {
+    if (infinity) clauses.push(`${infinity[1]} abilities don't consume uses`);
+    if (boost) clauses.push(`${boost[1]} abilities ${RANK_BOOST}`);
+  }
+  for (const kind of ['cast', 'seq', 'chase']) clauses.push(...found.filter(c => c[0] === kind).map(c => c[1]));
+  if (!clauses.length) return null;
+  clauses[0] = clauses[0].charAt(0).toUpperCase() + clauses[0].slice(1);
+  const durations = describeDurations(params.durations, ctx, params.effects);
+  if (!durations || durations.suffixes.length) return null;
+
+  const chase = params.effects.find(e => e.chaseAbilityId != null);
+  const listed = chase && (ctx.abilitySources?.(chase.chaseAbilityId) ?? []).find(s => /^Awoken /.test(s));
+  const words = ctx.selfKey.replace(/^AWAKE_MODE_/, '');
+  const subject = ELEMENT_KEYS.includes(words) ? ctx.element(words)
+    : ctx.conf.ABILITY_CATEGORY_ID?.[words] != null ? ctx.category(words) : titleCaseKey(words);
+  return { name: listed ?? `Awoken ${subject}`, effects: clauses.join(', '), defaultDuration: durations.duration };
+}
+
+const titleCaseKey = key => key.toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode, describeAwakeMode];
 
 // ─── Stat changes ────────────────────────────────────────────────────────────
 // The sheet's stat names, and its stat lists: equal values grouped in the order they
