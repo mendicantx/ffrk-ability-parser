@@ -176,6 +176,19 @@ When the element depends on a condition, such as the character's attach element,
 ### Decoder wording follows the sheet
 Where the Status Decoder generates a name or effects text for a status family the sheet already covers (for example Learning Mode), it should produce the sheet's wording.
 
+### Attack wording
+The Effects text follows the sheet's majority wording:
+- A hit on all enemies is a **group** attack: "One group attack (8.00)".
+- "(x each)" is used only for more than one hit: "Six single attacks (0.90 each)", but "One single attack (26.50)".
+
+### Learning Mode wording (decoder)
+The Status sheet's Learning Mode rows use several wordings, so the decoder uses the most common one:
+- **Name:** `Learning Mode: <Character>`, plus `(<Element or category>)` only when the character has more than one Learning Mode and this one is conditional, for example `Learning Mode: Aerith (Wind)`.
+- **Effects:** `Keeps track of Learning Mode: <Character> level (0~5), <Qualifier> attacks deal 5/10/…% more damage at Learning Mode: <Character> level 0/1/2/3/4/5`, or `increases damage dealt by 5/10/…%` when there is no condition. No trailing period.
+- **Damage table:** taken from the status's arguments, otherwise the helper's own default (some helpers use 25–50%), otherwise 5–30%.
+
+About 20 older sheet rows use the decoder's previous wording and now differ. `test/js/decoder.sheet-match.test.mjs` tracks how many names and effects match the sheet; the counts may only go up.
+
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
 
