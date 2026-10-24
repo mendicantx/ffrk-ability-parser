@@ -9,7 +9,12 @@
 //   category(key),       // ABILITY_CATEGORY_ID key → display name ('BLACK_MAGIC' → 'Black Magic')
 //   statusName(id),      // status id → sheet name (for "removed if the user hasn't [X]")
 //   abilityName(id),     // ability id → name (for ability-specific effects)
+//   abilityNameFrom(id, source), // the Other-tab name of ability id listed under source
 //   statusKey(id),       // status id → STATUS_AILMENTS_TYPE key
+//   selfKey,             // this status's STATUS_AILMENTS_TYPE key
+//   statusParams(key),   // another status's game config
+//   characterName(raw),  // coded name words ('FRIONIEL') → sheet character name ('Firion')
+//   followUps(source),   // Other-tab ability names whose Source is source
 // }
 
 const nameOf = (table, value) => Object.keys(table ?? {}).find(k => table[k] === value) ?? null;
@@ -207,10 +212,63 @@ function describeDurations(durations, ctx) {
   return { duration, suffixes };
 }
 
+// ─── Mode families ────────────────────────────────────────────────────────────
+// Modes bundle several effects that the sheet describes as one sentence. Each family
+// is recognised by its effects and composed in the sheet's own wording.
+
+const effectName = (e, ctx) => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type);
+const ELEMENT_KEYS = ['FIRE', 'ICE', 'LIGHTNING', 'EARTH', 'WIND', 'WATER', 'HOLY', 'DARK', 'POISON'];
+
+// "MASTER_BUDDY_MODE_VIVI_ICE_LIGHTNING" → { character: 'Vivi', elements: ['Ice', 'Lightning'] }
+function modeOwner(key, prefix, ctx) {
+  const words = key.slice(prefix.length).split('_');
+  const elements = [];
+  while (words.length > 1 && ELEMENT_KEYS.includes(words[words.length - 1])) elements.unshift(ctx.element(words.pop()));
+  return { character: ctx.characterName(words.join('_')), elements };
+}
+
+// Master Mode: <character> — "Casts [Star Strike: X] every 2s (max 5), grants Damage Cap
+// +20000/…/+70000 after 0/…/5 chases, casts [North Star: …] after 15s, removed if user
+// hasn't Master Mode". Instant cast, SB cost and Hero Boost belong to the base
+// [Master Mode] status's row, so they're left out here as in the sheet.
+const MASTER_EFFECTS = new Set(['COUNT_ABILITY_DONE', 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED', 'INCREASE_DAMAGE_THRESHOLD_LV',
+  'INCREASE_CAST_TIME_FACTOR', 'REDUCE_CONSUME_POINT', 'IS_DONE_EFFECTS_WHEN_SPECIFIC_EFFECT_KEYS', 'BUDDY_ENHANCE']);
+function describeMasterMode(params, ctx) {
+  const prefix = 'MASTER_BUDDY_MODE_';
+  if (!ctx.selfKey?.startsWith(prefix) || !params.effects.every(e => MASTER_EFFECTS.has(effectName(e, ctx)))) return null;
+  const chase = params.effects.find(e => effectName(e, ctx) === 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED');
+  const cap = params.effects.find(e => effectName(e, ctx) === 'INCREASE_DAMAGE_THRESHOLD_LV' && e.generalValueToDamageThresholdLvMap);
+  if (!chase || chase.time == null || chase.chaseAbilityDoneCountForIsDone == null) return null;
+
+  const { character, elements } = modeOwner(ctx.selfKey, prefix, ctx);
+  const name = `Master Mode: ${character}${elements.length ? ` (${elements.join(', ')})` : ''}`;
+  // One Star Strike can serve several modes; prefer the Other row listed under this mode.
+  const chaseName = ctx.abilityNameFrom?.(chase.chaseAbilityId, name) ?? ctx.abilityName(chase.chaseAbilityId);
+  const clauses = [`Casts [${chaseName}] every ${chase.time / 1000}s (max ${chase.chaseAbilityDoneCountForIsDone})`];
+  // Not every Master Mode raises the damage cap as its chases land.
+  if (cap) {
+    const steps = cap.generalValueToDamageThresholdLvMap.map(m => [m.numberCondition.greaterEqual, m.damageThresholdLv]).sort((a, b) => a[0] - b[0]);
+    clauses.push(`grants Damage Cap ${steps.map(([, lv]) => `+${lv * 10000}`).join('/')} after ${steps.map(([n]) => n).join('/')} chases`);
+  }
+  // The closing follow-up isn't part of this status: it's the soul break's, listed on the
+  // Other tab under this mode, and cast when the base Master Mode's timer runs out.
+  const northStar = ctx.followUps(name).find(n => /^North Star: /.test(n));
+  const baseTimer = ctx.statusParams('MASTER_BUDDY_MODE')?.effects?.find(e => effectName(e, ctx) === 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED');
+  if (northStar && baseTimer?.time) clauses.push(`casts [${northStar}] after ${baseTimer.time / 1000}s`);
+  clauses.push("removed if user hasn't Master Mode");
+  return { name, effects: clauses.join(', '), defaultDuration: '-' };
+}
+
+const MODE_FAMILIES = [describeMasterMode];
+
 // { name, effects, defaultDuration } in the sheet's wording (name may be null), or null when any part of the
 // status isn't understood yet.
 export function describeStatus(params, ctx) {
   if (!params?.effects?.length) return null;
+  for (const family of MODE_FAMILIES) {
+    const described = family(params, ctx);
+    if (described) return described;
+  }
   const clauses = [];
   for (const e of params.effects) {
     const describe = EFFECTS[nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type)];

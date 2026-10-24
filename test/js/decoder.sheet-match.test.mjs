@@ -10,7 +10,7 @@ import { loadPage, snapshot } from './harness.mjs';
 // Matches per family as of the last improvement.
 const FLOORS = {
   LEARNING_MODE: { names: 53, effects: 39 },
-  all:           { names: 1296, effects: 1258 },
+  all:           { names: 1493, effects: 1263 },
 };
 
 const familyOf = key => Object.keys(FLOORS).find(f => f !== 'all' && key.startsWith(f)) ?? null;
