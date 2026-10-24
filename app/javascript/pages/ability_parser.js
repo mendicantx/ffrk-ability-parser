@@ -253,6 +253,40 @@ function resolveStatuses(idOrIds) {
   return statuses;
 }
 
+// A Buster's Soul Breaks row describes its first use (Break Glint), whose own SB cost is
+// in buster_shingi_abilities[0]; the Buster's consume_point is the later uses' cost.
+function busterFirstUseCost(opts) {
+  const firstUse = opts.buster_shingi_abilities?.[0]?.relational_ability;
+  return firstUse && firstUse.consume_point !== undefined ? Number(firstUse.consume_point) : null;
+}
+
+// Sheet display name for an ability category: BLACK_MAGIC → "Black Magic".
+function schoolName(category) {
+  if (!category) return '';
+  return String(category).toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Name of the status whose chase ability this is (CHASE_ABILITY_FOR_<status key>), from
+// the Status sheet — e.g. "Buster Chase Mode: Warrior of Light".
+function chaseSourceName(abilityId) {
+  const chaseKey = DB.chaseAbilityIdToKey[parseInt(abilityId)];
+  if (!chaseKey) return '';
+  const statusKey = chaseKey.replace(/^CHASE_ABILITY_FOR_/, '');
+  const statusId = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
+  return DB.statusMap[statusId]?.commonName || '';
+}
+
+// SB Ver: the sheet's value when the soul break has a row; otherwise the tier plus the
+// next version number for that character (e.g. "Buster2" after "Buster1").
+function soulBreakVersion(sbRow, character, tier) {
+  if (sbRow?.['SB Ver']) return sbRow['SB Ver'];
+  if (!tier) return '';
+  const used = new Set(Object.values(DB.soulBreaksMap)
+    .filter(r => r['Character'] === character && r['Tier'] === tier && r['SB Ver'])
+    .map(r => r['SB Ver']));
+  return `${tier}${used.size + 1}`;
+}
+
 function chaseAbilityName(codedName) {
   if (!codedName) return null;
   const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + codedName];
@@ -349,7 +383,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
     category:     DB.abilityCategories[ability.category_id] ?? null,
     castTime:          opts.cast_time ? (opts.cast_time / 1000).toFixed(2) : null,
     sbCharge:          opts.ss_point ? Number(opts.ss_point) : 0,
-    sbCost:            Number(opts.consume_point) || null,
+    sbCost:            busterFirstUseCost(opts) ?? (Number(opts.consume_point) || null),
     soulStrikeCategory:Number(opts.soul_strike_category_id) || null,
     nameJp:            opts.alias_name || opts.disp_name || null,
     counterable:       Number(opts.counter_enable) !== 0 ? 'Yes' : 'No',
@@ -1848,12 +1882,15 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     26: 'Buster',            27: 'XSB',
   };
 
+  // Tier: the sheet's when the soul break has a row (docs/decisions.md "Naming").
+  const tier = sb?.['Tier'] || SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '';
+
   const colValues = {
     'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
     'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
     'Name':           nameEntry,
-    'Tier':           { val: SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '',                                              src: false },
-    'SB Ver':         { val: '',                                                                                          src: false },
+    'Tier':           { val: tier,                                                                                        src: !!sb?.['Tier'] },
+    'SB Ver':         { val: soulBreakVersion(sb, sb?.['Character'] || actorName, tier),                                  src: !!sb?.['SB Ver'] },
     'Type':           { val: type,                                                                                        src: false },
     'Target':         { val: target,                                                                                      src: false },
     'Formula':        { val: formula,                                                                                     src: false },
@@ -1952,7 +1989,7 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
   const colValues = {
     'Character':   { val: cfParent?.character || '' },
     'Source':      { val: cfParent?.sbName    || '' },
-    'SB Ver':      { val: 'CASB'                    },
+    'SB Ver':      { val: cfParent?.sbVer || 'CASB'  },
     'Name':        { val: 'Crystal Force I'         },
     'Type':        { val: type                      },
     'Target':      { val: target                    },
@@ -1964,7 +2001,7 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     'Counter':     { val: counter                   },
     'Auto Target': { val: autoTarget                },
     'SB':          { val: '-'                       },
-    'School':      { val: ''                        },
+    'School':      { val: schoolName(parsed.category) },
     'Name (JP)':   { val: parsed.name               },
     'ID':          { val: id                        },
     'GL':          { val: ''                        },
@@ -1992,7 +2029,7 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
   const colValues = {
     'Character':  {val: ekParent?.character||''},
     'Source':     {val: ekParent?.sbName||''},
-    'SB Ver':     {val: 'XSB'},
+    'SB Ver':     {val: ekParent?.sbVer || 'XSB'},
     'Name':       {val: nameEn},
     'Type':       {val: type},
     'Target':     {val: target},
@@ -2004,7 +2041,7 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
     'Counter':    {val: counter},
     'Auto Target':{val: autoTarget},
     'SB':         {val: String(parsed.sbCharge || '')},
-    'School':     {val: parsed.category || ''},
+    'School':     {val: schoolName(parsed.category)},
     'Name (JP)':  {val: parsed.name},
     'ID':         {val: id},
     '✓':     {val: ''},
@@ -2021,13 +2058,14 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
 function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
 
   const id = parsed.abilityId;
+  const otherRow = lookupOtherAbility(id);
   const { type, formula, multiplier, target, element, counter } = combatColumns(parsed);
   const autoTarget = target; // Other-tab follow-ups: Auto Target always repeats Target
 
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },
-    'Source':      { val: source             },
-    'Name':        { val: parsed.name        },
+    'Source':      { val: otherRow?.['Source'] || source || chaseSourceName(id), src: !!otherRow?.['Source'] },
+    'Name':        { val: otherRow?.['Name']   || parsed.name,                    src: !!otherRow?.['Name']   },
     'Type':        { val: type               },
     'Target':      { val: target             },
     'Formula':     { val: formula            },
@@ -2038,7 +2076,7 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
     'Counter':     { val: counter            },
     'Auto Target': { val: autoTarget         },
     'SB':          { val: '-'               },
-    'School':      { val: parsed.category ?? '' },
+    'School':      { val: schoolName(parsed.category) },
     'ID':          { val: String(id)        },
     'GL':          { val: ''               },
     '✓':           { val: '✓'             },
@@ -2300,6 +2338,7 @@ function recordRelations(parsed, ability, ctx) {
         relations.cfParent[sub.abilityId] = {
           character: sbRow['Character'] || actorName,
           sbName:    sbRow['Name']      || '',
+          sbVer:     soulBreakVersion(sbRow, sbRow['Character'] || actorName, sbRow['Tier'] || 'CASB'),
         };
       }
     }
@@ -2367,6 +2406,7 @@ function recordRelations(parsed, ability, ctx) {
           character: sbRow?.['Character'] || actorName,
           realm:     sbRow?.['Realm']     || actorRealm,
           sbName:    sbRow?.['Name']      || parsed.name,
+          sbVer:     soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'XSB'),
         };
       }
     }
