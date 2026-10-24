@@ -11,6 +11,7 @@
 //   abilityName(id),     // ability id → name (for ability-specific effects)
 //   abilityNameFrom(id, source), // the Other-tab name of ability id listed under source
 //   abilitySources(id),  // the Other-tab Sources ability id is listed under
+//   abilityEffects(id),  // the Other-tab Effects of ability id
 //   statusKey(id),       // status id → STATUS_AILMENTS_TYPE key
 //   statusId(key),       // STATUS_AILMENTS_TYPE key → status id
 //   selfKey,             // this status's STATUS_AILMENTS_TYPE key
@@ -44,6 +45,13 @@ function conditionSubject(cond, ctx, word = 'and') {
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// "[125% ATB 1]" from an Other-tab Effects cell that only grants statuses to the user
+// ("Grants [125% ATB 1] to user."), else null.
+function grantsToUser(effects) {
+  const m = /^Grants ((?:\[[^\]]+\](?:, | and )?)+) to (?:the )?user\.?$/.exec(effects ?? '');
+  return m ? m[1] : null;
+}
 const percent = factor => factor - 100;
 // castTimeFactor at or above this is instant cast.
 const INSTANT_CAST = 10000000;
@@ -55,9 +63,14 @@ const COUNT_WORDS = { 1: 'a', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'si
 // One clause per effect type; each returns null when it can't phrase the effect.
 const EFFECTS = {
   // Follow-ups that cast one ability: "Casts Retsu after using two Wind abilities".
+  // A follow-up whose Other-tab row only grants statuses to the user is described by
+  // what it grants: "Grants [125% ATB 1] after using a Lightning ability".
+  // executerCondition { isValidSaId } only limits the follow-up to while the user has
+  // a status; the "removed if …" clause already says so.
   REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
-    const known = new Set(['key', 'type', 'chaseType', 'abilityCondition', 'abilityUseCountCondition', 'chaseAbilityId', 'chaseAbilityDoneCountForIsDone']);
+    const known = new Set(['key', 'type', 'chaseType', 'abilityCondition', 'abilityUseCountCondition', 'chaseAbilityId', 'chaseAbilityDoneCountForIsDone', 'executerCondition']);
     if (e.chaseAbilityId == null || Object.keys(e).some(k => !known.has(k))) return null;
+    if (e.executerCondition && Object.keys(e.executerCondition).some(k => k !== 'isValidSaId')) return null;
     const uses = e.abilityUseCountCondition?.multiple ?? 1;
     if (Object.keys(e.abilityUseCountCondition ?? {}).some(k => k !== 'multiple') || !COUNT_WORDS[uses]) return null;
     const name = ctx.abilityName(e.chaseAbilityId);
@@ -66,8 +79,13 @@ const EFFECTS = {
     const limit = e.chaseAbilityDoneCountForIsDone;
     if (limit != null && !COUNT_WORDS[limit]) return null;
     const removed = limit != null ? `, removed after triggering ${limit === 1 ? 'once' : `${COUNT_WORDS[limit]} times`}` : '';
-    return `Casts ${name} after using ${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}${removed}`;
+    const after = `after using ${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}${removed}`;
+    const grants = grantsToUser(ctx.abilityEffects?.(e.chaseAbilityId));
+    return grants ? `Grants ${grants} ${after}` : `Casts ${name} ${after}`;
   },
+  // "Increase ATB charge speed by x2.00"
+  INCREASE_ATB_TIME_FACTOR: e => (e.atbTimeFactor == null || e.abilityCondition ? null
+    : `Increase ATB charge speed by x${e.atbTimeFactor >= INSTANT_CAST ? '9999999' : (e.atbTimeFactor / 100).toFixed(2)}`),
   INCREASE_ELEMENT_ATK: (e, ctx) => {
     const subject = conditionSubject({ elementId: e.elementId }, ctx);
     if (!subject) return null;
@@ -109,21 +127,35 @@ const EFFECTS = {
     return subject ? `Increases the damage/healing cap for ${subject} attacks by ${amount}` : null;
   },
   INCREASE_EXECUTED_DAMAGE: (e, ctx) => {
-    const factor = e.damageFactor ?? e.maximumDamageFactor;
-    if (factor == null) return null;
+    // summationDamageFactor (Resonance) is the added percentage itself.
+    const factor = e.damageFactor ?? e.maximumDamageFactor ?? (e.summationDamageFactor != null ? 100 + e.summationDamageFactor : null);
+    if (factor == null || e.generalValueKey) return null;
     const cond = e.abilityCondition ?? {};
     if (cond.hasWeakness && Object.keys(cond).every(k => k === 'hasWeakness' || k === 'hasDamage')) {
       return `Increases damage dealt by ${percent(factor)}% when exploiting elemental weaknesses`;
     }
     if (cond.isAbility) {
-      const subject = conditionSubject(cond, ctx, 'or');
+      const subject = conditionSubject(cond, ctx, e.summationDamageFactor != null ? 'and' : 'or');
       return subject ? `${subject} abilities deal ${percent(factor)}% more damage` : null;
     }
     return null;
   },
-  // "Ignores 50% of the target's DEF and RES"
-  DEF_AND_MDEF_PENETRATION: e => (e.abilityCondition || e.penetrationFactorMapType == null
-    ? null : `Ignores ${e.penetrationFactorMapType}% of the target's DEF and RES`),
+  // "Ignores 50% of the target's DEF and RES"; "Fire abilities ignore 30% of the target's DEF and RES"
+  DEF_AND_MDEF_PENETRATION: (e, ctx) => {
+    if (e.penetrationFactorMapType == null) return null;
+    if (!e.abilityCondition) return `Ignores ${e.penetrationFactorMapType}% of the target's DEF and RES`;
+    const subject = conditionSubject(e.abilityCondition, ctx, 'or');
+    return subject ? `${subject} abilities ignore ${e.penetrationFactorMapType}% of the target's DEF and RES` : null;
+  },
+  // "White Magic abilities restore 5% more HP"
+  INCREASE_EXECUTED_HEAL: (e, ctx) => {
+    const pct = e.summationDamageFactor ?? (e.damageFactor != null ? percent(e.damageFactor) : null);
+    const cond = e.abilityCondition ?? {};
+    const subject = cond.isAbility ? conditionSubject(Object.fromEntries(Object.entries(cond).filter(([k]) => k !== 'hasHeal')), ctx, 'or') : null;
+    return pct != null && subject && !e.generalValueKey ? `${subject} abilities restore ${pct}% more HP` : null;
+  },
+  // "Critical chance =10%"
+  INCREASE_CRITICAL_RATE: e => (e.rate == null || e.abilityCondition || e.generalValueKey ? null : `Critical chance =${e.rate}%`),
 };
 
 // ─── Names ───────────────────────────────────────────────────────────────────
@@ -144,6 +176,15 @@ function categoryNames(cond, ctx) {
 }
 
 const NAMES = {
+  // "200% ATB 1", "Instant ATB 2", "125% ATB (Synchro)", "200% ATB" (timed)
+  INCREASE_ATB_TIME_FACTOR: (e, ctx, t) => (e.atbTimeFactor == null || e.abilityCondition ? null
+    : `${e.atbTimeFactor >= INSTANT_CAST ? 'Instant' : `${e.atbTimeFactor}%`} ATB${t.suffix}`),
+  // A Tactical follow-up that grants an ATB boost: "Lightning, Dark 125% ATB Quick Cycle (Tactical)"
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx, t) => {
+    const atb = /^\[((?:\d+%|Instant) ATB) \d+\]$/.exec(grantsToUser(ctx.abilityEffects?.(e.chaseAbilityId)) ?? '');
+    const elements = elementNames(e.abilityCondition, ctx);
+    return t.tactical && atb && elements.length ? `${elements.join(', ')} ${atb[1]} Quick Cycle (Tactical)` : null;
+  },
   INCREASE_ELEMENT_ATK: (e, ctx, t) => t.seconds && e.level
     ? `${e.level < 0 ? 'Debuff' : 'Buff'} ${elementNames(e, ctx).join(', ')} ${Math.abs(e.level) * 10}% (${t.seconds}s)` : null,
   INCREASE_ELEMENT_DEF: (e, ctx, t) => t.seconds && e.level
@@ -166,6 +207,12 @@ const NAMES = {
   },
   INCREASE_EXECUTED_DAMAGE: (e, ctx, t) => {
     const cond = e.abilityCondition ?? {};
+    // Resonance: "Fire Resonance +5% Boost" (no duration in the name)
+    if (e.summationDamageFactor != null) {
+      const list = [...elementNames(cond, ctx), ...categoryNames(cond, ctx)];
+      const what = list.length > 1 ? `(${list.join('/')})` : list[0];
+      return what ? `${what} Resonance +${e.summationDamageFactor}% Boost` : null;
+    }
     const pct = (e.damageFactor ?? e.maximumDamageFactor) - 100;
     const when = t.suffix || t.timeSuffix;
     if (cond.hasWeakness) return `Weakness +${pct}% Boost${when}`;
@@ -181,28 +228,59 @@ const NAMES = {
     if (!elements.length) return null;
     return `${elements.length === ALL_ELEMENTS ? 'Prismatic' : elements.join(', ')} Damage Cap +${amount}${t.suffix}`;
   },
-  DEF_AND_MDEF_PENETRATION: (e, ctx, t) => (e.abilityCondition ? null
-    : `DEF and RES ${e.penetrationFactorMapType}% Piercing${t.suffix || t.timeSuffix}`),
+  // "Dancer Healing Resonance +5% Boost"
+  INCREASE_EXECUTED_HEAL: (e, ctx) => {
+    const what = [...elementNames(e.abilityCondition, ctx), ...categoryNames(e.abilityCondition, ctx)].join(', ');
+    return e.summationDamageFactor != null && what ? `${what} Healing Resonance +${e.summationDamageFactor}% Boost` : null;
+  },
+  // "10% Critical 3"
+  INCREASE_CRITICAL_RATE: (e, ctx, t) => (e.rate == null || e.abilityCondition ? null : `${e.rate}% Critical${t.suffix || t.timeSuffix}`),
+  // "Fire, Lightning, Earth Ability DEF and RES 30% Piercing (Tactical)"
+  DEF_AND_MDEF_PENETRATION: (e, ctx, t) => {
+    if (!e.abilityCondition) return `DEF and RES ${e.penetrationFactorMapType}% Piercing${t.suffix || t.timeSuffix}`;
+    const elements = elementNames(e.abilityCondition, ctx);
+    const what = elements.length === ALL_ELEMENTS ? 'Prismatic' : elements.join(', ');
+    return elements.length ? `${what} Ability DEF and RES ${e.penetrationFactorMapType}% Piercing${t.suffix || t.timeSuffix}` : null;
+  },
 };
+
+// The turn count shared by effects that end the status when used up (countForIsDone).
+function effectTurns(effects) {
+  const counts = [...new Set((effects ?? []).map(e => e.countForIsDone))];
+  return counts.length === 1 && counts[0] != null ? counts[0] : null;
+}
 
 function statusNameFor(params, ctx) {
   if (params.effects.length !== 1) return null;
-  const turn = (params.durations ?? []).find(d => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type) === 'TURN')?.turn;
+  const allDone = (params.durations ?? []).some(d => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type) === 'UNSET_WHEN_ALL_EFFECTS_ARE_DONE');
+  const turn = (params.durations ?? []).find(d => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type) === 'TURN')?.turn
+    ?? (allDone ? effectTurns(params.effects) : null);
+  const synchro = (params.durations ?? []).some(d => d.saId != null && ctx.statusKey?.(d.saId) === 'SYNCHRO_MODE');
   const time = (params.durations ?? []).find(d => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type) === 'TIME')?.time;
   const tactical = (params.durations ?? []).some(d => d.saId != null && ctx.statusKey?.(d.saId) === 'TACTICAL_AWAKE_MODE');
   const seconds = time ? time / 1000 : null;
-  const timing = { suffix: turn ? ` ${turn}` : tactical ? ' (Tactical)' : '', seconds, timeSuffix: seconds ? ` (${seconds}s)` : '', tactical };
+  const timing = { suffix: turn ? ` ${turn}` : tactical ? ' (Tactical)' : synchro ? ' (Synchro)' : '', seconds, timeSuffix: seconds ? ` (${seconds}s)` : '', tactical };
   const e = params.effects[0];
   return NAMES[nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type)]?.(e, ctx, timing) ?? null;
 }
 
+// Modes whose statuses the sheet ends with "removed if the user hasn't [X]" (every row for
+// Crystal Force, Extra and Master Mode). Other modes say "character"; Tactical depends on the text.
+const USER_REMOVAL_MODES = new Set(['Crystal Force Mode', 'Extra Mode', 'Master Mode']);
+
 // The status's Default Duration and any ", removed if …" suffix.
-function describeDurations(durations, ctx) {
+function describeDurations(durations, ctx, effects = []) {
   let duration = '-';
   const suffixes = [];
   for (const d of durations ?? []) {
     const type = nameOf(ctx.conf.STATUS_AILMENTS_PARAM_DURATION_TYPE, d.type);
     if (type === 'TURN' && d.turn != null) duration = plural(d.turn, 'turn');
+    else if (type === 'UNSET_WHEN_ALL_EFFECTS_ARE_DONE') {
+      // Ends when its effects are used up: "200% ATB 1" lasts 1 turn.
+      const turns = effectTurns(effects);
+      if (turns == null) return null;
+      duration = plural(turns, 'turn');
+    }
     else if (type === 'TIME' && d.time != null) duration = plural(d.time / 1000, 'second');
     else if (type === 'USNET_WHEN_SPECIFIC_SA_UNSET' && d.saId != null) {
       const name = ctx.statusName(d.saId);
@@ -528,6 +606,66 @@ function describeDualAwakeMode(params, ctx) {
 
 const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode];
 
+// ─── Stat changes ────────────────────────────────────────────────────────────
+// The sheet's stat names, and its stat lists: equal values grouped in the order they
+// appear, increases before decreases — "MND +30%, DEF and RES -30%".
+const STAT_NAMES = { ATK: 'ATK', MATK: 'MAG', DEF: 'DEF', MDEF: 'RES', MND: 'MND', atk: 'ATK', matk: 'MAG', def: 'DEF', mdef: 'RES', mnd: 'MND' };
+
+function statList(changes, unit) {
+  const groups = [];
+  for (const sign of [1, -1]) {
+    for (const { stat, value } of changes.filter(c => Math.sign(c.value) === sign)) {
+      const group = groups.find(g => g.value === value);
+      if (group) group.stats.push(stat); else groups.push({ value, stats: [stat] });
+    }
+  }
+  return groups.map(g => `${joinList(g.stats, 'and')} ${g.value > 0 ? '+' : '-'}${Math.abs(g.value)}${unit}`).join(', ');
+}
+
+// Older statuses with no game config spell their values out in the coded name:
+// CUSTOM_PARAM_MULTI_ATK_30_DEF_M30_8000 → "ATK +30%, DEF -30%" for 8 seconds. A
+// trailing number is milliseconds (8000) or turns (2); LARGE is 25 seconds; with no
+// duration the sheet's most common value is 25 seconds (18 rows, vs 13 for 8s and 12 "-").
+// The names the sheet gives many of these ("Dark Bargain") can't be derived; the rest
+// read "ATK +30%, DEF -30% (8s)", "100% Critical 2". (The custom names come from the
+// English Global version's localization; statuses added after Global closed have none,
+// so the generated form is what new rows use.)
+export function describeStatusFromKey(key) {
+  // Single stats read the same way: CUSTOM_ATK_10_WITH_DURATION_SMALL_8000.
+  const m = /^CUSTOM_PARAM_MULTI_(.+)$/.exec(key ?? '') ?? /^CUSTOM_((?:ATK|MATK|DEF|MDEF|MND|CRITICAL)_M?\d+(?:_.+)?)$/.exec(key ?? '');
+  if (!m) return null;
+  const tokens = m[1].split('_');
+  // Templates whose value is set by the ability: CUSTOM_ATK_DEF → "ATK and DEF +X%".
+  if (!m[0].startsWith('CUSTOM_PARAM_MULTI_') && tokens.every(t => STAT_NAMES[t] || t === 'CRITICAL')) {
+    if (tokens.includes('CRITICAL')) return tokens.length === 1 ? { name: 'Critical Chance X%', effects: 'Critical chance =X%', defaultDuration: '-' } : null;
+    const text = `${joinList(tokens.map(t => STAT_NAMES[t]), 'and')} +X%`;
+    return { name: text, effects: text, defaultDuration: '-' };
+  }
+  const changes = [];
+  let critical = null, i = 0;
+  while (i + 1 < tokens.length && /^M?\d+$/.test(tokens[i + 1]) && (STAT_NAMES[tokens[i]] || tokens[i] === 'CRITICAL')) {
+    const value = (tokens[i + 1].startsWith('M') ? -1 : 1) * parseInt(tokens[i + 1].replace('M', ''));
+    if (tokens[i] === 'CRITICAL') critical = value; else changes.push({ stat: STAT_NAMES[tokens[i]], value });
+    i += 2;
+  }
+  // What's left is the duration: [WITH_DURATION_][SMALL_|LARGE|<ms>|<turns>][_FOR_…]
+  // A size word before a number (MEDIUM_15000) only names the duration the number gives.
+  let rest = tokens.slice(i).filter(t => !['WITH', 'DURATION', 'SMALL'].includes(t));
+  if (rest[0] === 'MEDIUM' && /^\d+$/.test(rest[1] ?? '')) rest = rest.slice(1);
+  const end = rest.indexOf('FOR');
+  const dur = (end < 0 ? rest : rest.slice(0, end));
+  if (dur.length > 1 || (!changes.length && critical == null)) return null;
+  let defaultDuration = '25 seconds', nameSuffix = ' (25s)';
+  if (dur[0] === 'LARGE' || dur.length === 0) { /* 25 seconds */ }
+  else if (dur[0] === 'MEDIUM') { defaultDuration = '15 seconds'; nameSuffix = ' (15s)'; }
+  else if (/^\d+$/.test(dur[0]) && +dur[0] >= 1000) { defaultDuration = plural(+dur[0] / 1000, 'second'); nameSuffix = ` (${+dur[0] / 1000}s)`; }
+  else if (/^\d+$/.test(dur[0])) { defaultDuration = plural(+dur[0], 'turn'); nameSuffix = ` ${dur[0]}`; }
+  else return null;
+  const parts = [changes.length ? statList(changes, '%') : null, critical != null ? `Critical chance =${critical}%` : null].filter(Boolean);
+  const name = changes.length ? `${statList(changes, '%')}${nameSuffix}` : `${critical}% Critical${nameSuffix}`;
+  return { name, effects: parts.join(', '), defaultDuration };
+}
+
 // { name, effects, defaultDuration } in the sheet's wording (name may be null), or null when any part of the
 // status isn't understood yet.
 export function describeStatus(params, ctx) {
@@ -543,7 +681,7 @@ export function describeStatus(params, ctx) {
     if (!clause) return null;
     clauses.push(clause);
   }
-  const durations = describeDurations(params.durations, ctx);
+  const durations = describeDurations(params.durations, ctx, params.effects);
   if (!durations) return null;
   // OVERLAP statuses stack with themselves: "cumulable".
   if (nameOf(ctx.conf.STATUS_AILMENTS_PARAM_OVERLAP_TYPE, params.overlap?.type) === 'OVERLAP'
@@ -556,7 +694,11 @@ export function describeStatus(params, ctx) {
   const allCast = params.effects.every(e => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type) === 'INCREASE_CAST_TIME_FACTOR');
   for (const { removedUnless } of durations.suffixes) {
     if (allCast) clauses[clauses.length - 1] = clauses[clauses.length - 1].replace(/%NOUN%\w+$/, '') + ` while in ${removedUnless}`;
-    else clauses.push(`removed if the ${allCaps ? 'user' : 'character'} hasn't [${removedUnless}]`);
+    else {
+      // Tactical statuses that grant something say "user" (56 rows, none say "character").
+      const user = allCaps || USER_REMOVAL_MODES.has(removedUnless) || (removedUnless === 'Tactical Awoken Mode' && /^Grants /.test(clauses[0]));
+      clauses.push(`removed if the ${user ? 'user' : 'character'} hasn't [${removedUnless}]`);
+    }
   }
   for (let i = 0; i < clauses.length; i++) clauses[i] = clauses[i].replace('%NOUN%', ' ');
   // Follow-ups on the same trigger merge: "Casts A and B after using a Support ability".

@@ -40,6 +40,8 @@ test('decoder output survives a simulated battle.js repack', async () => {
   const assignments = original.eval('DB.statusAssignments');
   const helpers = new Map();
   for (const key of decodedKeys) {
+    // Statuses read from their coded name alone have no helper to rename.
+    if (!assignments[key]) continue;
     const { defineModule, funcName } = assignments[key];
     const id = `${defineModule}|${funcName}`;
     if (!helpers.has(id)) helpers.set(id, { defineModule, funcName, renamed: `zzRepack${helpers.size}` });
