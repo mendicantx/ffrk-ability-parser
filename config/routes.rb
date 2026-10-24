@@ -3,10 +3,17 @@ Rails.application.routes.draw do
 
   root "dashboard#index"
 
-  get  '/ability_parser',            to: 'ability_parser#index'
-  get  '/ability_parser/battle_js',  to: 'ability_parser#battle_js'
-  get  '/ability_parser/sheet_data', to: 'ability_parser#sheet_data'
+  get  '/ability_parser', to: 'ability_parser#index'
+  get  '/status_decoder', to: 'status_decoder#index'
 
-  get  '/status_decoder',             to: 'status_decoder#index'
-  get  '/status_decoder/sheet_data',  to: 'status_decoder#sheet_data'
+  # Cached data for both tools (see DataController)
+  get  '/data/sheets',    to: 'data#sheets'
+  get  '/data/battle_js', to: 'data#battle_js'
+  get  '/data/status',    to: 'data#status'
+  post '/data/refresh',   to: 'data#refresh'
+
+  # Older URLs, kept as aliases
+  get  '/ability_parser/battle_js',  to: 'data#battle_js'
+  get  '/ability_parser/sheet_data', to: 'data#sheets'
+  get  '/status_decoder/sheet_data', to: 'data#sheets', defaults: { names: 'status,other,extra' }
 end

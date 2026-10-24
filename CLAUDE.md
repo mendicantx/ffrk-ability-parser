@@ -11,11 +11,11 @@ Decisions made during development — field meanings, naming conventions, sheet 
 | Aspect | Decision | Reason |
 |---|---|---|
 | Framework | Rails 7.0.3 | User preference for Ruby web layer |
-| Ruby | 4.0.1 via asdf | Managed with asdf; `.tool-versions` pins the version |
-| Database | None (in-memory only) | Keeps it simple for now |
+| Ruby | 4.0.9 via asdf | `.tool-versions` pins the exact version; the Gemfile allows `~> 4.0` |
+| Database | None; data is cached as files in `data/` | Keeps it simple for now |
 | Google Sheets | Published CSV export URL per tab | No credentials needed; sheet must be published publicly |
 | battle.js | Dean Edwards p,a,c,k,e,r packed JS | Unpacked to raw JS string; content is AMD module code, not JSON |
-| Data refresh | On server boot via initializer | `DataLoader.refresh_all` runs automatically; rake task also available |
+| Data refresh | `rake data:refresh`, the Refresh button on either tool, or a daily cron | The server only reads the cache; it never fetches on page load |
 
 ## Data sources
 
@@ -32,7 +32,7 @@ Configure via environment variables (copy `.env.example` to `.env`):
 | `HERO_ABILITIES_SHEET_URL` | Hero Abilities tab | 329671300 |
 | `EXTRA_SHEET_URL` | Extra tab | 1700445928 |
 
-To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env`. `GOOGLE_SHEETS` is the only sheet list: the loader and both controllers read it through `DataLoader.sheet_urls`.
+To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env`. `GOOGLE_SHEETS` is the only sheet list.
 
 ### Action Args sheet (separate spreadsheet)
 
@@ -53,21 +53,22 @@ Used by the ability translator to know what each arg in an ability's JSON option
 
 | File | Purpose |
 |---|---|
-| `app/models/data_store.rb` | Singleton in-memory store (`DataStore.instance`) |
-| `lib/data_loader.rb` | `DataLoader.refresh_all`; defines `GOOGLE_SHEETS` config table; used by initializer and rake |
+| `app/models/data_store.rb` | Singleton that reads the `data/` cache (`DataStore.instance`); reloads when `metadata.json` changes |
+| `app/controllers/data_controller.rb` | Serves the cache to both tools: `/data/sheets`, `/data/battle_js`, `/data/status`, and the rate-limited `POST /data/refresh` |
+| `lib/data_loader.rb` | `DataLoader.refresh_all` fetches every source into `data/`; defines the `GOOGLE_SHEETS` registry |
 | `lib/importers/sheets_importer.rb` | Fetches and parses Google Sheets CSV |
 | `lib/importers/battle_js_importer.rb` | Fetches battle.js, unpacks p,a,c,k,e,r JS (supports base 62), returns raw JS string |
 | `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
 | `test/js/harness.mjs` | Runs both pages' scripts unchanged in a Node `vm` with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
 | `lib/data_snapshot.rb` | Writes the gzipped test snapshot of `data/` with a SHA-256 manifest |
-| `config/initializers/data_refresh.rb` | Triggers `DataLoader.refresh_all` on server boot (skipped during rake tasks) |
+| `config/initializers/data_refresh.rb` | Loads the `data/` cache into `DataStore` on boot (no network) |
 | `app/controllers/dashboard_controller.rb` | Root page; reads from DataStore |
 | `app/views/dashboard/index.html.erb` | Collapsible sections per sheet + battle.js; js-beautify formats JS in browser |
 
 ## Common commands
 
 ```bash
-# Start the server (auto-loads all data on boot)
+# Start the server (reads the data/ cache; run rake data:refresh first on a fresh checkout)
 bin/rails server
 
 # Manually refresh all data
@@ -76,7 +77,7 @@ rake data:refresh
 # Fetch and print battle.js to stdout
 rake data:battle_js
 
-# Check what's currently in memory
+# Check what's in the data/ cache
 rake data:status
 
 # Run the Ruby tests
@@ -105,13 +106,16 @@ To refresh daily, add a cron entry for the deploy user on the server:
 ## Architecture notes
 
 - `DataStore` uses Ruby's `Singleton` module — one instance per Rails process.
-  Data loads automatically on boot via `config/initializers/data_refresh.rb`.
+  It loads the `data/` files on boot, and `DataController` calls `reload_if_changed!` on each request
+  so a refresh by cron or rake is picked up without a restart.
+- Both tools fetch from `DataController` (`/data/*`). The older `/ability_parser/sheet_data`,
+  `/ability_parser/battle_js` and `/status_decoder/sheet_data` URLs are aliases.
 - Sheet data is stored in a hash keyed by symbol: `DataStore.instance.sheets` → `{ soul_breaks: [...], ... }`.
   Access a single sheet with `DataStore.instance.sheet(:soul_breaks)`.
 - `SheetsImporter` follows HTTP redirects (Google Sheets redirects before serving CSV).
 - `BattleJsImporter` unpacks p,a,c,k,e,r JS using a custom base-62 decoder (Ruby's `String#to_i` only supports up to base 36).
   Returns the unpacked JS as a plain string — content is AMD `define()` module code, not JSON.
-- `DataLoader` is the shared entry point used by both the boot initializer and rake tasks.
+- `DataLoader` is the only code that fetches from the network (rake tasks and `POST /data/refresh`).
 - Importers live in `lib/importers/`; `DataLoader` lives in `lib/`. Both are eager-loaded via `config/application.rb`.
 - The dashboard formats battle.js in the browser using js-beautify (CDN) on first expand of the `<details>` element.
 

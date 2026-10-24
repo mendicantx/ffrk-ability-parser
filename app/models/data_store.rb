@@ -1,6 +1,8 @@
 # File-backed singleton store for all ingested data.
 # Data is written to disk by DataLoader (rake data:refresh) and read back here.
 # On server boot, reload! is called automatically — no network calls needed.
+# reload_if_changed! re-reads the files when another process (cron, rake) has
+# refreshed them since they were last loaded.
 #
 # Usage:
 #   DataStore.instance.sheet(:soul_breaks)       # => Array of CSV row hashes
@@ -24,11 +26,18 @@ class DataStore
   attr_reader :sheets, :battle_js_data, :status_ailments_from_js, :last_refreshed_at
 
   def initialize
+    @mutex = Mutex.new
     load_from_disk!
   end
 
   def reload!
-    load_from_disk!
+    @mutex.synchronize { load_from_disk! }
+  end
+
+  # Reloads when metadata.json has changed since the last load. Cheap enough to
+  # call on every request (one stat call).
+  def reload_if_changed!
+    reload! if metadata_mtime != @loaded_metadata_mtime
   end
 
   def sheet(name)
@@ -42,6 +51,7 @@ class DataStore
   private
 
   def load_from_disk!
+    @loaded_metadata_mtime   = metadata_mtime
     @sheets                  = load_sheets
     @battle_js_data          = load_text(BATTLE_JS_FILE)
     @status_ailments_from_js = load_json(AILMENTS_FILE) || {}
@@ -58,6 +68,10 @@ class DataStore
       result[name] = data if data
     end
     result
+  end
+
+  def metadata_mtime
+    File.exist?(METADATA_FILE) ? File.mtime(METADATA_FILE) : nil
   end
 
   def load_json(path)
