@@ -60,7 +60,7 @@ Configure via environment variables (copy `.env.example` to `.env`):
 | `HERO_ABILITIES_SHEET_URL` | Hero Abilities tab | 329671300 |
 | `EXTRA_SHEET_URL` | Extra tab | 1700445928 |
 
-To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env`. `GOOGLE_SHEETS` is the only sheet list.
+To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env` — locally and in the server's `shared/.env` (then restart and refresh; see "Production"). `GOOGLE_SHEETS` is the only sheet list. A tab whose URL isn't set is skipped with only a warning in the Rails log ("[DataLoader] SKIPPED …"), so check the dashboard's sheet count.
 
 The CSV is read as UTF-8 (`SheetsImporter.parse_csv`), so Japanese text such as Name (JP) is kept; only invalid bytes and a leading byte-order mark are dropped.
 
@@ -169,7 +169,16 @@ node test/browser/smoke.mjs http://localhost:3000
 
 ## Production
 
-The site runs on `mendicant.com` (Passenger) from `/data/www/ffrk-ability-parser`. GitHub Actions deploys it after Tests pass on a push to `main`; manual deploys use the same command locally. Setup and checks for the Actions deploy are in the backlog under "Release: deploy from GitHub Actions".
+The live site is **https://ffrktools.mendicant.com** (Apache + Passenger on `mendicant.com`, from `/data/www/ffrk-ability-parser`). `https://mendicant.com/` itself is a separate static directory listing, not this app. GitHub Actions deploys after Tests pass on a push to `main`; manual deploys use the same command locally. Setup and checks for the Actions deploy are in the backlog under "Release: deploy from GitHub Actions".
+
+After a deploy, check the live site with the read-only smoke test, and `/data/status` for the refresh time and sheet counts:
+
+```bash
+node test/browser/smoke.mjs https://ffrktools.mendicant.com
+curl -s https://ffrktools.mendicant.com/data/status
+```
+
+The server's settings live in `shared/.env` (a Capistrano linked file). It must set every `*_SHEET_URL` the local `.env` sets; on 2026-10-24 `HERO_ABILITIES_SHEET_URL` and `EXTRA_SHEET_URL` were missing, so production fetched 5 sheets instead of 7. After changing it, restart the app (`touch /data/www/ffrk-ability-parser/current/tmp/restart.txt`) and press **Refresh data**.
 
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
