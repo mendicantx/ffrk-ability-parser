@@ -26,11 +26,13 @@ export function statusDescriber({ conf, statusParams }, sheets) {
     if (!isNaN(id) && r['Common Name']) sheetNames[id] = r['Common Name'];
   }
 
+  const otherEffects = {};
   const otherNames = {}, namesBySource = {}, effectsBySource = {}, nameByIdAndSource = {}, sourcesById = {};
   for (const r of sheets.other ?? []) {
     const id = parseInt(r['ID']);
     const source = r['Source'];
     if (!isNaN(id) && r['Name']) otherNames[id] = r['Name'];
+    if (!isNaN(id) && r['Effects']) otherEffects[id] = r['Effects'];
     if (!source) continue;
     if (r['Name']) (namesBySource[source] ??= []).push(r['Name']);
     if (r['Effects']) (effectsBySource[source] ??= []).push(r['Effects']);
@@ -57,6 +59,7 @@ export function statusDescriber({ conf, statusParams }, sheets) {
       category:        key => schoolName(key),
       statusName:      id => sheetNames[id] || (statusById[id] ? titleCase(statusById[id]) : null),
       abilityName:     id => abilityName(id) ?? MISSING_ABILITY,
+      abilityEffects:  id => otherEffects[id] ?? null,
       abilityNameFrom: (id, source) => nameByIdAndSource[`${id}|${source}`] ?? null,
       abilitySources:  id => sourcesById[id] ?? [],
       statusKey:       id => statusById[id] ?? null,

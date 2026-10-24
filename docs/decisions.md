@@ -316,6 +316,15 @@ Statuses without a Status-tab row are marked and listed for pasting:
 - **Name:** from the Other-tab Source of the mode's chase; Mode I borrows its Mode II partner's. Otherwise built from the coded name: "Dual Awoken Earth Mode I (Biggs)", and a trailing `II` is "(Fang v2)", the sheet's usual form.
 - **Default Duration:** Mode I is 15 seconds. Mode II lasts as long as its soul break's Dual Shift pattern (`dualShiftPatternId`, arg4: pattern 0 is [3,3,2,1,0] turns, pattern 1 is [1]), which the status doesn't know, so the decoder uses the sheet's most common value, "1 turn" (149 vs 120 for "3/3/2/1/0 turns (Dual Shift)").
 
+### Simple statuses (decoder)
+- **ATB:** "Increase ATB charge speed by x2.00" (x9999999 for instant), named "200% ATB 1", "Instant ATB 2", "125% ATB (Synchro)"; a status that ends when its effects are used up lasts `countForIsDone` turns.
+- **Follow-ups that only grant statuses:** when the follow-up's Other-tab Effects is "Grants [X] to user.", the status reads "Grants [X] after using a Lightning ability", and a Tactical one granting an ATB boost is named "Lightning 125% ATB Quick Cycle (Tactical)".
+- **"removed if the user/character hasn't [X]":** "user" for Crystal Force, Extra and Master Mode (every sheet row) and for Tactical statuses that start with "Grants" (56 rows, none say "character"); "character" otherwise.
+- **Stat changes:** stats are ATK, MAG, DEF, RES, MND; equal values are grouped in the order they appear, increases first ("MND +30%, DEF and RES -30%"). Older statuses with no game config (`CUSTOM_PARAM_MULTI_*`, `CUSTOM_ATK_*`, `CUSTOM_CRITICAL_*`) are read from the coded name: a trailing number is milliseconds or turns, LARGE is 25 seconds, MEDIUM 15 seconds, and no duration means 25 seconds (the sheet's most common). Templates without a value read "ATK and DEF +X%".
+- **Names of stat changes:** "ATK +30%, DEF -30% (8s)", "100% Critical 2". Many older rows have names from the English Global version's localization ("Dark Bargain", "Focus") that can't be derived; statuses added after Global closed have none, so the generated form is what new rows use.
+- **Resonance:** "Fire abilities deal 5% more damage", named "Fire Resonance +5% Boost"; several elements read "Wind and Dark abilities…" and "(Wind/Dark) Resonance +5% Boost"; healing: "Dancer abilities restore 5% more HP", "Dancer Healing Resonance +5% Boost".
+- **Piercing for some abilities:** "Fire abilities ignore 30% of the target's DEF and RES", named "Fire Ability DEF and RES 30% Piercing (Tactical)" ("Prismatic" for all elements).
+
 ### Soul Drive Mode wording (decoder)
 `Soul Drive Mode: <Character>` statuses (`LIMIT_BREAK_SOUL_DRIVE_*`) use the wording every one of the 160 sheet rows shares: "Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks, Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]". The cap and damage clauses appear only when the status has them.
 

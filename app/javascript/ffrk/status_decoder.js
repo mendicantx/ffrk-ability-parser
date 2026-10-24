@@ -13,6 +13,7 @@
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { realmName, schoolName, elementName, titleCase, canonicalCharacterName as sharedCharacterName } from 'ffrk/names';
 import { statusDescriber, KNOWN_ABILITY_NAMES } from 'ffrk/status_context';
+import { describeStatusFromKey } from 'ffrk/status_text';
 
 // ─── Source code extraction ───────────────────────────────────────────────────
 // Extract the full definition of a named function from a define() block body.
@@ -1128,6 +1129,16 @@ export function createStatusDecoder() {
         funcName: 'game data', decoded: true, _statusKey: statusKey,
       };
     }
+    // Older statuses with no game config: values from the coded name (ffrk/status_text).
+    const fromKey = !assignment && describeStatusFromKey(statusKey);
+    if (fromKey) {
+      return {
+        id, codedName: statusKey, commonName: fromKey.name,
+        effects: fromKey.effects, defaultDuration: fromKey.defaultDuration,
+        mndModifier: '-', exclusiveStatus: '-', notes: '',
+        funcName: 'coded name', decoded: true, _statusKey: statusKey,
+      };
+    }
     if (!assignment) {
       const raw = findRawAssignment(statusKey);
       return {
@@ -1185,6 +1196,18 @@ export function createStatusDecoder() {
         notes:           '',
         funcName:        'game data',
         decoded:         true,
+        _block: block, _funcName: funcName, _argsText: argsText, _statusKey: statusKey,
+      };
+    }
+
+    // Values spelled out in the coded name (older statuses).
+    const keyed = describeStatusFromKey(statusKey);
+    if (keyed) {
+      return {
+        id, codedName: statusKey, commonName: keyed.name,
+        effects: keyed.effects, defaultDuration: keyed.defaultDuration,
+        mndModifier: '-', exclusiveStatus: '-', notes: '',
+        funcName: 'coded name', decoded: true,
         _block: block, _funcName: funcName, _argsText: argsText, _statusKey: statusKey,
       };
     }
