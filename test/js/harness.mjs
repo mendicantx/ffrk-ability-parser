@@ -1,16 +1,20 @@
-// Runs the Ability Parser and Status Decoder page scripts in a Node `vm`
-// sandbox, against the frozen data snapshot in test/fixtures/snapshot.
+// Runs the Ability Parser and Status Decoder pages in Node against the frozen
+// data snapshot in test/fixtures/snapshot.
 //
-// The scripts run unchanged: a minimal fake DOM stands in for the browser, and
-// a fake fetch() serves the snapshot for the routes the pages call. Top-level
-// declarations in the page scripts (DB, decodeStatus, processBattleJson, ...)
-// are reachable through page.eval('name').
+// The page modules (app/javascript/pages) are imported as real ES modules: a
+// resolve hook maps the importmap specifiers (ffrk/*, pages/*) to files, a
+// minimal fake DOM and a fake fetch() that serves the snapshot are installed as
+// globals, and classic inline scripts (the shared constants partial) run in the
+// global scope first, as in a browser. Each loadPage() imports a fresh instance
+// of the page module; page.eval('expr') evaluates an expression against the
+// page module's exports (DB, decodeStatus, processBattleJson, ...).
 
 import fs from 'node:fs';
+import { registerHooks } from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
 import zlib from 'node:zlib';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURES = path.join(ROOT, 'test/fixtures');
@@ -35,6 +39,21 @@ export function snapshot() {
 // ─── Page scripts ────────────────────────────────────────────────────────────
 const VIEWS = path.join(ROOT, 'app/views');
 export const JS_DIR = path.join(ROOT, 'app/javascript');
+const JS_DIR_URL = pathToFileURL(JS_DIR).href;
+
+// Mirrors config/importmap.rb: `ffrk/x` and `pages/x` are app/javascript/<dir>/x.js,
+// and everything under app/javascript is an ES module.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const m = /^(ffrk|pages)\/([\w/]+)$/.exec(specifier);
+    if (m) return { url: pathToFileURL(path.join(JS_DIR, m[1], `${m[2]}.js`)).href, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    const result = nextLoad(url, context);
+    return url.startsWith(JS_DIR_URL) ? { ...result, format: 'module' } : result;
+  },
+});
 
 // Expands `<%= render 'shared/x' %>` and drops ERB comments, then returns the
 // page's scripts in the order a browser runs them: inline classic <script>
@@ -166,39 +185,49 @@ const PAGES = {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Boots a page's scripts against the snapshot and resolves once its data has loaded.
+// Browser globals the pages use, installed on globalThis for each page load.
+function installGlobals(globals) {
+  for (const [name, value] of Object.entries(globals)) {
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  }
+}
+
+let pageInstance = 0;
+
+// Boots a page against the snapshot and resolves once its data has loaded.
+// Load one page at a time: the globals belong to the most recently loaded page.
 export async function loadPage(view, { timeoutMs = 60000 } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
 
   const document = new FakeDocument();
-  const sandbox = {
+  installGlobals({
     document,
-    console,
+    window: globalThis,
     fetch: makeFetch(),
-    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
-    performance,
-    URL, URLSearchParams,
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { reload() {} },
     requestAnimationFrame: fn => setTimeout(fn, 0),
-  };
-  sandbox.window = sandbox;
-  sandbox.globalThis = sandbox;
-  const context = vm.createContext(sandbox);
+  });
 
+  let exports = {};
   for (const { code, file, module } of pageScripts(view)) {
-    // Page modules have no imports yet, so they run as strict-mode scripts; that
-    // keeps their top-level names reachable through page.eval() for the tests.
-    vm.runInContext(module ? `'use strict';${code}` : code, context, { filename: file });
+    if (module) {
+      // A fresh module instance per load; shared ffrk/* modules are stateless.
+      exports = await import(`${pathToFileURL(path.join(ROOT, file)).href}?instance=${++pageInstance}`);
+    } else {
+      vm.runInThisContext(code, { filename: file });
+    }
   }
 
-  const evalIn = expr => vm.runInContext(expr, context);
+  const evalIn = expr => new Function(...Object.keys(exports), `return (${expr});`)(...Object.values(exports));
   const deadline = Date.now() + timeoutMs;
   while (!evalIn(page.ready)) {
     if (Date.now() > deadline) throw new Error(`${view}: data did not load within ${timeoutMs} ms`);
     await sleep(5);
   }
-  return { view, document, context, eval: evalIn };
+  return { view, document, exports, eval: evalIn };
 }
 
 // ─── Golden files ────────────────────────────────────────────────────────────

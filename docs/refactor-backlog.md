@@ -111,6 +111,7 @@ As the maintainer, I want the logic both tools need in one `app/javascript/ffrk/
 - It covers constant extraction (`extractConstantMap`, `invert`), battle.js loading, element, series and character name formatting, target classification, character-from-status-key and ability-condition text.
 - The duplicate copies are deleted. Goldens stay byte-identical.
 - **Test:** `node --test "test/js/*.test.mjs"`, which also runs `core.test.mjs` with a unit test per helper.
+- **Status:** done (`task/shared-core`). Only `extractConstantMap`, `invert` and the `/data` helpers were truly shared without changing output. The name formatting, target classification and `describeStatus` differ between the pages, so they move in story 13 along with the owner's naming decisions. The harness now imports the pages as real ES modules.
 
 ### 13. Shared display tables
 As the maintainer, I want the hard-coded tables in `config/ffrk/*.yml`, read by both tools and the Python script, so that names can't drift again.
@@ -169,7 +170,7 @@ A battle capture holds every soul break for every party member, so one or two ca
 ## Findings from the captures
 
 - **Ability Crash gets a Soul Break row.** In the Seymour XSB, Ability Crash (22540040) renders a Soul Break preview with character "Unknown" as well as its Other-tab follow-up row. decisions.md routes Ability Crash to the Other tab and the Soul Breaks sheet has no row for it, so the Soul Break row should be suppressed. To fix in story 18 (Extra soul break hooks).
-- **Statuses missing from the Status sheet show coded names.** `EXTRA_BUDDY_MODE_SEYMOUR` (56777) and `CUSTOM_PARAM_MULTI_ATK_15_MATK_15_DEF_25_MDEF_25_MND_15_LARGE` (6116) aren't in the sheet, so the effects text shows the raw key. The decoder can describe the Extra Mode status; story 12's `describeStatus` (sheet first, decoder fallback) fixes this.
+- **Statuses missing from the Status sheet show coded names.** `EXTRA_BUDDY_MODE_SEYMOUR` (56777) and `CUSTOM_PARAM_MULTI_ATK_15_MATK_15_DEF_25_MDEF_25_MND_15_LARGE` (6116) aren't in the sheet, so the effects text shows the raw key. The decoder can describe the Extra Mode status; a shared `describeStatus` (sheet first, decoder fallback) in story 13 fixes this.
 
 ## Open questions for the owner
 

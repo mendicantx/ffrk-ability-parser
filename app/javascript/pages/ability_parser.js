@@ -1,6 +1,9 @@
 // Ability Parser page script, loaded as an ES module by
 // app/views/ability_parser/index.html.erb via javascript_import_module_tag.
 
+import { extractConstantMap, invert } from 'ffrk/battle_js';
+import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
+
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
 
@@ -53,38 +56,6 @@ function checkAllLoaded() {
   const allOk = ['battlejs','sheets']
     .every(k => document.getElementById(`li-${k}-icon`).classList.contains('ok'));
   document.getElementById('parse-btn').disabled = !allOk;
-}
-
-// Extract a simple {KEY:num, KEY:num} map from battle.js text
-// Returns { NAME: number } (forward map)
-function extractConstantMap(js, name) {
-  // Merge ALL occurrences — STATUS_AILMENTS_TYPE is spread across 13
-  // sub-module blocks, each covering a different slice of status IDs.
-  const marker = name + ':{';
-  const merged = {};
-  let searchFrom = 0;
-  while (true) {
-    const idx = js.indexOf(marker, searchFrom);
-    if (idx === -1) break;
-    let depth = 0, start = idx + name.length + 1, i = start;
-    for (; i < js.length; i++) {
-      if (js[i] === '{') depth++;
-      else if (js[i] === '}') { depth--; if (depth === 0) break; }
-    }
-    const block = js.slice(start + 1, i);
-    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-      merged[m[1]] = parseInt(m[2]);
-    }
-    searchFrom = idx + 1;
-  }
-  return merged;
-}
-
-// Invert: {NAME: num} → {num: NAME}
-function invert(map) {
-  const inv = {};
-  for (const [k, v] of Object.entries(map)) inv[v] = k;
-  return inv;
 }
 
 // ─── Load battle.js and extract constants ────────────────────────────────────
@@ -153,9 +124,10 @@ async function loadSheets() {
   setLoadState('sheets', 'loading', 'fetching…');
   try {
     const resp = await fetch('/data/sheets');
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    const raw = await resp.json();
+    if (raw.error) throw new Error(raw.error);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
 
     // Start from empty maps so a reload never keeps rows removed from the sheet.
     DB.statusMap = {};
@@ -217,7 +189,7 @@ async function loadSheets() {
       if (!isNaN(id)) DB.extraMap[id] = r;
     }
 
-    const refreshed = data.last_refreshed_at ? ` · refreshed ${new Date(data.last_refreshed_at).toLocaleString()}` : '';
+    const refreshed = lastRefreshedAt ? ` · refreshed ${new Date(lastRefreshedAt).toLocaleString()}` : '';
     setLoadState('sheets', 'ok',
       `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length}${refreshed}`);
   } catch(e) {
@@ -2843,20 +2815,6 @@ document.getElementById('parse-btn').addEventListener('click', () => {
 });
 
 
-// Asks the server to re-fetch the sheets and battle.js (rate-limited server-side).
-// Resolves to an error message, or null on success.
-async function refreshServerData() {
-  const token = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
-  try {
-    const resp = await fetch('/data/refresh', { method: 'POST', headers: { 'X-CSRF-Token': token } });
-    if (resp.ok) return null;
-    const body = await resp.json().catch(() => ({}));
-    return body.error ?? `HTTP ${resp.status}`;
-  } catch (e) {
-    return e.message;
-  }
-}
-
 document.getElementById('reload-btn').addEventListener('click', async () => {
   const btn = document.getElementById('reload-btn');
   const errEl = document.getElementById('parse-error');
@@ -2876,3 +2834,6 @@ document.getElementById('reload-btn').addEventListener('click', async () => {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 loadBattleJs();
 loadSheets();
+
+// Exposed for the Node tests (test/js); the page itself doesn't import anything from here.
+export { DB, processBattleJson, parseAbility };
