@@ -154,6 +154,26 @@ The `extraRepeat: !0` effect uses `abilityCondition:{isExtraKiwamiAbility:true}`
 
 ---
 
+## Running battle.js
+
+Decision (owner, 2026-10-23): the tools may run battle.js to read the game's own data, instead of picking values out of the source text.
+
+`app/javascript/ffrk/battle_runtime.js` runs battle.js's AMD modules with stand-ins for what the game framework provides:
+- a stub `define`/`require`;
+- an auto-creating `FF` namespace;
+- underscore 1.13.7 (`public/vendor/`);
+- small shims for the game's `util` and `lib/ClassBase`.
+
+It builds the `Conf` modules first, because other modules read `FF.ns.battle.Conf` at build time without declaring it. It returns plain data:
+- `conf`: the 194 battle constant tables;
+- `statusParams`: the real config (effects, durations, values) for about 6,700 of the 7,965 statuses, via the game's own `StatusAilmentsConfig.getParam`.
+
+In the browser it runs in a Web Worker, isolated from the page. In the Node tests it runs in a `vm` context. The Status Decoder shows this data for every status ("Game data (battle.js)"), and it is the base for describing statuses from the game's data rather than from regex-decoded helper calls.
+
+This depends on battle.js being unpacked byte-for-byte, so the unpacker undoes the packed payload's JS string escapes, keeps UTF-8 (Japanese text), and uses ASCII-only word boundaries.
+
+---
+
 ## Sheet conventions (owner decisions, 2026-10-23)
 
 The community sheet is the reference: where the tools and the sheet disagree, the tools should match the sheet.

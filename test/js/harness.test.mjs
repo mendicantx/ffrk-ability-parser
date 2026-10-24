@@ -54,3 +54,11 @@ test('ability parser loads the snapshot and enables parsing', async () => {
   assert.equal(page.document.getElementById('parse-btn').disabled, false);
   assert.ok(page.eval('Object.keys(DB.soulStrikeCategories).length') > 20);
 });
+
+test('status decoder loads game data from battle.js', async () => {
+  const page = await loadPage('status_decoder');
+  for (let i = 0; i < 400 && !page.eval('DB.game'); i++) await new Promise(r => setTimeout(r, 25));
+  assert.match(page.document.getElementById('li-game-icon').className, /\bok\b/);
+  const id = page.eval(`DB.statusAilmentsForward.TACTICAL_AWAKE_MODE_GARLAND`);
+  assert.match(page.eval(`formatGameParams(DB.game.statusParams[${id}])`), /Effect 2: REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE[\s\S]*repeatNum: 2/);
+});

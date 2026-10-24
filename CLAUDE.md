@@ -63,7 +63,8 @@ Used by the ability translator to know what each arg in an ability's JSON option
 | `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
 | `app/javascript/pages/status_decoder.js` | Status Decoder page script (ES module, pinned with `pin_all_from` in `config/importmap.rb`) |
 | `app/javascript/pages/ability_parser.js` | Ability Parser page script (ES module) |
-| `app/javascript/ffrk/` | Shared, stateless modules used by the pages and the dashboard (`battle_js.js`: constant extraction; `server_data.js`: `/data` helpers) |
+| `app/javascript/ffrk/` | Shared modules used by the pages and the dashboard: `battle_js.js` (constant extraction), `server_data.js` (`/data` helpers), `names.js` (realm names), `battle_runtime.js` (runs battle.js in a Web Worker for the game's real data) |
+| `public/vendor/` | underscore 1.13.7, loaded only inside the battle.js Worker |
 | `test/browser/smoke.mjs` | Browser smoke test: drives both tools in headless Edge/Chrome over the DevTools Protocol |
 | `test/js/harness.mjs` | Runs both pages' scripts unchanged in a Node `vm` with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
 | `lib/data_snapshot.rb` | Writes the gzipped test snapshot of `data/` with a SHA-256 manifest |
