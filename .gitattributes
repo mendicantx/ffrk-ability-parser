@@ -6,3 +6,6 @@ vendor/* linguist-vendored
 
 # Gzipped test data snapshot
 *.gz binary
+
+# Golden test output: keep LF so diffs are stable on Windows
+test/fixtures/golden/** text eol=lf
