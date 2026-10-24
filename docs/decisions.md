@@ -183,6 +183,18 @@ Where the Status Decoder generates a name or effects text for a status family th
 
 All four previews take these columns, plus Type, Formula, Multiplier, Element and Counter, from `combatColumns()` in `ability_parser.js`. Where the sheet is ambiguous, the most common form in the sheet wins.
 
+### Buster soul breaks
+A Buster has two Soul Breaks rows:
+- **Break Glint**, under the Buster's own ID. It describes the first use, and its Points is the first use's cost from `buster_shingi_abilities[0]` (0).
+- **Break Arte**, under the repeat ability's ID (`arg2`).
+
+### Tactical soul breaks
+A Tactical (TASB) soul break has two Soul Breaks rows with the same ID (166 of 280 TASB IDs in the sheet):
+- **The mode:** NAT, Self.
+- **"<name> (Weapon Skill)":** the `weaponSkillAbilityId` attack, Points 0, the same SB Ver.
+
+The parser shows the weapon skill under the soul break's ID and "(Weapon Skill)" name; its on-page ids carry a `-ws` suffix. The mode row's Effects in the sheet is a hand-written summary of the Tactical Awoken Mode status, which the parser doesn't produce yet. TP MAX follow-ups without an Other row are named `TPMAX<Character>`, as the sheet names them.
+
 ### Attack wording
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".
