@@ -34,9 +34,12 @@ export function snapshot() {
 
 // ─── Page scripts ────────────────────────────────────────────────────────────
 const VIEWS = path.join(ROOT, 'app/views');
+export const JS_DIR = path.join(ROOT, 'app/javascript');
 
 // Expands `<%= render 'shared/x' %>` and drops ERB comments, then returns the
-// inline <script> bodies in document order.
+// page's scripts in the order a browser runs them: inline classic <script>
+// blocks first, then modules from `javascript_import_module_tag` (deferred).
+// Each entry is { code, file, module }.
 export function pageScripts(view) {
   const expand = file => fs.readFileSync(file, 'utf8')
     .replace(/<%#[\s\S]*?%>/g, '')
@@ -45,11 +48,16 @@ export function pageScripts(view) {
       return expand(path.join(VIEWS, dir, `_${name}.html.erb`));
     });
   const html = expand(path.join(VIEWS, view, 'index.html.erb'));
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  for (const s of scripts) {
-    if (s.includes('<%')) throw new Error(`${view}: ERB inside a <script> block is not supported by the harness`);
-  }
-  return scripts;
+
+  const classic = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m, i) => {
+    if (m[1].includes('<%')) throw new Error(`${view}: ERB inside a <script> block is not supported by the harness`);
+    return { code: m[1], file: `${view}/index.html.erb#script${i}`, module: false };
+  });
+  const modules = [...html.matchAll(/<%=\s*javascript_import_module_tag\s+["']([\w/]+)["']\s*%>/g)].map(m => {
+    const file = path.join(JS_DIR, `${m[1]}.js`);
+    return { code: fs.readFileSync(file, 'utf8'), file: path.relative(ROOT, file), module: true };
+  });
+  return [...classic, ...modules];
 }
 
 // ─── Fake DOM ────────────────────────────────────────────────────────────────
@@ -178,8 +186,10 @@ export async function loadPage(view, { timeoutMs = 60000 } = {}) {
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
 
-  for (const [i, code] of pageScripts(view).entries()) {
-    vm.runInContext(code, context, { filename: `${view}/index.html.erb#script${i}` });
+  for (const { code, file, module } of pageScripts(view)) {
+    // Page modules have no imports yet, so they run as strict-mode scripts; that
+    // keeps their top-level names reachable through page.eval() for the tests.
+    vm.runInContext(module ? `'use strict';${code}` : code, context, { filename: file });
   }
 
   const evalIn = expr => vm.runInContext(expr, context);
