@@ -145,6 +145,8 @@ try {
       await ap.waitFor(`/configs|err/.test(document.getElementById('li-game-icon').className + ${text('li-game-detail')})`, 'battle.js to run in its Worker');
       const named = await ap.evaluate(`document.getElementById('results').textContent.includes('Dual Awoken Sharpshooter Mode II (Trey v2)')`);
       check('parser names a status from game data', named);
+      const missing = await ap.evaluate(`document.getElementById('status-tsv-all')?.value ?? ''`);
+      check('parser lists statuses missing from the Status tab', /^50344009\tDual Awoken Sharpshooter Mode I \(Trey v2\)\t/.test(missing), missing.slice(0, 80));
     }
     check(`parser page has no script errors (${file})`, ap.errors.length === 0, ap.errors.join(' | '));
     ap.close();

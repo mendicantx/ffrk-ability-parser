@@ -304,6 +304,10 @@ About 20 older sheet rows use the decoder's previous wording and now differ. `te
 ### Status names in the Ability Parser
 The Ability Parser names a status from its Status-tab row. When the sheet has no row, it uses the Status Decoder's description from the game data (`ffrk/status_context`, the same code the decoder uses), so new modes appear by name ("[Dual Awoken Sharpshooter Mode II (Trey v2)]") instead of by coded name. The parser runs battle.js in the background; parsing doesn't wait for it, and the last parse is shown again when the game data arrives. Statuses the decoder only handles with its older helper decoders (Crystal Force, Extra and Tactical modes) still show their coded names in the parser.
 
+Statuses without a Status-tab row are marked and listed for pasting:
+- In the sheet previews, their "[Name]" has a dotted underline and the tooltip "Not on the Status tab yet". The copyable TSV is unchanged.
+- A "Not on the Status tab" section after the results has one row per status in the Status tab's column order (ID, Common Name, Effects, Default Duration, MND Modifier, Exclusive Status, Coded Name, Notes), with "Copy row" and "Copy all rows". MND Modifier and Exclusive Status are "-", as in the Status Decoder. A status the decoder can't describe yet keeps blank Common Name, Effects and Default Duration cells and the note "Not decoded yet".
+
 ### Dual Awoken Mode wording (decoder)
 `DUAL_AWAKE_MODE_FIRST_*` / `_SECOND_*` statuses use the sheet's most common order and wording: damage cap, rank boost ("Sharpshooter abilities deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5"), extra triggers, cast speed, use-count tiers ("cast speed x2.00/x2.50/x3.00 and critical chance =50%/75%/100% for equipped Sharpshooter abilities after casting 1/2/3+ Sharpshooter abilities"), damage, critical chance, chase ("casts Dual Arrow Force after using Sharpshooter abilities"), "casts X when removed".
 - **Subjects** join with "and" (79 rows vs 76 with slashes). Elements keep the game's order ("Dark and Fire", 28 rows vs 2 sorted), unlike Zenith rows.
