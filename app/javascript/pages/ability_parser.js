@@ -253,6 +253,40 @@ function resolveStatuses(idOrIds) {
   return statuses;
 }
 
+// A Buster's Soul Breaks row describes its first use (Break Glint), whose own SB cost is
+// in buster_shingi_abilities[0]; the Buster's consume_point is the later uses' cost.
+function busterFirstUseCost(opts) {
+  const firstUse = opts.buster_shingi_abilities?.[0]?.relational_ability;
+  return firstUse && firstUse.consume_point !== undefined ? Number(firstUse.consume_point) : null;
+}
+
+// Sheet display name for an ability category: BLACK_MAGIC → "Black Magic".
+function schoolName(category) {
+  if (!category) return '';
+  return String(category).toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Name of the status whose chase ability this is (CHASE_ABILITY_FOR_<status key>), from
+// the Status sheet — e.g. "Buster Chase Mode: Warrior of Light".
+function chaseSourceName(abilityId) {
+  const chaseKey = DB.chaseAbilityIdToKey[parseInt(abilityId)];
+  if (!chaseKey) return '';
+  const statusKey = chaseKey.replace(/^CHASE_ABILITY_FOR_/, '');
+  const statusId = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
+  return DB.statusMap[statusId]?.commonName || '';
+}
+
+// SB Ver: the sheet's value when the soul break has a row; otherwise the tier plus the
+// next version number for that character (e.g. "Buster2" after "Buster1").
+function soulBreakVersion(sbRow, character, tier) {
+  if (sbRow?.['SB Ver']) return sbRow['SB Ver'];
+  if (!tier) return '';
+  const used = new Set(Object.values(DB.soulBreaksMap)
+    .filter(r => r['Character'] === character && r['Tier'] === tier && r['SB Ver'])
+    .map(r => r['SB Ver']));
+  return `${tier}${used.size + 1}`;
+}
+
 function chaseAbilityName(codedName) {
   if (!codedName) return null;
   const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + codedName];
@@ -349,7 +383,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
     category:     DB.abilityCategories[ability.category_id] ?? null,
     castTime:          opts.cast_time ? (opts.cast_time / 1000).toFixed(2) : null,
     sbCharge:          opts.ss_point ? Number(opts.ss_point) : 0,
-    sbCost:            Number(opts.consume_point) || null,
+    sbCost:            busterFirstUseCost(opts) ?? (Number(opts.consume_point) || null),
     soulStrikeCategory:Number(opts.soul_strike_category_id) || null,
     nameJp:            opts.alias_name || opts.disp_name || null,
     counterable:       Number(opts.counter_enable) !== 0 ? 'Yes' : 'No',
@@ -777,6 +811,10 @@ function generateEffectsText(parsed) {
     const kind = sa?.target === 'OPPONENT_ALIVE_ALL' ? 'group' : 'single';
     return hits === 1 ? `${kind} attack` : `${kind} attacks`;
   }
+  // "[A], [B] and [C]", as the sheet lists statuses.
+  function joinWithAnd(items) {
+    return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+  }
   function perHitText(hits, factors) { return ` (${factors}${hits === 1 ? '' : ' each'})`; }
 
   // Damage cap for an attack sub-action.
@@ -873,19 +911,19 @@ function generateEffectsText(parsed) {
   function targetLabel(target) {
     if (!target) return '';
     const raw = String(target);
-    if (raw === 'default') return ' to user';
+    if (raw === 'default') return ' to the user';
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
     const isSelf  = t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF') || t.startsWith('EXECUTER');
     const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    if (isSelf)             return ' to user';
+    if (isSelf)             return ' to the user';
     if (isAlly  && isAllT)  return ' to all allies';
     if (isAlly)             return ' to single ally';
     if (isEnemy && isAllT)  return ' to enemies';
     if (isEnemy)            return ' to enemy';
     // Numeric fallbacks for common IDs not in the DB map
-    if (raw === '1001') return ' to user';
+    if (raw === '1001') return ' to the user';
     if (raw === '2001' || raw === '4001') return ' to all allies';
     if (raw === '3003') return ' to enemies';
     return '';
@@ -903,7 +941,7 @@ function generateEffectsText(parsed) {
     const capVal  = sa.props.overflow ? 99999
                   : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
-    const capStr  = capVal ? ` capped at ${capVal.toLocaleString()}` : '';
+    const capStr  = capVal ? ` capped at ${capVal}` : '';
     const flags   = [
       // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
       sa.props.ranged   ? 'ranged'           : null,
@@ -1291,15 +1329,15 @@ function generateEffectsText(parsed) {
       const perHitStr  = basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const allEnLabels = [enLabel.label,
         ...elseIfAtks.map(ei => parseEnElementLabel(ei.conditionArg)?.label).filter(Boolean)];
-      const capStr = baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '';
+      const capStr = baseCap !== 9999 ? ` capped at ${baseCap}` : '';
       segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr}${capStr} based on ${allEnLabels.join(' or ')}${hpStr}`);
     } else {
       const perHitStr = boostPerHit != null && basePerHit != null
         ? perHitText(hits, `${basePerHit.toFixed(2)} or ${boostPerHit.toFixed(2)}`)
         : basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const capStr    = boostCap != null && baseCap !== boostCap
-        ? ` capped at ${baseCap.toLocaleString()}/${boostCap.toLocaleString()}`
-        : (baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '');
+        ? ` capped at ${baseCap}/${boostCap}`
+        : (baseCap !== 9999 ? ` capped at ${baseCap}` : '');
       const afterStr  = condLabel ? ` after ${condLabel.elseLabel}/${condLabel.ifLabel} uses` : '';
       const basedStr  = statLabel ? ` based on ${statLabel}` : (enLabel ? ` based on ${enLabel.label}` : '');
       segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
@@ -1368,7 +1406,7 @@ function generateEffectsText(parsed) {
         byTargetUnc.get(tLabel).push(s);
       }
       for (const [tLabel, group] of byTargetUnc) {
-        const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+        const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
         } else {
@@ -1390,7 +1428,7 @@ function generateEffectsText(parsed) {
         const condSuffix = ' ' + formatPartyCondition(cond);
         const enemyParts = [], allyParts = [];
         for (const [tLabel, group] of bt) {
-          const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+          const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
           if (tLabel.includes('enem')) enemyParts.push(`${statusStr}${tLabel.replace(' to ', ' on ')}`);
           else                         allyParts.push(`${statusStr}${tLabel}`);
         }
@@ -1565,7 +1603,12 @@ function generateEffectsText(parsed) {
   // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
 
-  return segs.length ? segs.join('. ') + '.' : '(No effects detected)';
+  // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
+  // segments start lower-case when they open with a verb, and there is no final period
+  // (docs/decisions.md "Effects punctuation").
+  const SEGMENT_VERBS = /^(Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
+  const sentence = segs.map((seg, i) => (i > 0 && SEGMENT_VERBS.test(seg) ? seg.charAt(0).toLowerCase() + seg.slice(1) : seg));
+  return segs.length ? sentence.join(', ') : '(No effects detected)';
 }
 
 // ─── Soul break lookup ────────────────────────────────────────────────────────
@@ -1616,154 +1659,207 @@ async function translateSBName(abilityId, jpText) {
   }
 }
 
+// ─── Sheet columns shared by every preview ───────────────────────────────────
+// Type, Formula, Multiplier, Target, Auto Target, Element and Counter are derived
+// the same way for every sheet tab (Soul Breaks, Crystal Commands, Extra, Other).
+// Each rule follows the community sheet's most common convention (docs/decisions.md
+// "Sheet conventions"); the preview builders only choose their tab's columns.
+
+// Sub-ability labels that mean "this sub-ability is what actually executes".
+const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+
+// The ability whose sub-actions do the work: the wrapped sub-ability, or the ability itself.
+function execAbility(parsed) {
+  return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
+}
+
+const isAttackSubAction = sa => sa.props.hits != null || sa.props.multiplier != null;
+
+// Damage sub-actions, the executing ability's first.
+function attackSubActions(parsed) {
+  const exec = execAbility(parsed);
+  const own = exec.subActions.filter(isAttackSubAction);
+  return exec === parsed ? own : [...own, ...parsed.subActions.filter(isAttackSubAction)];
+}
+
+const ATK_TYPE_COLUMNS = {
+  // Names as they appear in battle.js ATK_TYPE, plus aliases seen in class names
+  PHYSICAL: { type: 'PHY', formula: 'Physical' }, INBORN:  { type: 'NAT', formula: '' },
+  SUMMON:   { type: 'SUM', formula: 'Magical'  }, BLACK:   { type: 'BLK', formula: 'Magical' },
+  WHITE:    { type: 'WHT', formula: 'Magical'  }, MAGIC:   { type: 'BLK', formula: 'Magical' },
+  MAGICAL:  { type: 'BLK', formula: 'Magical'  }, HEALING: { type: 'WHT', formula: 'Magical' },
+  HYBRID:   { type: 'NAT', formula: ''         }, NATURAL: { type: 'NAT', formula: '' },
+};
+
+function typeAndFormula(parsed) {
+  const exec        = execAbility(parsed);
+  const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
+  if (ATK_TYPE_COLUMNS[atkTypeName]) return ATK_TYPE_COLUMNS[atkTypeName];
+
+  // Fallback: substring matching over every available signal — handles class names like
+  // 'PhysAttack' or 'BlackMagicAttack' and SUB_ACTION_TYPE names like 'PHYSICAL_ATTACK'.
+  const hay = [parsed.formulaClass, parsed.category, attackSubActions(parsed)[0]?.type, atkTypeName,
+               exec.exerciseType ?? parsed.exerciseType].map(v => String(v ?? '')).join(' ').toUpperCase();
+  // More specific checks first to avoid mis-classification
+  if (hay.includes('INBORN') || hay.includes('HYBRID')) return { type: 'NAT', formula: ''         };
+  if (hay.includes('SUMMON'))                            return { type: 'SUM', formula: 'Magical'  };
+  if (hay.includes('WHITE')  || hay.includes('HEAL'))   return { type: 'WHT', formula: 'Magical'  };
+  if (hay.includes('BLACK'))                             return { type: 'BLK', formula: 'Magical'  };
+  if (hay.includes('PHYS'))                              return { type: 'PHY', formula: 'Physical' };
+  if (hay.includes('MAGIC'))                             return { type: 'BLK', formula: 'Magical'  };
+  return { type: '', formula: '' };
+}
+
+// Who a SUB_ACTION_TARGET_TYPE name (or similar) points at.
+function targetKind(targetStr) {
+  const t       = String(targetStr ?? '').toUpperCase();
+  const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
+  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
+  const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
+  const isAll   = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
+  let target = '';
+  if      (isSelf)            target = 'Self';
+  else if (isEnemy && isAll)  target = 'All enemies';
+  else if (isEnemy)           target = 'Single enemy';
+  else if (isAlly  && isAll)  target = 'All allies';
+  else if (isAlly)            target = 'Single ally';
+  else if (isAll)             target = 'All';
+  return { t, isEnemy, target };
+}
+
+// Target and Auto Target for a sub-action target name. Auto Target repeats the Target
+// unless the game picks a specific one (docs/decisions.md "Target and Auto Target").
+function targetLabels(targetStr) {
+  const { t, isEnemy, target } = targetKind(targetStr);
+  const who = isEnemy ? 'enemy' : 'ally';
+  let autoTarget = target;
+  if      (t.includes('LOW_HP_RATE'))  autoTarget = `Lowest HP% ${who}`;
+  else if (t.includes('HIGH_HP_RATE')) autoTarget = `Highest HP% ${who}`;
+  else if (t.includes('LOW_HP'))       autoTarget = `Lowest HP ${who}`;
+  else if (t.includes('HIGH_HP'))      autoTarget = `Highest HP ${who}`;
+  else if (t.includes('RANDOM'))       autoTarget = `Random ${who}`;
+  return { target, autoTarget };
+}
+
+function targetColumns(parsed) {
+  // An attack's target decides it.
+  const atk = attackSubActions(parsed)[0];
+  if (atk) return targetLabels(atk.target);
+
+  // No attack: the widest target among the sub-actions.
+  const exec = execAbility(parsed);
+  const found = new Set();
+  for (const sa of exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions) {
+    if ((sa.controlTypeRaw ?? 0) !== 0 || !sa.target || String(sa.target) === '0') continue;
+    const { target } = targetKind(sa.target);
+    if (target) found.add(target);
+  }
+  for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
+    if (found.has(target)) return { target, autoTarget: target };
+  }
+
+  // Nothing else: the ability's own range and segment.
+  const range  = String(parsed.target.range ?? '').toUpperCase();
+  const seg    = String(parsed.target.segment ?? '').toUpperCase();
+  const isAll  = range.includes('ALL') || range === '4' || range === '5';
+  const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
+  const target = isAlly ? (isAll ? 'All allies' : 'Single ally') : (isAll ? 'All enemies' : 'Single enemy');
+  return { target, autoTarget: target };
+}
+
+function multiplierColumn(parsed) {
+  const exec = execAbility(parsed);
+  const sa   = attackSubActions(parsed)[0];
+  if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
+  // sa.props.multiplier is per hit (factor/100); exec.props.multiplier is the total (damageFactor/100)
+  if (sa.props.multiplier != null) return ((sa.props.hits ?? 1) * sa.props.multiplier).toFixed(2);
+  if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
+  return '';
+}
+
+// Every element the attacks hit with, NE included whenever an attack hits for NE
+// (docs/decisions.md "Element column includes NE"); blank when there is no attack.
+function elementColumn(parsed) {
+  const attacks = attackSubActions(parsed);
+  if (!attacks.length) return '';
+  const named = new Set();
+  let hasNE = false;
+  for (const sa of attacks) {
+    const elems = sa.elements.map(fmtElement).filter(Boolean);
+    if (!elems.length) hasNE = true;
+    for (const e of elems) (e === 'NE' ? (hasNE = true) : named.add(e));
+  }
+  if (hasNE) named.add('NE');
+  return [...named].join(', ');
+}
+
+// N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
+function counterColumn(parsed) {
+  const exec = execAbility(parsed);
+  const subActions = exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions;
+  return parsed.counterable === 'Yes' && !subActions.some(sa => sa.props.ignoresReflection) ? 'Y' : 'N';
+}
+
+function combatColumns(parsed) {
+  const { type, formula } = typeAndFormula(parsed);
+  const multiplier = multiplierColumn(parsed);
+  const columns = { type, formula, multiplier, ...targetColumns(parsed), element: elementColumn(parsed), counter: counterColumn(parsed) };
+  // A NAT attack is a hybrid: Formula "Hybrid" and Multiplier "-" (docs/decisions.md "Hybrid formula").
+  if (type === 'NAT') Object.assign(columns, multiplier ? { formula: 'Hybrid', multiplier: '-' } : { formula: '', multiplier: '' });
+  return columns;
+}
+
+// Renders one sheet-tab preview: a "Copy row" button with the tab-separated row to
+// paste into the sheet, and a table of the columns. Shared by every tab's builder.
+// columns: [{ col, val, rawVal?, src?, tdId?, tdExtra? }] in sheet order. val is plain
+// text unless rawVal is given, in which case val is markup and rawVal its text.
+// src marks values taken from the sheet itself rather than derived from the JSON.
+function renderSheetPreview({ title, idPrefix, id, columns }) {
+  const escapeHtml = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const text = c => String(c.rawVal ?? c.val ?? '');
+  const tsvRow = columns.map(c => text(c).replace(/[\t\n\r]/g, ' ')).join('\t');
+
+  let html = `<details class="sb-preview-details"><summary>${title}</summary>`;
+  html += `<div class="sb-preview">`;
+  html += `<div class="sbp-copy-row">`;
+  html += `<button class="sbp-copy-btn" onclick="
+    const v = this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
+    )">Copy row</button>`;
+  html += `<textarea class="sbp-tsv-area" id="${idPrefix}-tsv-${id}" rows="1" readonly>${escapeHtml(tsvRow)}</textarea>`;
+  html += `</div>`;
+  html += `<table class="sb-preview-table">`;
+  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
+  for (const c of columns) {
+    const cls   = text(c) === '' ? 'sbp-empty' : c.src ? 'sbp-sheet' : 'sbp-derived';
+    const attrs = (c.tdId ? ` id="${c.tdId}"` : '') + (c.tdExtra ? ` ${c.tdExtra}` : '');
+    const shown = c.rawVal != null ? c.val : escapeHtml(c.val ?? '');
+    html += `<tr><td class="sbp-col">${c.col}</td><td class="${cls}"${attrs}>${shown}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+  html += `</div></details>`;
+  return html;
+}
+
 // ─── SB sheet column preview ──────────────────────────────────────────────────
 function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '') {
   // ── Local helpers ──
 
-  function fmtElem(name) {
-    if (!name) return '';
-    const up = name.toUpperCase();
-    if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE' || up === 'NON') return 'NE';
-    if (up === 'DARKNESS') return 'Dark';
-    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-  }
 
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
-  function getExec() {
-    return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
-  }
 
-  // First attacking sub-action in the exec ability (or top-level fallback)
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const atkSAs = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (atkSAs.length > 0) return atkSAs[0];
-    const topAtk = parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    return topAtk[0] ?? null;
-  }
 
-  // Derive Type/Formula from ATK_TYPE of exec ability; fallback to name-based inference.
-  // exec.props.range holds the ATK_TYPE name (e.g. 'PHYSICAL') set by the 'atkType' formula arg.
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      // Names as they appear in battle.js ATK_TYPE constant
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' },
-      'INBORN':   { type: 'NAT', formula: ''         },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  },
-      'BLACK':    { type: 'BLK', formula: 'Magical'  },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  },
-      // Extra aliases in case battle.js uses different names
-      'MAGIC':    { type: 'BLK', formula: 'Magical'  },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  },
-      'HEALING':  { type: 'WHT', formula: 'Magical'  },
-      'HYBRID':   { type: 'NAT', formula: ''         },
-      'NATURAL':  { type: 'NAT', formula: ''         },
-    };
-    const exec        = getExec();
-    const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
 
-    // Fallback: build a haystack from all available string signals and use flexible
-    // substring matching — handles class names like 'PhysAttack', 'BlackMagicAttack',
-    // or SUB_ACTION_TYPE entries like 'PHYSICAL_ATTACK'.
-    const fc     = (parsed.formulaClass ?? '').toUpperCase();
-    const cat    = (parsed.category     ?? '').toUpperCase();
-    const saType = (getFirstAtkSA()?.type ?? '').toUpperCase();
-    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
-    const hay    = [fc, cat, saType, atkTypeName, exType].join(' ');
 
-    // More-specific checks first to avoid mis-classification
-    if (hay.includes('INBORN')  || hay.includes('HYBRID'))  return { type: 'NAT', formula: ''         };
-    if (hay.includes('SUMMON'))                              return { type: 'SUM', formula: 'Magical'  };
-    if (hay.includes('WHITE')   || hay.includes('HEAL'))    return { type: 'WHT', formula: 'Magical'  };
-    if (hay.includes('BLACK'))                               return { type: 'BLK', formula: 'Magical'  };
-    if (hay.includes('PHYS'))                                return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                               return { type: 'BLK', formula: 'Magical'  };
-    return { type: '', formula: '' };
-  }
 
-  // Parse a SUB_ACTION_TARGET_TYPE name into sheet-style target and auto-target labels
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t       = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isSelf  = t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if (isSelf)                 target = 'Self';
-    else if (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
 
-  function inferTargetInfo() {
-    // Priority scan across all non-control sub-actions (exec + parsed)
-    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
-    const found = new Set();
-    const exec = getExec();
-    const sasToScan = exec !== parsed
-      ? [...parsed.subActions, ...exec.subActions]
-      : parsed.subActions;
-    for (const sa of sasToScan) {
-      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
-      const tStr = String(sa.target ?? '').toUpperCase();
-      if (!tStr || tStr === '0') continue;
-      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
-      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND');
-      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
-      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
-      if      (isEnemy && isAllT) found.add('All enemies');
-      else if (isEnemy)           found.add('Single enemy');
-      else if (isAlly  && isAllT) found.add('All allies');
-      else if (isAlly)            found.add('Single ally');
-      else if (isSelf)            found.add('Self');
-    }
-    // If attack SAs exist, use parseSubActionTarget for auto-target logic too
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    // No attacks: use highest-priority found target
-    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
-    return { target: '', autoTarget: '' };
-  }
-
-  function inferMultiplier() {
-    const exec = getExec();
-    const sa   = getFirstAtkSA();
-    if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    // sa.props.multiplier is per-hit (factor/100); exec.props.multiplier is total (damageFactor/100)
-    if (sa.props.multiplier != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-
-  function inferElement() {
-    const sa = getFirstAtkSA();
-    if (!sa) return '';    // no attack (e.g. healing SB) → leave blank
-    const elems = sa.elements.map(fmtElem).filter(Boolean);
-    return elems.length ? elems.join(', ') : 'NE';
-  }
 
   // ── Derivations ──
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget }        = inferTargetInfo();
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') {
-    formula    = multiplier ? 'Hybrid' : '';
-    multiplier = '';
-  }
-  const element                = inferElement();
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const id                     = parsed.abilityId;
   const imgFormula             = `=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",${id},"/",${id},"_256.png"),4,64,64)`;
 
@@ -1795,16 +1891,15 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     26: 'Buster',            27: 'XSB',
   };
 
-  // Counter is N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
-  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+  // Tier: the sheet's when the soul break has a row (docs/decisions.md "Naming").
+  const tier = sb?.['Tier'] || SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '';
 
   const colValues = {
     'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
     'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
     'Name':           nameEntry,
-    'Tier':           { val: SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '',                                              src: false },
-    'SB Ver':         { val: '',                                                                                          src: false },
+    'Tier':           { val: tier,                                                                                        src: !!sb?.['Tier'] },
+    'SB Ver':         { val: soulBreakVersion(sb, sb?.['Character'] || actorName, tier),                                  src: !!sb?.['SB Ver'] },
     'Type':           { val: type,                                                                                        src: false },
     'Target':         { val: target,                                                                                      src: false },
     'Formula':        { val: formula,                                                                                     src: false },
@@ -1824,53 +1919,11 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'GL':             { val: '',                                                                                          src: false },
   };
 
-  // Column order matches the Soul Breaks sheet tab exactly.
-  // Img is a formula column (not in the CSV) inserted at its correct position.
-  const SHEET_COL_ORDER = [
-    'Realm', 'Character', 'Img', 'Name', 'Tier', 'SB Ver', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target',
-    'Points', 'Mastery Bonus', 'Honing Effects', 'Relic', 'Name (JP)', 'ID', 'Anima', 'GL', '✓',
-  ];
-  const cols = SHEET_COL_ORDER.map(colName => {
-    if (colName === 'Img') return { col: 'Img', val: imgFormula, src: false };
-    const known = colValues[colName];
-    if (known) return { col: colName, ...known };
-    // Column in sheet but no derivation — show sheet value or blank
-    const sheetVal = String(sb?.[colName] ?? '');
-    return { col: colName, val: sheetVal, src: !!sheetVal };
+  const COLUMN_ORDER = ['Realm', 'Character', 'Img', 'Name', 'Tier', 'SB Ver', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'Points', 'Mastery Bonus', 'Honing Effects', 'Relic', 'Name (JP)', 'ID', 'Anima', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Soul Break tab columns', idPrefix: 'sbp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: String(sb?.[col] ?? ''), src: !!sb?.[col] }) }),
   });
-
-  // Tab-separated row for direct paste into Google Sheets.
-  // Use rawVal when present (cols where val contains HTML).
-  const tsvRow = cols.map(c => String(c.rawVal ?? c.val ?? '').replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Soul Break tab columns</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v = this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
-      () => { this.nextElementSibling.select(); document.execCommand('copy');
-              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="sbp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val, rawVal, tdId, src, tdExtra } of cols) {
-    const textVal   = String(rawVal ?? val ?? '');
-    const cls       = textVal === '' ? 'sbp-empty' : src ? 'sbp-sheet' : 'sbp-derived';
-    const idAttr    = tdId    ? ` id="${tdId}"`  : '';
-    const extraAttr = tdExtra ? ` ${tdExtra}`    : '';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}"${idAttr}${extraAttr}>${val}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-
-  html += `</div></details>`;
-  return html;
 }
 
 function renderStatusList(statuses, label) {
@@ -1937,97 +1990,15 @@ function renderProps(props) {
 // ─── Crystal Commands sheet column preview ────────────────────────────────────
 function renderCFSheetPreview(parsed, cfParent, genEffects) {
   // Shared helpers (same logic as renderSBSheetPreview, closed over this parsed)
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
-  function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const sa = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (sa.length) return sa[0];
-    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
-      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
-    };
-    const exec = getExec();
-    const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
-    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
-    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
-    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
-    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
-    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
-    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
-    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
-    return { type: '', formula: '' };
-  }
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if      (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
-  function inferTargetInfo() {
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    const range = String(parsed.target.range ?? '').toUpperCase();
-    const seg   = String(parsed.target.segment ?? '').toUpperCase();
-    const isAllT = range.includes('ALL') || range === '4' || range === '5';
-    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
-    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
-  }
-  function inferMultiplier() {
-    const exec = getExec();
-    const sa   = getFirstAtkSA();
-    if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const sa = getFirstAtkSA();
-    if (!sa) return '';
-    const elems = sa.elements.map(fmtElement).filter(e => e && e !== 'NE');
-    return elems.length ? elems.join(', ') : 'NE';
-  }
 
   const id                        = parsed.abilityId;
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget }        = inferTargetInfo();
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') {
-    formula    = multiplier ? 'Hybrid' : '';
-    multiplier = '';
-  }
-  const element                   = inferElement();
-  const hasIgnoreReflect          = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter                   = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const imgFormula                = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")`;
 
   const colValues = {
     'Character':   { val: cfParent?.character || '' },
     'Source':      { val: cfParent?.sbName    || '' },
-    'SB Ver':      { val: 'CASB'                    },
+    'SB Ver':      { val: cfParent?.sbVer || 'CASB'  },
     'Name':        { val: 'Crystal Force I'         },
     'Type':        { val: type                      },
     'Target':      { val: target                    },
@@ -2039,127 +2010,25 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     'Counter':     { val: counter                   },
     'Auto Target': { val: autoTarget                },
     'SB':          { val: '-'                       },
-    'School':      { val: ''                        },
+    'School':      { val: schoolName(parsed.category) },
     'Name (JP)':   { val: parsed.name               },
     'ID':          { val: id                        },
     'GL':          { val: ''                        },
     '✓':           { val: ''                        },
   };
 
-  const SHEET_COL_ORDER = [
-    'Character', 'Source', 'SB Ver', 'Img', 'Name', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
-    'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'GL', '✓',
-  ];
-
-  const cols = SHEET_COL_ORDER.map(col => {
-    if (col === 'Img') return { col, val: imgFormula };
-    return { col, val: String(colValues[col]?.val ?? '') };
+  const COLUMN_ORDER = ['Character', 'Source', 'SB Ver', 'Img', 'Name', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Crystal Commands tab columns', idPrefix: 'cfp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
   });
-
-  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Crystal Commands tab columns</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="cfp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val } of cols) {
-    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
 }
 
 // ─── Extra sheet column preview (Extra Kiwami abilities) ─────────────────────
 function renderExtraSheetPreview(parsed, ekParent, genEffects) {
-  const WRAPPED_LABELS = new Set(['arg1','wrappedAbilityId','abilityId','defaultAbility','defaultAbilityId','burstAbilityArgs','crystalForceAbilityId']);
-  function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const sa = exec.subActions.filter(s => s.props.hits != null || s.props.multiplier != null);
-    if (sa.length) return sa[0];
-    return parsed.subActions.filter(s => s.props.hits != null || s.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const MAP = {
-      'PHYSICAL':{'type':'PHY','formula':'Physical'},'INBORN':{'type':'NAT','formula':''},
-      'SUMMON':{'type':'SUM','formula':'Magical'},'BLACK':{'type':'BLK','formula':'Magical'},
-      'WHITE':{'type':'WHT','formula':'Magical'},'MAGIC':{'type':'BLK','formula':'Magical'},
-      'MAGICAL':{'type':'BLK','formula':'Magical'},'HEALING':{'type':'WHT','formula':'Magical'},
-      'HYBRID':{'type':'NAT','formula':''},'NATURAL':{'type':'NAT','formula':''},
-    };
-    const exec = getExec();
-    const atn = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (MAP[atn]) return MAP[atn];
-    const hay = [parsed.formulaClass,parsed.category,getFirstAtkSA()?.type,atn,String(exec.exerciseType??'').toUpperCase()].join(' ').toUpperCase();
-    if (hay.includes('INBORN')||hay.includes('HYBRID'))  return {type:'NAT',formula:''};
-    if (hay.includes('SUMMON'))                           return {type:'SUM',formula:'Magical'};
-    if (hay.includes('WHITE')||hay.includes('HEAL'))      return {type:'WHT',formula:'Magical'};
-    if (hay.includes('BLACK'))                            return {type:'BLK',formula:'Magical'};
-    if (hay.includes('PHYS'))                             return {type:'PHY',formula:'Physical'};
-    if (hay.includes('MAGIC'))                            return {type:'BLK',formula:'Magical'};
-    return {type:'',formula:''};
-  }
-  function parseSubActionTargetLocal(targetStr) {
-    if (!targetStr) return {target:'',autoTarget:''};
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT')||t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY')||t.includes('ALLY')||t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL')||(t.includes('ALL')&&!t.includes('SINGLE'));
-    let target='';
-    if (isEnemy&&isAllT) target='All enemies';
-    else if (isEnemy)    target='Single enemy';
-    else if (isAlly&&isAllT) target='All allies';
-    else if (isAlly)     target='Single ally';
-    else if (isAllT)     target='All';
-    let autoTarget='';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget=isEnemy?'Lowest HP% Enemy':'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget=isEnemy?'Highest HP% Enemy':'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget=isEnemy?'Lowest HP Enemy':'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget=isEnemy?'Highest HP Enemy':'Highest HP Ally';
-    return {target, autoTarget};
-  }
-  function inferTargetInfo() {
-    const sa = getFirstAtkSA();
-    if (!sa) return {target:'Single enemy', autoTarget:''};
-    return parseSubActionTargetLocal(sa.target);
-  }
-  function inferMultiplier() {
-    const exec=getExec(), sa=getFirstAtkSA();
-    if (!sa) return exec.props.multiplier!=null?exec.props.multiplier.toFixed(2):'';
-    const hits=sa.props.hits??1;
-    if (sa.props.multiplier!=null)   return (hits*sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier!=null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const sa=getFirstAtkSA();
-    if (!sa) return '';
-    const elems=sa.elements.map(fmtElement).filter(e=>e&&e!=='NE');
-    return elems.length?elems.join(', '):'NE';
-  }
 
   const id         = parsed.abilityId;
-  const {type, formula} = inferTypeFormula();
-  const {target, autoTarget} = inferTargetInfo();
-  const multiplier = inferMultiplier();
-  const element    = inferElement();
-  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter    = (parsed.counterable==='Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const heroRow    = lookupHeroAbility(id);
   const otherRow   = lookupOtherAbility(id);
   const extraRow   = lookupExtraAbility(id);
@@ -2169,7 +2038,7 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
   const colValues = {
     'Character':  {val: ekParent?.character||''},
     'Source':     {val: ekParent?.sbName||''},
-    'SB Ver':     {val: 'XSB'},
+    'SB Ver':     {val: ekParent?.sbVer || 'XSB'},
     'Name':       {val: nameEn},
     'Type':       {val: type},
     'Target':     {val: target},
@@ -2181,160 +2050,31 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
     'Counter':    {val: counter},
     'Auto Target':{val: autoTarget},
     'SB':         {val: String(parsed.sbCharge || '')},
-    'School':     {val: parsed.category || ''},
+    'School':     {val: schoolName(parsed.category)},
     'Name (JP)':  {val: parsed.name},
     'ID':         {val: id},
     '✓':     {val: ''},
   };
 
-  const COL_ORDER = [
-    'Character','Source','SB Ver','Img','Name','Type','Target',
-    'Formula','Multiplier','Element','Time','Effects','Counter',
-    'Auto Target','SB','School','Name (JP)','ID','✓',
-  ];
-
-  const cols = COL_ORDER.map(col => {
-    if (col==='Img') return {col, val: imgFormula};
-    return {col, val: String(colValues[col]?.val??'')};
+  const COLUMN_ORDER = ['Character','Source','SB Ver','Img','Name','Type','Target', 'Formula','Multiplier','Element','Time','Effects','Counter', 'Auto Target','SB','School','Name (JP)','ID','✓'];
+  return renderSheetPreview({
+    title: 'Extra tab columns', idPrefix: 'ekp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
   });
-
-  const tsvRow  = cols.map(c=>c.val.replace(/[\t\n\r]/g,' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Extra tab columns</summary>`;
-  html += `<div class="sb-preview"><div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="const v=this.nextElementSibling.value;navigator.clipboard.writeText(v).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},()=>{this.nextElementSibling.select();document.execCommand('copy');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);})">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="ekp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div><table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const {col, val} of cols) {
-    const cls = val===''?'sbp-empty':'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">&#9632;</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
 }
 
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
 function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
-  function getFirstAtkSA() {
-    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
-      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
-    };
-    const atkTypeName = String(parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
-    const exType = String(parsed.exerciseType ?? '').toUpperCase();
-    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
-    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
-    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
-    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
-    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
-    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
-    return { type: '', formula: '' };
-  }
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if      (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
-  function inferTargetInfo() {
-    // Priority scan across all non-control sub-actions
-    // Priority order: All enemies > Single enemy > All allies > Single ally > Self
-    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
-    const found = new Set();
-    // Also scan the wrapped inner ability's sub-actions (e.g. Crystal Force follow-ups
-    // where the follow-up itself has no sub_actions but wraps another ability via arg1).
-    const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
-    const execAb = parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label));
-    const sasToScan = execAb ? [...parsed.subActions, ...execAb.subActions] : parsed.subActions;
-    for (const sa of sasToScan) {
-      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
-      const tStr = String(sa.target ?? '').toUpperCase();
-      if (!tStr || tStr === '0') continue;
-      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
-      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND') || tStr.includes('COLLEAGUE');
-      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
-      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
-      if      (isEnemy && isAllT) found.add('All enemies');
-      else if (isEnemy)           found.add('Single enemy');
-      else if (isAlly  && isAllT) found.add('All allies');
-      else if (isAlly)            found.add('Single ally');
-      else if (isSelf)            found.add('Self');
-    }
-    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
-    // Fallback: first attack SA, then ability-level target
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    const range = String(parsed.target.range ?? '').toUpperCase();
-    const seg   = String(parsed.target.segment ?? '').toUpperCase();
-    const isAllT = range.includes('ALL') || range === '4' || range === '5';
-    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
-    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
-  }
-  function inferMultiplier() {
-    const sa = getFirstAtkSA();
-    if (!sa) return parsed.props.multiplier != null ? parsed.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (parsed.props.multiplier != null) return parsed.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const atkSAs = parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (!atkSAs.length) return '';
-    const seen = new Set();
-    let hasNE = false;
-    for (const sa of atkSAs) {
-      const named = sa.elements.map(fmtElement).filter(Boolean);
-      if (!named.length || named.every(e => e === 'NE')) { hasNE = true; continue; }
-      for (const e of named) {
-        if (e === 'NE') hasNE = true;
-        else seen.add(e);
-      }
-    }
-    if (hasNE) seen.add('NE');
-    return seen.size ? [...seen].join(', ') : 'NE';
-  }
 
   const id = parsed.abilityId;
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget: _autoTarget } = inferTargetInfo();
-  const autoTarget = target; // Follow-ups: Auto Target always matches Target
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') { formula = multiplier ? 'Hybrid' : ''; multiplier = ''; }
-  const element = inferElement();
-  const hasIgnoreReflect2 = parsed.subActions.some(sa => sa.props.ignoresReflection);
-  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect2) ? 'Y' : 'N';
+  const otherRow = lookupOtherAbility(id);
+  const { type, formula, multiplier, target, element, counter } = combatColumns(parsed);
+  const autoTarget = target; // Other-tab follow-ups: Auto Target always repeats Target
 
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },
-    'Source':      { val: source             },
-    'Name':        { val: parsed.name        },
+    'Source':      { val: otherRow?.['Source'] || source || chaseSourceName(id), src: !!otherRow?.['Source'] },
+    'Name':        { val: otherRow?.['Name']   || parsed.name,                    src: !!otherRow?.['Name']   },
     'Type':        { val: type               },
     'Target':      { val: target             },
     'Formula':     { val: formula            },
@@ -2345,44 +2085,18 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
     'Counter':     { val: counter            },
     'Auto Target': { val: autoTarget         },
     'SB':          { val: '-'               },
-    'School':      { val: parsed.category ?? '' },
+    'School':      { val: schoolName(parsed.category) },
     'ID':          { val: String(id)        },
     'GL':          { val: ''               },
     '✓':           { val: '✓'             },
   };
 
-  const SHEET_COL_ORDER = [
-    'Source Type', 'Source', 'Img', 'Name', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
-    'Auto Target', 'SB', 'School', 'ID', 'GL', '✓',
-  ];
-
-  const cols    = SHEET_COL_ORDER.map(col => ({ col, val: col === 'Img' ? '' : String(colValues[col]?.val ?? '') }));
-  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Other tab columns (Follow-Up)</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="fup-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val } of cols) {
-    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
+  const imgFormula = ''; // Other-tab follow-up rows leave the image blank
+  const COLUMN_ORDER = ['Source Type', 'Source', 'Img', 'Name', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Other tab columns (Follow-Up)', idPrefix: 'fup', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
+  });
 }
 
 // Returns the top-level parsed ability followed by all sub-abilities, depth-first.
@@ -2633,6 +2347,7 @@ function recordRelations(parsed, ability, ctx) {
         relations.cfParent[sub.abilityId] = {
           character: sbRow['Character'] || actorName,
           sbName:    sbRow['Name']      || '',
+          sbVer:     soulBreakVersion(sbRow, sbRow['Character'] || actorName, sbRow['Tier'] || 'CASB'),
         };
       }
     }
@@ -2700,6 +2415,7 @@ function recordRelations(parsed, ability, ctx) {
           character: sbRow?.['Character'] || actorName,
           realm:     sbRow?.['Realm']     || actorRealm,
           sbName:    sbRow?.['Name']      || parsed.name,
+          sbVer:     soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'XSB'),
         };
       }
     }

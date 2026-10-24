@@ -176,10 +176,27 @@ When the element depends on a condition, such as the character's attach element,
 ### Decoder wording follows the sheet
 Where the Status Decoder generates a name or effects text for a status family the sheet already covers (for example Learning Mode), it should produce the sheet's wording.
 
+### Target and Auto Target
+- **Target:** the first attack's target. With no attack, the widest target among the sub-actions; otherwise the ability's own range.
+- **Auto Target:** repeats the Target ("All enemies", "Self", "All allies") unless the game picks a specific target: "Lowest HP% enemy" (lowercase, the sheet's majority), "Random enemy", and so on.
+- **Other-tab follow-ups:** Auto Target always repeats the Target.
+
+All four previews take these columns, plus Type, Formula, Multiplier, Element and Counter, from `combatColumns()` in `ability_parser.js`. Where the sheet is ambiguous, the most common form in the sheet wins.
+
 ### Attack wording
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".
 - "(x each)" is used only for more than one hit: "Six single attacks (0.90 each)", but "One single attack (26.50)".
+
+### Effects punctuation
+Effects text is one sentence in the sheet's most common style:
+- Clauses are joined with ", ", and a following verb is lower-case ("…capped at 19999, grants [X] to the user").
+- No final period.
+- Statuses are listed as "[A], [B] and [C]".
+- "to the user".
+- Caps have no thousands separator ("19999").
+
+This holds in every ID range of the sheet, including the newest soul breaks (about 2:1). Rows written in the other style ("capped at 99,999. Grants … to user.") are the minority.
 
 ### Learning Mode wording (decoder)
 The Status sheet's Learning Mode rows use several wordings, so the decoder uses the most common one:
