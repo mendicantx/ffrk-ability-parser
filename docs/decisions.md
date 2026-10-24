@@ -304,7 +304,7 @@ About 20 older sheet rows use the decoder's previous wording and now differ. `te
 ### Soul Drive Mode wording (decoder)
 `Soul Drive Mode: <Character>` statuses (`LIMIT_BREAK_SOUL_DRIVE_*`) use the wording every one of the 160 sheet rows shares: "Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks, Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]". The cap and damage clauses appear only when the status has them.
 
-What the Soul Break use grants isn't part of the status. The base [Soul Drive Mode] casts the soul break's own follow-up (its arg2), and battle.js doesn't link it to the character's mode. The decoder takes it from the Other-tab row listed under the mode (Source "Soul Drive Mode: <Character>"); without one it writes the usual placeholder: "casts <ability missing from Other Tab> after using a Soul Break".
+What the Soul Break use grants isn't part of the status. The base [Soul Drive Mode] casts the soul break's own follow-up (its arg2), and battle.js doesn't link it to the character's mode. The decoder takes it from the Other-tab row listed under the mode (Source "Soul Drive Mode: <Character>"). Without one, a standard mode (with the cap and damage boosts) is assumed to grant [Instant ATB 1], as 102 of 107 sheet rows do (owner decision, 2026-10-23); a plain mode gets the usual placeholder, "casts <ability missing from Other Tab> after using a Soul Break", because plain modes grant different things.
 
 Names keep an element suffix (15 of 18 sheet rows) and drop the `KOKI` word from the coded name.
 

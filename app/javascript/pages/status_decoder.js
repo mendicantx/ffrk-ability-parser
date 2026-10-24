@@ -1178,6 +1178,7 @@ function describeFromGameData(statusId) {
     abilityNameFrom: (id, source) => DB.otherNamesByIdAndSource[`${id}|${source}`] ?? null,
     abilitySources: id => DB.otherSourcesById[id] ?? [],
     statusKey:   id => DB.statusById[id] ?? null,
+    statusId:    key => DB.statusAilmentsForward[key] ?? null,
     selfKey:     DB.statusById[statusId] ?? null,
     statusParams: key => DB.game.statusParams[DB.statusAilmentsForward[key]] ?? null,
     characterName: raw => canonicalCharacterName(titleCase(raw)),
