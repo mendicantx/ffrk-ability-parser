@@ -48,6 +48,7 @@ const DB = {
   sheetRows:          null, // the sheets as loaded, for ffrk/status_context
   game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   lastInput:          null, // the last text parsed, shown again when game data arrives
+  missingStatuses:    new Map(), // id → { id, codedName, described } seen in this parse without a Status-tab row
 };
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -282,6 +283,8 @@ function lookupStatus(id) {
   const codedName = DB.statusAilments[id];
   const sheetInfo = DB.statusMap[id];
   const described = sheetInfo?.commonName ? null : describeFromGameData(id);
+  // Statuses without a Status-tab row are listed after the parse, ready to paste.
+  if (!sheetInfo?.commonName && codedName) DB.missingStatuses.set(id, { id, codedName, described });
   return {
     id,
     codedName: codedName ?? `STATUS_${id}`,
@@ -2614,8 +2617,68 @@ function parseMixedFormat(text) {
 }
 
 // ─── Main parse entry point ───────────────────────────────────────────────────
+// ─── Statuses missing from the Status tab ────────────────────────────────────
+// Each status the parse met without a Status-tab row, as a row to paste into the tab
+// (its columns: ID, Common Name, Effects, Default Duration, MND Modifier, Exclusive
+// Status, Coded Name, Notes). The text comes from the game data, as in the Status
+// Decoder; statuses it can't describe yet keep blank cells to fill in.
+const STATUS_TAB_COLUMNS = ['ID', 'Common Name', 'Effects', 'Default Duration', 'MND Modifier', 'Exclusive Status', 'Coded Name', 'Notes'];
+
+function statusTabRow({ id, codedName, described }) {
+  return [id, described?.name ?? '', described?.effects ?? '', described?.defaultDuration ?? '', '-', '-', codedName,
+          described ? '' : 'Not decoded yet'];
+}
+
+function renderMissingStatuses(statuses) {
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const tsv = row => row.map(v => String(v).replace(/[\t\n\r]/g, ' ')).join('\t');
+  const rows = statuses.sort((a, b) => a.id - b.id).map(statusTabRow);
+  let html = `<div class="ability-block missing-statuses" id="missing-statuses">`;
+  html += `<h3>Not on the Status tab (${rows.length})</h3>`;
+  html += `<p class="missing-note">These statuses have no Status-tab row yet; their names above are underlined. `;
+  html += `Each row is in the Status tab's column order, ready to paste.</p>`;
+  html += `<div class="sbp-copy-row"><button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-all">Copy all rows</button>`;
+  html += `<textarea class="status-tsv-area" id="status-tsv-all" rows="${Math.min(rows.length, 6)}" readonly>${esc(rows.map(tsv).join('\n'))}</textarea></div>`;
+  html += `<table class="sb-preview-table missing-table"><thead><tr>`;
+  html += STATUS_TAB_COLUMNS.filter(c => !['MND Modifier', 'Exclusive Status'].includes(c)).map(c => `<th>${c}</th>`).join('') + `<th></th></tr></thead><tbody>`;
+  for (const row of rows) {
+    const [id, name, effects, duration, , , coded, notes] = row;
+    const cell = v => (v === '' ? `<td class="sbp-empty">—</td>` : `<td>${esc(v)}</td>`);
+    html += `<tr>${cell(id)}${cell(name)}${cell(effects)}${cell(duration)}${cell(coded)}${cell(notes)}`;
+    html += `<td><button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-${id}">Copy row</button>`;
+    html += `<textarea class="status-tsv-area" id="status-tsv-${id}" rows="1" readonly hidden>${esc(tsv(row))}</textarea></td></tr>`;
+  }
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+// Underlines "[Name]" in the previews' table cells for statuses without a Status-tab
+// row. Only <td> contents change; the copyable TSV text is left as it is.
+function markMissingStatuses(html, statuses) {
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const tags = statuses.map(s => s.described?.name ?? s.codedName).filter(Boolean).map(name => `[${esc(name)}]`);
+  if (!tags.length) return html;
+  return html.replace(/(<td[^>]*>)([\s\S]*?)(<\/td>)/g, (_, open, body, close) => {
+    for (const tag of tags) {
+      if (body.includes(tag)) body = body.split(tag).join(`<span class="status-missing" title="Not on the Status tab yet">${tag}</span>`);
+    }
+    return open + body + close;
+  });
+}
+
+// Copy buttons in the missing-statuses section.
+document.getElementById('results').addEventListener('click', e => {
+  const btn = e.target.closest?.('.status-copy-btn');
+  if (!btn) return;
+  const area = document.getElementById(btn.dataset.copyTarget);
+  const label = btn.textContent;
+  const done = () => { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = label; }, 1500); };
+  navigator.clipboard.writeText(area.value).then(done, () => { area.hidden = false; area.select(); document.execCommand('copy'); done(); });
+});
+
 function processBattleJson(jsonText) {
   DB.lastInput = jsonText;
+  DB.missingStatuses = new Map();
   let json;
   try {
     json = JSON.parse(jsonText);
@@ -2679,6 +2742,11 @@ function processBattleJson(jsonText) {
 
     html += `</div>`;
     resultsEl.innerHTML += html;
+  }
+
+  if (DB.missingStatuses.size) {
+    const missing = [...DB.missingStatuses.values()];
+    resultsEl.innerHTML = markMissingStatuses(resultsEl.innerHTML, missing) + renderMissingStatuses(missing);
   }
 
   // Auto-translate all JP names that were rendered
