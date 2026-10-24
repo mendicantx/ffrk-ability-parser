@@ -19,27 +19,34 @@ The plan comes from two reviews of the code, one on architecture and one on doma
 
 ## Stories
 
-### 1. Freeze a test data snapshot
+### 1. One sheet registry
+As the maintainer, I want one list of sheets, so that the loader, the controllers, `.env.example` and the docs cannot disagree. It comes first because the test snapshot needs the Extra and Hero Abilities sheets.
+- `DataLoader::GOOGLE_SHEETS` includes `extra` and `hero_abilities`. `AbilityParserController::SHEET_VARS` is deleted and both controllers read the registry.
+- `.env.example` and CLAUDE.md list every sheet.
+- **Test:** `bin/rails test`
+
+
+### 2. Freeze a test data snapshot
 As the maintainer, I want a frozen copy of battle.js and the sheet data in the repo, so that tests give the same answer every time and need no network.
 - `rake data:snapshot` copies `data/` into `test/fixtures/snapshot/`, gzipped, with `SNAPSHOT.md` recording the date and each file's SHA-256.
 - Running it again when `data/` has not changed leaves the files untouched.
 - **Test:** `rake data:snapshot; git status --short test/fixtures` shows no changes on the second run.
 
-### 2. Test harness that runs today's inline scripts
+### 3. Test harness that runs today's inline scripts
 As the maintainer, I want `node --test` to run the existing `<script>` blocks from both views in a sandbox, so that today's behaviour is locked in before any code moves.
 - `test/js/harness.mjs` extracts the scripts from the two views and `shared/_ffrk_constants.html.erb`. It runs them in a Node `vm` with a minimal fake DOM.
 - Its fake `fetch` serves the snapshot for `/ability_parser/battle_js`, `/ability_parser/sheet_data` and `/status_decoder/sheet_data`, and stubs the translate call.
 - No npm dependencies (Node 24's built-in test runner).
 - **Test:** `node --test test/js/` passes a smoke test that decodes a known status key.
 
-### 3. Decoder golden output for every status key
+### 4. Decoder golden output for every status key
 As the maintainer, I want today's `decodeStatus` output saved for every `STATUS_AILMENTS_TYPE` key, so that any change in decoding is caught.
 - `test/fixtures/golden/statuses.jsonl` has one line per key. It is regenerated with `$env:UPDATE_GOLDEN=1`.
 - The test prints decoded and undecoded counts per family.
 - The current `inferred_statuses.csv` is also committed as a golden file, for story 19.
 - **Test:** `node --test test/js/decoder.golden.test.mjs`
 
-### 4. Parser golden output from real battle captures
+### 5. Parser golden output from real battle captures
 As the maintainer, I want saved battle captures with the sheet rows the parser produces today, so that I notice when any column changes.
 - Each `test/fixtures/battles/<name>.json` has a matching `test/fixtures/golden/<name>.tsv` (every preview table's row) and `<name>.effects.txt`.
 - The test also derives the other two input shapes, a bare soul break and the mixed `{sb}\nabilities:[...]` format, from each capture.
@@ -47,7 +54,7 @@ As the maintainer, I want saved battle captures with the sheet rows the parser p
 - **Test:** `node --test test/js/parser.golden.test.mjs`
 - **Inputs:** see *Battle captures needed*.
 
-### 5. Fix the drift bugs decisions.md already settles
+### 6. Fix the drift bugs decisions.md already settles
 As the owner, I want the known-wrong sheet columns fixed now, so that rows I paste into the sheet stop being wrong.
 - **Counter:** N when `shouldIgnoreReflection` is 1 or `counter_enable` is 0, in every preview builder ("Counter column" and "`shouldIgnoreReflection`" in decisions.md). The SB and CF previews ignore it today.
 - **Stacking text:** `maxLv` 5 gives "with Secondary Stacking" and 3 gives "with Stacking", everywhere ("`increaseLv` + `maxLv`"). One of the two copies is wrong today.
@@ -56,12 +63,6 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - Each fix is its own commit with its golden diff.
 - **Test:** `node --test test/js/`, plus a Python unit test for the Roman numeral set.
 - **Release point:** worth merging to `main` after this story.
-
-### 6. One sheet registry
-As the maintainer, I want one list of sheets, so that the loader, the controllers, `.env.example` and the docs cannot disagree.
-- `DataLoader::GOOGLE_SHEETS` includes `extra` and `hero_abilities`. `AbilityParserController::SHEET_VARS` is deleted and both controllers read the registry.
-- `.env.example` and CLAUDE.md list every sheet.
-- **Test:** `bin/rails test test/lib/data_loader_test.rb`
 
 ### 7. Keep data across deploys
 As the owner, I want production data to survive a deploy, so that the tools never come up empty once they read from the cache.
@@ -154,7 +155,7 @@ As the maintainer, I want one status inference engine, so that Python and JavaSc
 
 A battle capture holds every soul break for every party member, so one or two captures can cover everything. One 2023 capture already exists (`E:\workspaces\FFRK-js\bossai\battle_init.js`, Ace) and is used first. Still needed, in the order stories need them:
 
-1. **For story 5:** a soul break with `shouldIgnoreReflection`, a Crystal Force soul break (CASB) with its Crystal Force ability, and an Extra soul break (XSB).
+1. **For story 6:** a soul break with `shouldIgnoreReflection`, a Crystal Force soul break (CASB) with its Crystal Force ability, and an Extra soul break (XSB).
 2. **For story 16:** a Buster soul break, a Tactical Awoken soul break (TASB), a healing soul break and a hybrid (NAT) attack.
 3. **For story 18:** a soul break with an IF/ELSE block or party condition (often a Dual Awakening soul break or ADSB), a Synchro soul break, a Chain soul break, and anything with a cut-in ability.
 
@@ -179,5 +180,5 @@ A battle capture holds every soul break for every party member, so one or two ca
 
 - **CI:** a GitHub Actions workflow running `node --test` and `bin/rails test`, added with story 9.
 - **HTML escaping:** sheet and capture values go into `innerHTML` unescaped. Fixed when rendering is consolidated in stories 16–17.
-- **New battle.js process:** run `rake data:refresh`, then `rake data:snapshot`, then review the golden diff. Documented in story 1 and used by story 14.
+- **New battle.js process:** run `rake data:refresh`, then `rake data:snapshot`, then review the golden diff. Documented in story 2 and used by story 14.
 - **Production assets and CSP:** checked in stories 10 and 11.
