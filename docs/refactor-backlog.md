@@ -66,7 +66,7 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - **Python Roman numerals:** include X and XIII–XVI ("`_cap_word`").
 - Each fix is its own commit with its golden diff.
 - **Test:** `node --test "test/js/*.test.mjs"; python -I -m unittest discover -s test/python`
-- **Status:** done (`task/settled-drift-fixes`). The Counter fix is covered by the counter-enabled Ace variant. The stacking wording and XSB tier still need an Extra soul break capture to be covered by golden files.
+- **Status:** done (`task/settled-drift-fixes`). The Counter fix is covered by the counter-enabled Ace variant. The Seymour XSB capture covers the stacking wording and the XSB tier.
 
 ### 7. Keep data across deploys
 As the owner, I want production data to survive a deploy, so that the tools never come up empty once they read from the cache.
@@ -160,9 +160,14 @@ As the maintainer, I want one status inference engine, so that Python and JavaSc
 
 A battle capture holds every soul break for every party member, so one or two captures can cover everything. One 2023 capture already exists (`E:\workspaces\FFRK-js\bossai\battle_init.js`, Ace) and is used first. Still needed, in the order stories need them:
 
-1. **For story 6:** a soul break with `shouldIgnoreReflection`, a Crystal Force soul break (CASB) with its Crystal Force ability, and an Extra soul break (XSB).
+1. **For story 6:** received. Ace's CASB (2023 capture) and Seymour's XSB (pasted by the owner).
 2. **For story 16:** a Buster soul break, a Tactical Awoken soul break (TASB), a healing soul break and a hybrid (NAT) attack.
 3. **For story 18:** a soul break with an IF/ELSE block or party condition (often a Dual Awakening soul break or ADSB), a Synchro soul break, a Chain soul break, and anything with a cut-in ability.
+
+## Findings from the captures
+
+- **Ability Crash gets a Soul Break row.** In the Seymour XSB, Ability Crash (22540040) renders a Soul Break preview with character "Unknown" as well as its Other-tab follow-up row. decisions.md routes Ability Crash to the Other tab and the Soul Breaks sheet has no row for it, so the Soul Break row should be suppressed. To fix in story 18 (Extra soul break hooks).
+- **Statuses missing from the Status sheet show coded names.** `EXTRA_BUDDY_MODE_SEYMOUR` (56777) and `CUSTOM_PARAM_MULTI_ATK_15_MATK_15_DEF_25_MDEF_25_MND_15_LARGE` (6116) aren't in the sheet, so the effects text shows the raw key. The decoder can describe the Extra Mode status; story 12's `describeStatus` (sheet first, decoder fallback) fixes this.
 
 ## Open questions for the owner
 

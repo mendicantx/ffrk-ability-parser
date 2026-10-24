@@ -1,5 +1,6 @@
-// Locks in the Ability Parser's output for every battle capture in
-// test/fixtures/battles. For each capture <name>.json it stores:
+// Locks in the Ability Parser's output for every capture in test/fixtures/battles:
+// <name>.json (any JSON shape the parser accepts) or <name>.txt (a raw paste,
+// e.g. the mixed "{sb} abilities:[...]" format). For each one it stores:
 //   golden/parser/<name>.tsv   every sheet-preview row (the text copied into the sheet)
 //   golden/parser/<name>.html  the full rendered results, one tag per line
 // Regenerate after an intended change with:
@@ -12,7 +13,7 @@ import path from 'node:path';
 import { loadPage, checkGolden, FIXTURES } from './harness.mjs';
 
 const BATTLES = path.join(FIXTURES, 'battles');
-const captures = fs.readdirSync(BATTLES).filter(f => f.endsWith('.json')).sort();
+const captures = fs.readdirSync(BATTLES).filter(f => /\.(json|txt)$/.test(f)).sort();
 
 function decodeEntities(s) {
   return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
@@ -41,7 +42,7 @@ test('every battle capture has at least one fixture', () => {
 });
 
 for (const file of captures) {
-  const name = file.replace(/\.json$/, '');
+  const name = file.replace(/\.(json|txt)$/, '');
 
   test(`parser output for ${name} matches golden files`, async () => {
     const page = await loadPage('ability_parser');
@@ -56,9 +57,12 @@ for (const file of captures) {
     assert.equal(htmlDiff, null, htmlDiff ?? '');
   });
 
+  // Full battle captures only: check the other input shapes give the same rows.
+  if (!file.endsWith('.json')) continue;
   test(`${name}: a bare soul break and the mixed format give the same rows`, async () => {
     const page = await loadPage('ability_parser');
     const battle = JSON.parse(fs.readFileSync(path.join(BATTLES, file), 'utf8')).battle;
+    if (!battle) return; // not a full capture
     const actors = [...(battle.supporter ?? []), ...(battle.buddy ?? [])];
     let checked = 0;
     for (const actor of actors) {
