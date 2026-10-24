@@ -1616,154 +1616,171 @@ async function translateSBName(abilityId, jpText) {
   }
 }
 
+// ─── Sheet columns shared by every preview ───────────────────────────────────
+// Type, Formula, Multiplier, Target, Auto Target, Element and Counter are derived
+// the same way for every sheet tab (Soul Breaks, Crystal Commands, Extra, Other).
+// Each rule follows the community sheet's most common convention (docs/decisions.md
+// "Sheet conventions"); the preview builders only choose their tab's columns.
+
+// Sub-ability labels that mean "this sub-ability is what actually executes".
+const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+
+// The ability whose sub-actions do the work: the wrapped sub-ability, or the ability itself.
+function execAbility(parsed) {
+  return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
+}
+
+const isAttackSubAction = sa => sa.props.hits != null || sa.props.multiplier != null;
+
+// Damage sub-actions, the executing ability's first.
+function attackSubActions(parsed) {
+  const exec = execAbility(parsed);
+  const own = exec.subActions.filter(isAttackSubAction);
+  return exec === parsed ? own : [...own, ...parsed.subActions.filter(isAttackSubAction)];
+}
+
+const ATK_TYPE_COLUMNS = {
+  // Names as they appear in battle.js ATK_TYPE, plus aliases seen in class names
+  PHYSICAL: { type: 'PHY', formula: 'Physical' }, INBORN:  { type: 'NAT', formula: '' },
+  SUMMON:   { type: 'SUM', formula: 'Magical'  }, BLACK:   { type: 'BLK', formula: 'Magical' },
+  WHITE:    { type: 'WHT', formula: 'Magical'  }, MAGIC:   { type: 'BLK', formula: 'Magical' },
+  MAGICAL:  { type: 'BLK', formula: 'Magical'  }, HEALING: { type: 'WHT', formula: 'Magical' },
+  HYBRID:   { type: 'NAT', formula: ''         }, NATURAL: { type: 'NAT', formula: '' },
+};
+
+function typeAndFormula(parsed) {
+  const exec        = execAbility(parsed);
+  const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
+  if (ATK_TYPE_COLUMNS[atkTypeName]) return ATK_TYPE_COLUMNS[atkTypeName];
+
+  // Fallback: substring matching over every available signal — handles class names like
+  // 'PhysAttack' or 'BlackMagicAttack' and SUB_ACTION_TYPE names like 'PHYSICAL_ATTACK'.
+  const hay = [parsed.formulaClass, parsed.category, attackSubActions(parsed)[0]?.type, atkTypeName,
+               exec.exerciseType ?? parsed.exerciseType].map(v => String(v ?? '')).join(' ').toUpperCase();
+  // More specific checks first to avoid mis-classification
+  if (hay.includes('INBORN') || hay.includes('HYBRID')) return { type: 'NAT', formula: ''         };
+  if (hay.includes('SUMMON'))                            return { type: 'SUM', formula: 'Magical'  };
+  if (hay.includes('WHITE')  || hay.includes('HEAL'))   return { type: 'WHT', formula: 'Magical'  };
+  if (hay.includes('BLACK'))                             return { type: 'BLK', formula: 'Magical'  };
+  if (hay.includes('PHYS'))                              return { type: 'PHY', formula: 'Physical' };
+  if (hay.includes('MAGIC'))                             return { type: 'BLK', formula: 'Magical'  };
+  return { type: '', formula: '' };
+}
+
+// Who a SUB_ACTION_TARGET_TYPE name (or similar) points at.
+function targetKind(targetStr) {
+  const t       = String(targetStr ?? '').toUpperCase();
+  const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
+  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
+  const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
+  const isAll   = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
+  let target = '';
+  if      (isSelf)            target = 'Self';
+  else if (isEnemy && isAll)  target = 'All enemies';
+  else if (isEnemy)           target = 'Single enemy';
+  else if (isAlly  && isAll)  target = 'All allies';
+  else if (isAlly)            target = 'Single ally';
+  else if (isAll)             target = 'All';
+  return { t, isEnemy, target };
+}
+
+// Target and Auto Target for a sub-action target name. Auto Target repeats the Target
+// unless the game picks a specific one (docs/decisions.md "Target and Auto Target").
+function targetLabels(targetStr) {
+  const { t, isEnemy, target } = targetKind(targetStr);
+  const who = isEnemy ? 'enemy' : 'ally';
+  let autoTarget = target;
+  if      (t.includes('LOW_HP_RATE'))  autoTarget = `Lowest HP% ${who}`;
+  else if (t.includes('HIGH_HP_RATE')) autoTarget = `Highest HP% ${who}`;
+  else if (t.includes('LOW_HP'))       autoTarget = `Lowest HP ${who}`;
+  else if (t.includes('HIGH_HP'))      autoTarget = `Highest HP ${who}`;
+  else if (t.includes('RANDOM'))       autoTarget = `Random ${who}`;
+  return { target, autoTarget };
+}
+
+function targetColumns(parsed) {
+  // An attack's target decides it.
+  const atk = attackSubActions(parsed)[0];
+  if (atk) return targetLabels(atk.target);
+
+  // No attack: the widest target among the sub-actions.
+  const exec = execAbility(parsed);
+  const found = new Set();
+  for (const sa of exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions) {
+    if ((sa.controlTypeRaw ?? 0) !== 0 || !sa.target || String(sa.target) === '0') continue;
+    const { target } = targetKind(sa.target);
+    if (target) found.add(target);
+  }
+  for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
+    if (found.has(target)) return { target, autoTarget: target };
+  }
+
+  // Nothing else: the ability's own range and segment.
+  const range  = String(parsed.target.range ?? '').toUpperCase();
+  const seg    = String(parsed.target.segment ?? '').toUpperCase();
+  const isAll  = range.includes('ALL') || range === '4' || range === '5';
+  const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
+  const target = isAlly ? (isAll ? 'All allies' : 'Single ally') : (isAll ? 'All enemies' : 'Single enemy');
+  return { target, autoTarget: target };
+}
+
+function multiplierColumn(parsed) {
+  const exec = execAbility(parsed);
+  const sa   = attackSubActions(parsed)[0];
+  if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
+  // sa.props.multiplier is per hit (factor/100); exec.props.multiplier is the total (damageFactor/100)
+  if (sa.props.multiplier != null) return ((sa.props.hits ?? 1) * sa.props.multiplier).toFixed(2);
+  if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
+  return '';
+}
+
+// Every element the attacks hit with, NE included whenever an attack hits for NE
+// (docs/decisions.md "Element column includes NE"); blank when there is no attack.
+function elementColumn(parsed) {
+  const attacks = attackSubActions(parsed);
+  if (!attacks.length) return '';
+  const named = new Set();
+  let hasNE = false;
+  for (const sa of attacks) {
+    const elems = sa.elements.map(fmtElement).filter(Boolean);
+    if (!elems.length) hasNE = true;
+    for (const e of elems) (e === 'NE' ? (hasNE = true) : named.add(e));
+  }
+  if (hasNE) named.add('NE');
+  return [...named].join(', ');
+}
+
+// N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
+function counterColumn(parsed) {
+  const exec = execAbility(parsed);
+  const subActions = exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions;
+  return parsed.counterable === 'Yes' && !subActions.some(sa => sa.props.ignoresReflection) ? 'Y' : 'N';
+}
+
+function combatColumns(parsed) {
+  const { type, formula } = typeAndFormula(parsed);
+  const multiplier = multiplierColumn(parsed);
+  const columns = { type, formula, multiplier, ...targetColumns(parsed), element: elementColumn(parsed), counter: counterColumn(parsed) };
+  // A NAT attack is a hybrid: Formula "Hybrid" and Multiplier "-" (docs/decisions.md "Hybrid formula").
+  if (type === 'NAT') Object.assign(columns, multiplier ? { formula: 'Hybrid', multiplier: '-' } : { formula: '', multiplier: '' });
+  return columns;
+}
+
 // ─── SB sheet column preview ──────────────────────────────────────────────────
 function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '') {
   // ── Local helpers ──
 
-  function fmtElem(name) {
-    if (!name) return '';
-    const up = name.toUpperCase();
-    if (up === 'NOTHING' || up === 'NON_ELEMENTAL' || up === 'NONELEMENTAL' || up === 'NE' || up === 'NON') return 'NE';
-    if (up === 'DARKNESS') return 'Dark';
-    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-  }
 
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
-  function getExec() {
-    return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed;
-  }
 
-  // First attacking sub-action in the exec ability (or top-level fallback)
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const atkSAs = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (atkSAs.length > 0) return atkSAs[0];
-    const topAtk = parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    return topAtk[0] ?? null;
-  }
 
-  // Derive Type/Formula from ATK_TYPE of exec ability; fallback to name-based inference.
-  // exec.props.range holds the ATK_TYPE name (e.g. 'PHYSICAL') set by the 'atkType' formula arg.
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      // Names as they appear in battle.js ATK_TYPE constant
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' },
-      'INBORN':   { type: 'NAT', formula: ''         },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  },
-      'BLACK':    { type: 'BLK', formula: 'Magical'  },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  },
-      // Extra aliases in case battle.js uses different names
-      'MAGIC':    { type: 'BLK', formula: 'Magical'  },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  },
-      'HEALING':  { type: 'WHT', formula: 'Magical'  },
-      'HYBRID':   { type: 'NAT', formula: ''         },
-      'NATURAL':  { type: 'NAT', formula: ''         },
-    };
-    const exec        = getExec();
-    const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
 
-    // Fallback: build a haystack from all available string signals and use flexible
-    // substring matching — handles class names like 'PhysAttack', 'BlackMagicAttack',
-    // or SUB_ACTION_TYPE entries like 'PHYSICAL_ATTACK'.
-    const fc     = (parsed.formulaClass ?? '').toUpperCase();
-    const cat    = (parsed.category     ?? '').toUpperCase();
-    const saType = (getFirstAtkSA()?.type ?? '').toUpperCase();
-    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
-    const hay    = [fc, cat, saType, atkTypeName, exType].join(' ');
 
-    // More-specific checks first to avoid mis-classification
-    if (hay.includes('INBORN')  || hay.includes('HYBRID'))  return { type: 'NAT', formula: ''         };
-    if (hay.includes('SUMMON'))                              return { type: 'SUM', formula: 'Magical'  };
-    if (hay.includes('WHITE')   || hay.includes('HEAL'))    return { type: 'WHT', formula: 'Magical'  };
-    if (hay.includes('BLACK'))                               return { type: 'BLK', formula: 'Magical'  };
-    if (hay.includes('PHYS'))                                return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                               return { type: 'BLK', formula: 'Magical'  };
-    return { type: '', formula: '' };
-  }
 
-  // Parse a SUB_ACTION_TARGET_TYPE name into sheet-style target and auto-target labels
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t       = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isSelf  = t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if (isSelf)                 target = 'Self';
-    else if (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
 
-  function inferTargetInfo() {
-    // Priority scan across all non-control sub-actions (exec + parsed)
-    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
-    const found = new Set();
-    const exec = getExec();
-    const sasToScan = exec !== parsed
-      ? [...parsed.subActions, ...exec.subActions]
-      : parsed.subActions;
-    for (const sa of sasToScan) {
-      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
-      const tStr = String(sa.target ?? '').toUpperCase();
-      if (!tStr || tStr === '0') continue;
-      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
-      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND');
-      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
-      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
-      if      (isEnemy && isAllT) found.add('All enemies');
-      else if (isEnemy)           found.add('Single enemy');
-      else if (isAlly  && isAllT) found.add('All allies');
-      else if (isAlly)            found.add('Single ally');
-      else if (isSelf)            found.add('Self');
-    }
-    // If attack SAs exist, use parseSubActionTarget for auto-target logic too
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    // No attacks: use highest-priority found target
-    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
-    return { target: '', autoTarget: '' };
-  }
-
-  function inferMultiplier() {
-    const exec = getExec();
-    const sa   = getFirstAtkSA();
-    if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    // sa.props.multiplier is per-hit (factor/100); exec.props.multiplier is total (damageFactor/100)
-    if (sa.props.multiplier != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-
-  function inferElement() {
-    const sa = getFirstAtkSA();
-    if (!sa) return '';    // no attack (e.g. healing SB) → leave blank
-    const elems = sa.elements.map(fmtElem).filter(Boolean);
-    return elems.length ? elems.join(', ') : 'NE';
-  }
 
   // ── Derivations ──
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget }        = inferTargetInfo();
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') {
-    formula    = multiplier ? 'Hybrid' : '';
-    multiplier = '';
-  }
-  const element                = inferElement();
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const id                     = parsed.abilityId;
   const imgFormula             = `=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",${id},"/",${id},"_256.png"),4,64,64)`;
 
@@ -1794,10 +1811,6 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     21: 'CASB',              22: 'ASB',   23: 'MASB',  24: 'LBSD', 25: 'TASB',
     26: 'Buster',            27: 'XSB',
   };
-
-  // Counter is N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
-  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
 
   const colValues = {
     'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
@@ -1937,91 +1950,9 @@ function renderProps(props) {
 // ─── Crystal Commands sheet column preview ────────────────────────────────────
 function renderCFSheetPreview(parsed, cfParent, genEffects) {
   // Shared helpers (same logic as renderSBSheetPreview, closed over this parsed)
-  const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
-  function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const sa = exec.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (sa.length) return sa[0];
-    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
-      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
-    };
-    const exec = getExec();
-    const atkTypeName = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
-    const exType = String(exec.exerciseType ?? parsed.exerciseType ?? '').toUpperCase();
-    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
-    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
-    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
-    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
-    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
-    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
-    return { type: '', formula: '' };
-  }
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if      (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
-  function inferTargetInfo() {
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    const range = String(parsed.target.range ?? '').toUpperCase();
-    const seg   = String(parsed.target.segment ?? '').toUpperCase();
-    const isAllT = range.includes('ALL') || range === '4' || range === '5';
-    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
-    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
-  }
-  function inferMultiplier() {
-    const exec = getExec();
-    const sa   = getFirstAtkSA();
-    if (!sa) return exec.props.multiplier != null ? exec.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier != null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const sa = getFirstAtkSA();
-    if (!sa) return '';
-    const elems = sa.elements.map(fmtElement).filter(e => e && e !== 'NE');
-    return elems.length ? elems.join(', ') : 'NE';
-  }
 
   const id                        = parsed.abilityId;
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget }        = inferTargetInfo();
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') {
-    formula    = multiplier ? 'Hybrid' : '';
-    multiplier = '';
-  }
-  const element                   = inferElement();
-  const hasIgnoreReflect          = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter                   = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const imgFormula                = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")`;
 
   const colValues = {
@@ -2086,80 +2017,9 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
 
 // ─── Extra sheet column preview (Extra Kiwami abilities) ─────────────────────
 function renderExtraSheetPreview(parsed, ekParent, genEffects) {
-  const WRAPPED_LABELS = new Set(['arg1','wrappedAbilityId','abilityId','defaultAbility','defaultAbilityId','burstAbilityArgs','crystalForceAbilityId']);
-  function getExec() { return parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label)) ?? parsed; }
-  function getFirstAtkSA() {
-    const exec = getExec();
-    const sa = exec.subActions.filter(s => s.props.hits != null || s.props.multiplier != null);
-    if (sa.length) return sa[0];
-    return parsed.subActions.filter(s => s.props.hits != null || s.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const MAP = {
-      'PHYSICAL':{'type':'PHY','formula':'Physical'},'INBORN':{'type':'NAT','formula':''},
-      'SUMMON':{'type':'SUM','formula':'Magical'},'BLACK':{'type':'BLK','formula':'Magical'},
-      'WHITE':{'type':'WHT','formula':'Magical'},'MAGIC':{'type':'BLK','formula':'Magical'},
-      'MAGICAL':{'type':'BLK','formula':'Magical'},'HEALING':{'type':'WHT','formula':'Magical'},
-      'HYBRID':{'type':'NAT','formula':''},'NATURAL':{'type':'NAT','formula':''},
-    };
-    const exec = getExec();
-    const atn = String(exec.props.range ?? parsed.props.range ?? '').toUpperCase();
-    if (MAP[atn]) return MAP[atn];
-    const hay = [parsed.formulaClass,parsed.category,getFirstAtkSA()?.type,atn,String(exec.exerciseType??'').toUpperCase()].join(' ').toUpperCase();
-    if (hay.includes('INBORN')||hay.includes('HYBRID'))  return {type:'NAT',formula:''};
-    if (hay.includes('SUMMON'))                           return {type:'SUM',formula:'Magical'};
-    if (hay.includes('WHITE')||hay.includes('HEAL'))      return {type:'WHT',formula:'Magical'};
-    if (hay.includes('BLACK'))                            return {type:'BLK',formula:'Magical'};
-    if (hay.includes('PHYS'))                             return {type:'PHY',formula:'Physical'};
-    if (hay.includes('MAGIC'))                            return {type:'BLK',formula:'Magical'};
-    return {type:'',formula:''};
-  }
-  function parseSubActionTargetLocal(targetStr) {
-    if (!targetStr) return {target:'',autoTarget:''};
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT')||t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY')||t.includes('ALLY')||t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL')||(t.includes('ALL')&&!t.includes('SINGLE'));
-    let target='';
-    if (isEnemy&&isAllT) target='All enemies';
-    else if (isEnemy)    target='Single enemy';
-    else if (isAlly&&isAllT) target='All allies';
-    else if (isAlly)     target='Single ally';
-    else if (isAllT)     target='All';
-    let autoTarget='';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget=isEnemy?'Lowest HP% Enemy':'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget=isEnemy?'Highest HP% Enemy':'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget=isEnemy?'Lowest HP Enemy':'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget=isEnemy?'Highest HP Enemy':'Highest HP Ally';
-    return {target, autoTarget};
-  }
-  function inferTargetInfo() {
-    const sa = getFirstAtkSA();
-    if (!sa) return {target:'Single enemy', autoTarget:''};
-    return parseSubActionTargetLocal(sa.target);
-  }
-  function inferMultiplier() {
-    const exec=getExec(), sa=getFirstAtkSA();
-    if (!sa) return exec.props.multiplier!=null?exec.props.multiplier.toFixed(2):'';
-    const hits=sa.props.hits??1;
-    if (sa.props.multiplier!=null)   return (hits*sa.props.multiplier).toFixed(2);
-    if (exec.props.multiplier!=null) return exec.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const sa=getFirstAtkSA();
-    if (!sa) return '';
-    const elems=sa.elements.map(fmtElement).filter(e=>e&&e!=='NE');
-    return elems.length?elems.join(', '):'NE';
-  }
 
   const id         = parsed.abilityId;
-  const {type, formula} = inferTypeFormula();
-  const {target, autoTarget} = inferTargetInfo();
-  const multiplier = inferMultiplier();
-  const element    = inferElement();
-  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
-  const counter    = (parsed.counterable==='Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const heroRow    = lookupHeroAbility(id);
   const otherRow   = lookupOtherAbility(id);
   const extraRow   = lookupExtraAbility(id);
@@ -2219,117 +2079,10 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
 
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
 function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
-  function getFirstAtkSA() {
-    return parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null)[0] ?? null;
-  }
-  function inferTypeFormula() {
-    const ATK_TYPE_MAP = {
-      'PHYSICAL': { type: 'PHY', formula: 'Physical' }, 'INBORN':  { type: 'NAT', formula: '' },
-      'SUMMON':   { type: 'SUM', formula: 'Magical'  }, 'BLACK':   { type: 'BLK', formula: 'Magical' },
-      'WHITE':    { type: 'WHT', formula: 'Magical'  }, 'MAGIC':   { type: 'BLK', formula: 'Magical' },
-      'MAGICAL':  { type: 'BLK', formula: 'Magical'  }, 'HEALING': { type: 'WHT', formula: 'Magical' },
-      'HYBRID':   { type: 'NAT', formula: '' },          'NATURAL': { type: 'NAT', formula: '' },
-    };
-    const atkTypeName = String(parsed.props.range ?? '').toUpperCase();
-    if (ATK_TYPE_MAP[atkTypeName]) return ATK_TYPE_MAP[atkTypeName];
-    const exType = String(parsed.exerciseType ?? '').toUpperCase();
-    const hay = [parsed.formulaClass, parsed.category, getFirstAtkSA()?.type, atkTypeName, exType].join(' ').toUpperCase();
-    if (hay.includes('INBORN') || hay.includes('HYBRID'))  return { type: 'NAT', formula: '' };
-    if (hay.includes('SUMMON'))                             return { type: 'SUM', formula: 'Magical' };
-    if (hay.includes('WHITE') || hay.includes('HEAL'))      return { type: 'WHT', formula: 'Magical' };
-    if (hay.includes('BLACK'))                              return { type: 'BLK', formula: 'Magical' };
-    if (hay.includes('PHYS'))                               return { type: 'PHY', formula: 'Physical' };
-    if (hay.includes('MAGIC'))                              return { type: 'BLK', formula: 'Magical' };
-    return { type: '', formula: '' };
-  }
-  function parseSubActionTarget(targetStr) {
-    if (!targetStr) return { target: '', autoTarget: '' };
-    const t = String(targetStr).toUpperCase();
-    const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-    const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND');
-    const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    let target = '';
-    if      (isEnemy && isAllT) target = 'All enemies';
-    else if (isEnemy)           target = 'Single enemy';
-    else if (isAlly  && isAllT) target = 'All allies';
-    else if (isAlly)            target = 'Single ally';
-    else if (isAllT)            target = 'All';
-    let autoTarget = '';
-    if      (t.includes('LOW_HP_RATE'))  autoTarget = isEnemy ? 'Lowest HP% Enemy'  : 'Lowest HP% Ally';
-    else if (t.includes('HIGH_HP_RATE')) autoTarget = isEnemy ? 'Highest HP% Enemy' : 'Highest HP% Ally';
-    else if (t.includes('LOW_HP'))       autoTarget = isEnemy ? 'Lowest HP Enemy'   : 'Lowest HP Ally';
-    else if (t.includes('HIGH_HP'))      autoTarget = isEnemy ? 'Highest HP Enemy'  : 'Highest HP Ally';
-    return { target, autoTarget };
-  }
-  function inferTargetInfo() {
-    // Priority scan across all non-control sub-actions
-    // Priority order: All enemies > Single enemy > All allies > Single ally > Self
-    const PRIORITY = ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self'];
-    const found = new Set();
-    // Also scan the wrapped inner ability's sub-actions (e.g. Crystal Force follow-ups
-    // where the follow-up itself has no sub_actions but wraps another ability via arg1).
-    const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
-    const execAb = parsed.subAbilities.find(s => WRAPPED_LABELS.has(s._label));
-    const sasToScan = execAb ? [...parsed.subActions, ...execAb.subActions] : parsed.subActions;
-    for (const sa of sasToScan) {
-      if ((sa.controlTypeRaw ?? 0) !== 0) continue;
-      const tStr = String(sa.target ?? '').toUpperCase();
-      if (!tStr || tStr === '0') continue;
-      const isEnemy = tStr.includes('OPPONENT') || tStr.includes('ENEMY');
-      const isAlly  = tStr.includes('PARTY') || tStr.includes('ALLY') || tStr.includes('FRIEND') || tStr.includes('COLLEAGUE');
-      const isSelf  = !isEnemy && !isAlly && (tStr.startsWith('EXECUTER') || tStr === 'SELF' || tStr.startsWith('SELF_') || tStr.endsWith('_SELF'));
-      const isAllT  = tStr.includes('_ALL') || (tStr.includes('ALL') && !tStr.includes('SINGLE'));
-      if      (isEnemy && isAllT) found.add('All enemies');
-      else if (isEnemy)           found.add('Single enemy');
-      else if (isAlly  && isAllT) found.add('All allies');
-      else if (isAlly)            found.add('Single ally');
-      else if (isSelf)            found.add('Self');
-    }
-    for (const p of PRIORITY) { if (found.has(p)) return { target: p, autoTarget: '' }; }
-    // Fallback: first attack SA, then ability-level target
-    const sa = getFirstAtkSA();
-    if (sa) return parseSubActionTarget(sa.target);
-    const range = String(parsed.target.range ?? '').toUpperCase();
-    const seg   = String(parsed.target.segment ?? '').toUpperCase();
-    const isAllT = range.includes('ALL') || range === '4' || range === '5';
-    const isAlly = seg.includes('ALLY') || seg.includes('FRIEND') || seg.includes('PARTY');
-    return { target: isAlly ? (isAllT ? 'All allies' : 'Single ally') : (isAllT ? 'All enemies' : 'Single enemy'), autoTarget: '' };
-  }
-  function inferMultiplier() {
-    const sa = getFirstAtkSA();
-    if (!sa) return parsed.props.multiplier != null ? parsed.props.multiplier.toFixed(2) : '';
-    const hits = sa.props.hits ?? 1;
-    if (sa.props.multiplier   != null) return (hits * sa.props.multiplier).toFixed(2);
-    if (parsed.props.multiplier != null) return parsed.props.multiplier.toFixed(2);
-    return '';
-  }
-  function inferElement() {
-    const atkSAs = parsed.subActions.filter(sa => sa.props.hits != null || sa.props.multiplier != null);
-    if (!atkSAs.length) return '';
-    const seen = new Set();
-    let hasNE = false;
-    for (const sa of atkSAs) {
-      const named = sa.elements.map(fmtElement).filter(Boolean);
-      if (!named.length || named.every(e => e === 'NE')) { hasNE = true; continue; }
-      for (const e of named) {
-        if (e === 'NE') hasNE = true;
-        else seen.add(e);
-      }
-    }
-    if (hasNE) seen.add('NE');
-    return seen.size ? [...seen].join(', ') : 'NE';
-  }
 
   const id = parsed.abilityId;
-  const { type, formula: rawFormula } = inferTypeFormula();
-  const { target, autoTarget: _autoTarget } = inferTargetInfo();
-  const autoTarget = target; // Follow-ups: Auto Target always matches Target
-  let formula    = rawFormula;
-  let multiplier = inferMultiplier();
-  if (type === 'NAT') { formula = multiplier ? 'Hybrid' : ''; multiplier = ''; }
-  const element = inferElement();
-  const hasIgnoreReflect2 = parsed.subActions.some(sa => sa.props.ignoresReflection);
-  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect2) ? 'Y' : 'N';
+  const { type, formula, multiplier, target, element, counter } = combatColumns(parsed);
+  const autoTarget = target; // Other-tab follow-ups: Auto Target always repeats Target
 
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },

@@ -176,6 +176,13 @@ When the element depends on a condition, such as the character's attach element,
 ### Decoder wording follows the sheet
 Where the Status Decoder generates a name or effects text for a status family the sheet already covers (for example Learning Mode), it should produce the sheet's wording.
 
+### Target and Auto Target
+- **Target:** the first attack's target. With no attack, the widest target among the sub-actions; otherwise the ability's own range.
+- **Auto Target:** repeats the Target ("All enemies", "Self", "All allies") unless the game picks a specific target: "Lowest HP% enemy" (lowercase, the sheet's majority), "Random enemy", and so on.
+- **Other-tab follow-ups:** Auto Target always repeats the Target.
+
+All four previews take these columns, plus Type, Formula, Multiplier, Element and Counter, from `combatColumns()` in `ability_parser.js`. Where the sheet is ambiguous, the most common form in the sheet wins.
+
 ### Attack wording
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".
