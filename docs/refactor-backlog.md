@@ -183,13 +183,13 @@ A battle capture holds every soul break for every party member, so one or two ca
 
 Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
 - `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 732 of 1259.
-- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1772 names and 1394 effects.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1772 names and 1279 effects (the zero-hone-cost line lowered the Zenith effects matches).
 
 Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, and Zenith Mode.
 
-**Zenith Mode** (`ULTIMATE_BUDDY_MODE_*`): 291 of 311 decode. Of the 284 with sheet rows, 268 names and 126 effects match the sheet exactly. The rest differ because:
+**Zenith Mode** (`ULTIMATE_BUDDY_MODE_*`): 291 of 311 decode. Of the 284 with sheet rows, 268 names match the sheet exactly. The rest differ because:
 - 55 Spirit Attacks aren't on the Other tab yet, so they show `<ability missing from Other Tab>`.
-- The sheet has a second, newer style: the chase clause comes before cast speed, and the text adds "Hero Abilities have zero hone cost" (64 of 307 rows, almost all status IDs 55000 and up). battle.js has no per-status effect for this. Hero Abilities swapped in by a Zenith are Kiwami panels, and `AbilityPanel.isNoConsumption()` is always true for those. That's the base [Zenith Mode]'s "certain Hero Abilities don't consume uses", so the per-character text follows the majority style and leaves it out. **Open question for the owner:** should the decoder add the clause anyway?
+- The text includes "Hero Abilities have zero hone cost" on every Zenith (owner decision), and only 64 of 307 sheet rows have it. battle.js has no per-status effect for it: the Hero Abilities a Zenith swaps in are Kiwami panels, and `AbilityPanel.isNoConsumption()` is always true for those. With the line, 11 effects match exactly (126 without it).
 - Minority wordings and typos in the sheet ("Fire infusion" without brackets, "Water and Wind", a stray comma before "(max 1)").
 
 Zenith statuses still undecoded (20): healers (`INCREASE_EXECUTED_HEAL`, "WHT actions restore 20% more HP"), chases triggered by breaking a Damage Reduction Barrier, timed damage boosts, Gogo's per-element chases, and one-offs for Tidus (Water), Thancred, Squall (Ice), Arden, Genesis, Rapha and Aerith.
