@@ -2541,8 +2541,11 @@ function renderAbility(parsed, depth, ctx) {
   // Soul Break sheet column preview — only for depth-0 soul strikes
   // (sheet match present, or soul_strike_category_id indicates it's a soul strike without a sheet entry)
   // Also forced for BUSTER_SHINGI sub-abilities (defaultAbilityId / repeatSkillAbilityId) via relations.busterParent.
+  // Not for an Extra soul break's Ability Crash: it has a soul strike category but
+  // belongs only on the Other tab (docs/decisions.md "Ability Crush (arg2)").
   const busterShingiParent = relations.busterParent[parseInt(parsed.abilityId)];
-  if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
+  const isAbilityCrash = relations.extraCrushSource[parseInt(parsed.abilityId)] !== undefined;
+  if (depth === 0 && !isAbilityCrash && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
     const wsParent = relations.weaponSkillParent[parseInt(parsed.abilityId)] ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
     const sbActorRealm = wsParent?.realm     || actorRealm;
