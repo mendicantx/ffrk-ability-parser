@@ -16,6 +16,7 @@
 //   statusParams(key),   // another status's game config
 //   characterName(raw),  // coded name words ('FRIONIEL') → sheet character name ('Firion')
 //   followUps(source),   // Other-tab ability names whose Source is source
+//   followUpEffects(source), // the Effects of those Other-tab rows
 // }
 
 const nameOf = (table, value) => Object.keys(table ?? {}).find(k => table[k] === value) ?? null;
@@ -223,7 +224,8 @@ const ELEMENT_KEYS = ['FIRE', 'ICE', 'LIGHTNING', 'EARTH', 'WIND', 'WATER', 'HOL
 // "MASTER_BUDDY_MODE_VIVI_ICE_LIGHTNING" → { character: 'Vivi', elements: ['Ice', 'Lightning'] }
 // A second mode for the same character ends in a roman numeral: "RINOA_II" → 'Rinoa II'.
 function modeOwner(key, prefix, ctx) {
-  const words = key.slice(prefix.length).split('_');
+  // KOKI marks a second version of a character's mode; the sheet doesn't show it.
+  const words = key.slice(prefix.length).split('_').filter(w => w !== 'KOKI');
   const numeral = words.length > 1 && /^(II|III|IV)$/.test(words[words.length - 1]) ? ` ${words.pop()}` : '';
   const elements = [];
   while (words.length > 1 && ELEMENT_KEYS.includes(words[words.length - 1])) elements.unshift(ctx.element(words.pop()));
@@ -349,7 +351,49 @@ function describeZenithMode(params, ctx) {
   return { name, effects: ordered.join(', '), defaultDuration: durations.duration };
 }
 
-const MODE_FAMILIES = [describeMasterMode, describeZenithMode];
+// Soul Drive Mode: <character> — "Reduces the SB points cost for Soul Breaks by 250, instant
+// cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks,
+// Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break,
+// removed after triggering, removed if the character hasn't [Soul Drive Mode]".
+// What the Soul Break use grants isn't in this status: the base [Soul Drive Mode] casts
+// the soul break's own follow-up (its arg2), which battle.js doesn't link to the mode.
+// It comes from the Other-tab row listed under this mode, or is the usual placeholder.
+const isSoulBreakOnly = cond => cond?.isSoulStrike === true && cond.isAbility === false && cond.isLimitBreak === false;
+const SOUL_DRIVE_CLAUSES = {
+  REDUCE_CONSUME_POINT: e => (isSoulBreakOnly(e.abilityCondition) && e.reduceConsumePoint
+    ? `Reduces the SB points cost for Soul Breaks by ${e.reduceConsumePoint}` : null),
+  INCREASE_CAST_TIME_FACTOR: e => (isSoulBreakOnly(e.abilityCondition) && e.castTimeFactor >= INSTANT_CAST
+    ? 'instant cast speed for Soul Breaks' : null),
+  INCREASE_DAMAGE_THRESHOLD_LV: e => (isSoulBreakOnly(e.abilityCondition)
+    ? `increases the damage/healing cap by ${e.damageThresholdLv * 10000} for Soul Breaks` : null),
+  INCREASE_EXECUTED_DAMAGE: e => (isSoulBreakOnly(e.abilityCondition) && e.damageFactor
+    ? `Soul Breaks deal ${percent(e.damageFactor)}% more damage` : null),
+};
+
+function describeSoulDriveMode(params, ctx) {
+  if (!/^LIMIT_BREAK_SOUL_DRIVE_(?!MODE$)/.test(ctx.selfKey ?? '')) return null;
+  const clauses = [];
+  for (const e of params.effects) {
+    const clause = SOUL_DRIVE_CLAUSES[effectName(e, ctx)]?.(e, ctx);
+    if (!clause) return null;
+    clauses.push(clause);
+  }
+  const durations = describeDurations(params.durations, ctx);
+  if (!durations || durations.suffixes.length !== 1) return null;
+
+  const prefix = /^LIMIT_BREAK_SOUL_DRIVE_MODE_/.test(ctx.selfKey) ? 'LIMIT_BREAK_SOUL_DRIVE_MODE_' : 'LIMIT_BREAK_SOUL_DRIVE_';
+  const { character, elements } = modeOwner(ctx.selfKey, prefix, ctx);
+  const name = `Soul Drive Mode: ${character}${elements.length ? ` (${elements.join(', ')})` : ''}`;
+  // "Grants [X] and [Y] to all XI allies" → "grants [X] and [Y] to all XI allies after using a Soul Break"
+  const listed = ctx.followUpEffects?.(name)?.find(t => /^Grants /.test(t));
+  clauses.push(listed
+    ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
+    : 'casts <ability missing from Other Tab> after using a Soul Break');
+  clauses.push('removed after triggering', `removed if the character hasn't [${durations.suffixes[0].removedUnless}]`);
+  return { name, effects: clauses.join(', '), defaultDuration: durations.duration };
+}
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode];
 
 // { name, effects, defaultDuration } in the sheet's wording (name may be null), or null when any part of the
 // status isn't understood yet.

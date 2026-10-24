@@ -34,6 +34,7 @@ const DB = {
   otherNamesBySource:    {},   // Other-tab Source → [ability names] (e.g. a mode's follow-ups)
   otherNamesByIdAndSource: {}, // 'id|Source' → name (one ability can be listed under several modes)
   otherSourcesById:      {},   // other ability id → [Sources] (e.g. a Spirit Attack → its Zenith Mode)
+  otherEffectsBySource:  {},   // Other-tab Source → [Effects] of the abilities listed under it
   extraByCharacter:      {},   // character name → [ability Name strings] from Extra sheet
   charRealm:             {},   // character name → realm (Characters sheet)
   characterNames:        {},   // lower-case name → Characters sheet name
@@ -188,10 +189,12 @@ async function loadSheets() {
     DB.otherNamesBySource = {};
     DB.otherNamesByIdAndSource = {};
     DB.otherSourcesById = {};
+    DB.otherEffectsBySource = {};
     for (const r of (data.other || [])) {
       const id = parseInt(r['ID']);
       if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
       if (r['Source'] && r['Name']) (DB.otherNamesBySource[r['Source']] ??= []).push(r['Name']);
+      if (r['Source'] && r['Effects']) (DB.otherEffectsBySource[r['Source']] ??= []).push(r['Effects']);
       if (r['Source'] && r['Name'] && !isNaN(id)) DB.otherNamesByIdAndSource[`${id}|${r['Source']}`] = r['Name'];
       if (r['Source'] && !isNaN(id)) (DB.otherSourcesById[id] ??= []).push(r['Source']);
     }
@@ -1179,6 +1182,7 @@ function describeFromGameData(statusId) {
     statusParams: key => DB.game.statusParams[DB.statusAilmentsForward[key]] ?? null,
     characterName: raw => canonicalCharacterName(titleCase(raw)),
     followUps:   source => DB.otherNamesBySource[source] ?? [],
+    followUpEffects: source => DB.otherEffectsBySource[source] ?? [],
   });
 }
 
