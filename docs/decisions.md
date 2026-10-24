@@ -316,6 +316,9 @@ Statuses without a Status-tab row are marked and listed for pasting:
 - **Name:** from the Other-tab Source of the mode's chase; Mode I borrows its Mode II partner's. Otherwise built from the coded name: "Dual Awoken Earth Mode I (Biggs)", and a trailing `II` is "(Fang v2)", the sheet's usual form.
 - **Default Duration:** Mode I is 15 seconds. Mode II lasts as long as its soul break's Dual Shift pattern (`dualShiftPatternId`, arg4: pattern 0 is [3,3,2,1,0] turns, pattern 1 is [1]), which the status doesn't know, so the decoder uses the sheet's most common value, "1 turn" (149 vs 120 for "3/3/2/1/0 turns (Dual Shift)").
 
+### Awoken Mode wording (decoder)
+`AWAKE_MODE_*` statuses: "Sharpshooter abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5", then cast speed ("cast speed x3.00 for X abilities", "cast speed x2.00/2.25/2.50/2.75/3.00 for X abilities at ability rank 1/2/3/4/5", "instant cast speed for Jump attacks"), extra triggers, and the chase ("casts Holy Wave after using White Magic abilities": plural, 54 rows vs 36 singular; "after using two X or Y abilities" when it takes several uses). 15 seconds. The name is the Other-tab Source of the chase (the English localization, e.g. "Awoken Savior"), else "Awoken <element or school>" from the coded name.
+
 ### Simple statuses (decoder)
 - **ATB:** "Increase ATB charge speed by x2.00" (x9999999 for instant), named "200% ATB 1", "Instant ATB 2", "125% ATB (Synchro)"; a status that ends when its effects are used up lasts `countForIsDone` turns.
 - **Follow-ups that only grant statuses:** when the follow-up's Other-tab Effects is "Grants [X] to user.", the status reads "Grants [X] after using a Lightning ability", and a Tactical one granting an ATB boost is named "Lightning 125% ATB Quick Cycle (Tactical)".
