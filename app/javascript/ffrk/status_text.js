@@ -12,6 +12,7 @@
 //   abilityNameFrom(id, source), // the Other-tab name of ability id listed under source
 //   abilitySources(id),  // the Other-tab Sources ability id is listed under
 //   statusKey(id),       // status id → STATUS_AILMENTS_TYPE key
+//   statusId(key),       // STATUS_AILMENTS_TYPE key → status id
 //   selfKey,             // this status's STATUS_AILMENTS_TYPE key
 //   statusParams(key),   // another status's game config
 //   characterName(raw),  // coded name words ('FRIONIEL') → sheet character name ('Firion')
@@ -386,8 +387,12 @@ function describeSoulDriveMode(params, ctx) {
   const name = `Soul Drive Mode: ${character}${elements.length ? ` (${elements.join(', ')})` : ''}`;
   // "Grants [X] and [Y] to all XI allies" → "grants [X] and [Y] to all XI allies after using a Soul Break"
   const listed = ctx.followUpEffects?.(name)?.find(t => /^Grants /.test(t));
-  clauses.push(listed
-    ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
+  // Not listed: the standard mode (with the cap and damage boosts) grants [Instant ATB 1] in
+  // 102 of 107 sheet rows, so it's assumed (owner decision); plain modes vary too much.
+  const standard = params.effects.some(e => effectName(e, ctx) === 'INCREASE_EXECUTED_DAMAGE');
+  const instantAtb = ctx.statusName(ctx.statusId?.('INCREASE_ATB_TIME_FACTOR_MAX_TURN_1'));
+  clauses.push(listed ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
+    : standard && instantAtb ? `grants [${instantAtb}] after using a Soul Break`
     : 'casts <ability missing from Other Tab> after using a Soul Break');
   clauses.push('removed after triggering', `removed if the character hasn't [${durations.suffixes[0].removedUnless}]`);
   return { name, effects: clauses.join(', '), defaultDuration: durations.duration };
