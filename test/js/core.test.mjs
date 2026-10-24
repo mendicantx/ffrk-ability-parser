@@ -48,6 +48,21 @@ test('invert swaps keys and values', () => {
   assert.deepEqual(invert({ FIRE: 100, ICE: 101 }), { 100: 'FIRE', 101: 'ICE' });
 });
 
+test('refreshServerData reports sources that failed and kept their previous data', async () => {
+  const { refreshServerData } = await import('ffrk/server_data');
+  const saved = { fetch: globalThis.fetch, document: globalThis.document };
+  globalThis.document = { querySelector: () => null };
+  try {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ refresh_errors: { status: 'no ID column' } }) });
+    assert.equal(await refreshServerData(), 'Refreshed, but these kept their previous data: status (no ID column)');
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ refresh_errors: {} }) });
+    assert.equal(await refreshServerData(), null);
+  } finally {
+    globalThis.fetch = saved.fetch;
+    globalThis.document = saved.document;
+  }
+});
+
 test('splitSheetsResponse separates the refresh time from the sheets', () => {
   const { sheets, lastRefreshedAt } = splitSheetsResponse({ status: [{ ID: '1' }], last_refreshed_at: '2026-01-01T00:00:00Z' });
   assert.deepEqual(sheets, { status: [{ ID: '1' }] });

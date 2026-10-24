@@ -180,6 +180,8 @@ curl -s https://ffrktools.mendicant.com/data/status
 
 The server's settings live in `shared/.env` (a Capistrano linked file). It must set every `*_SHEET_URL` the local `.env` sets; on 2026-10-24 `HERO_ABILITIES_SHEET_URL` and `EXTRA_SHEET_URL` were missing, so production fetched 5 sheets instead of 7. After changing it, restart the app (`touch /data/www/ffrk-ability-parser/current/tmp/restart.txt`) and press **Refresh data**.
 
+A refresh checks each download before it replaces the cached file: a sheet must have rows, its key column (`REQUIRED_COLUMNS` in `lib/data_loader.rb`) and at least half its previous rows; battle.js must have status entries and at least half its previous size. A source that fails keeps its previous data, the error is saved in `metadata.json` and shown in `/data/status` (`refresh_errors`) and by the Refresh data button, and `rake data:refresh` exits non-zero so cron and the deploy hook notice.
+
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
 To refresh daily, add a cron entry for the deploy user on the server:
