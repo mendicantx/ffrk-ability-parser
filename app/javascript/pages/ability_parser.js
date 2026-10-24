@@ -2616,12 +2616,13 @@ function parseMixedFormat(text) {
   return { ...sb, abilities };
 }
 
-// ─── Main parse entry point ───────────────────────────────────────────────────
 // ─── Statuses missing from the Status tab ────────────────────────────────────
 // Each status the parse met without a Status-tab row, as a row to paste into the tab
 // (its columns: ID, Common Name, Effects, Default Duration, MND Modifier, Exclusive
 // Status, Coded Name, Notes). The text comes from the game data, as in the Status
-// Decoder; statuses it can't describe yet keep blank cells to fill in.
+// Decoder; statuses it can't describe yet keep blank cells to fill in. The tab is kept
+// in ascending ID order and rows are added one at a time, so each row says which
+// existing status it goes after.
 const STATUS_TAB_COLUMNS = ['ID', 'Common Name', 'Effects', 'Default Duration', 'MND Modifier', 'Exclusive Status', 'Coded Name', 'Notes'];
 
 function statusTabRow({ id, codedName, described }) {
@@ -2629,28 +2630,44 @@ function statusTabRow({ id, codedName, described }) {
           described ? '' : 'Not decoded yet'];
 }
 
+// The existing Status-tab row a new status goes after: the highest ID below it.
+function statusInsertAfter(id) {
+  let after = null;
+  for (const key of Object.keys(DB.statusMap)) {
+    const n = Number(key);
+    if (n < id && (after === null || n > after)) after = n;
+  }
+  return after === null ? null : { id: after, name: DB.statusMap[after]?.commonName ?? '' };
+}
+
 function renderMissingStatuses(statuses) {
   const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const tsv = row => row.map(v => String(v).replace(/[\t\n\r]/g, ' ')).join('\t');
-  const rows = statuses.sort((a, b) => a.id - b.id).map(statusTabRow);
+  const sorted = statuses.sort((a, b) => a.id - b.id);
   let html = `<div class="ability-block missing-statuses" id="missing-statuses">`;
-  html += `<h3>Not on the Status tab (${rows.length})</h3>`;
+  html += `<h3>Not on the Status tab (${sorted.length})</h3>`;
   html += `<p class="missing-note">These statuses have no Status-tab row yet; their names above are underlined. `;
-  html += `Each row is in the Status tab's column order, ready to paste.</p>`;
-  html += `<div class="sbp-copy-row"><button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-all">Copy all rows</button>`;
-  html += `<textarea class="status-tsv-area" id="status-tsv-all" rows="${Math.min(rows.length, 6)}" readonly>${esc(rows.map(tsv).join('\n'))}</textarea></div>`;
-  html += `<table class="sb-preview-table missing-table"><thead><tr>`;
+  html += `Each row is in the Status tab's column order: insert a row below the one in "Insert after", then paste.</p>`;
+  html += `<table class="sb-preview-table missing-table"><thead><tr><th>Insert after</th>`;
   html += STATUS_TAB_COLUMNS.filter(c => !['MND Modifier', 'Exclusive Status'].includes(c)).map(c => `<th>${c}</th>`).join('') + `<th></th></tr></thead><tbody>`;
-  for (const row of rows) {
+  for (const status of sorted) {
+    const row = statusTabRow(status);
     const [id, name, effects, duration, , , coded, notes] = row;
+    // A status can already have a row with blank cells: then it's filled in, not inserted.
+    const after = statusInsertAfter(id);
+    const place = id in DB.statusMap ? 'its row is there but blank: fill it in'
+      : after ? `${after.id}${after.name ? ` <span class="insert-after-name">${esc(after.name)}</span>` : ''}` : 'the top of the tab';
     const cell = v => (v === '' ? `<td class="sbp-empty">—</td>` : `<td>${esc(v)}</td>`);
-    html += `<tr>${cell(id)}${cell(name)}${cell(effects)}${cell(duration)}${cell(coded)}${cell(notes)}`;
+    html += `<tr><td class="insert-after">${place}</td>`;
+    html += `${cell(id)}${cell(name)}${cell(effects)}${cell(duration)}${cell(coded)}${cell(notes)}`;
     html += `<td><button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-${id}">Copy row</button>`;
     html += `<textarea class="status-tsv-area" id="status-tsv-${id}" rows="1" readonly hidden>${esc(tsv(row))}</textarea></td></tr>`;
   }
   html += `</tbody></table></div>`;
   return html;
 }
+
+// ─── Main parse entry point ───────────────────────────────────────────────────
 
 // Underlines "[Name]" in the previews' table cells for statuses without a Status-tab
 // row. Only <td> contents change; the copyable TSV text is left as it is.
