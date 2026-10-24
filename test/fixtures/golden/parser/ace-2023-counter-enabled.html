@@ -2042,11 +2042,11 @@
 <div class="sb-preview">
 <div class="sbp-copy-row">
 <button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
+    const v = this.nextElementSibling.value;
     navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
 <textarea class="sbp-tsv-area" id="cfp-tsv-31543391" rows="1" readonly>Ace	Radiant Jackpot Shot	CASB	=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")	Crystal Force I	BLK	Single enemy	Magical	39.60	Fire, NE	0.01	Six single attacks (6.60 each) capped at 19,999. Grants [Damage Cap +10000 2], [Quick Cast 2], [Magical +30% Boost 2], [DEF and RES 50% Piercing 2], [200% ATB 1] to user.	N	Lowest HP% enemy	-		耀光キャノンレーザー	31543391		</textarea>
 </div>
@@ -2144,7 +2144,7 @@
 </tbody>
 </table>
 <div class="sbp-legend">
-<span class="sbp-derived-badge">■</span> derived from JSON</div>
+<span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>
 </div>
 </details>
 <details>

@@ -1766,6 +1766,42 @@ function combatColumns(parsed) {
   return columns;
 }
 
+// Renders one sheet-tab preview: a "Copy row" button with the tab-separated row to
+// paste into the sheet, and a table of the columns. Shared by every tab's builder.
+// columns: [{ col, val, rawVal?, src?, tdId?, tdExtra? }] in sheet order. val is plain
+// text unless rawVal is given, in which case val is markup and rawVal its text.
+// src marks values taken from the sheet itself rather than derived from the JSON.
+function renderSheetPreview({ title, idPrefix, id, columns }) {
+  const escapeHtml = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const text = c => String(c.rawVal ?? c.val ?? '');
+  const tsvRow = columns.map(c => text(c).replace(/[\t\n\r]/g, ' ')).join('\t');
+
+  let html = `<details class="sb-preview-details"><summary>${title}</summary>`;
+  html += `<div class="sb-preview">`;
+  html += `<div class="sbp-copy-row">`;
+  html += `<button class="sbp-copy-btn" onclick="
+    const v = this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
+    )">Copy row</button>`;
+  html += `<textarea class="sbp-tsv-area" id="${idPrefix}-tsv-${id}" rows="1" readonly>${escapeHtml(tsvRow)}</textarea>`;
+  html += `</div>`;
+  html += `<table class="sb-preview-table">`;
+  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
+  for (const c of columns) {
+    const cls   = text(c) === '' ? 'sbp-empty' : c.src ? 'sbp-sheet' : 'sbp-derived';
+    const attrs = (c.tdId ? ` id="${c.tdId}"` : '') + (c.tdExtra ? ` ${c.tdExtra}` : '');
+    const shown = c.rawVal != null ? c.val : escapeHtml(c.val ?? '');
+    html += `<tr><td class="sbp-col">${c.col}</td><td class="${cls}"${attrs}>${shown}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+  html += `</div></details>`;
+  return html;
+}
+
 // ─── SB sheet column preview ──────────────────────────────────────────────────
 function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '') {
   // ── Local helpers ──
@@ -1837,53 +1873,11 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'GL':             { val: '',                                                                                          src: false },
   };
 
-  // Column order matches the Soul Breaks sheet tab exactly.
-  // Img is a formula column (not in the CSV) inserted at its correct position.
-  const SHEET_COL_ORDER = [
-    'Realm', 'Character', 'Img', 'Name', 'Tier', 'SB Ver', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target',
-    'Points', 'Mastery Bonus', 'Honing Effects', 'Relic', 'Name (JP)', 'ID', 'Anima', 'GL', '✓',
-  ];
-  const cols = SHEET_COL_ORDER.map(colName => {
-    if (colName === 'Img') return { col: 'Img', val: imgFormula, src: false };
-    const known = colValues[colName];
-    if (known) return { col: colName, ...known };
-    // Column in sheet but no derivation — show sheet value or blank
-    const sheetVal = String(sb?.[colName] ?? '');
-    return { col: colName, val: sheetVal, src: !!sheetVal };
+  const COLUMN_ORDER = ['Realm', 'Character', 'Img', 'Name', 'Tier', 'SB Ver', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'Points', 'Mastery Bonus', 'Honing Effects', 'Relic', 'Name (JP)', 'ID', 'Anima', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Soul Break tab columns', idPrefix: 'sbp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: String(sb?.[col] ?? ''), src: !!sb?.[col] }) }),
   });
-
-  // Tab-separated row for direct paste into Google Sheets.
-  // Use rawVal when present (cols where val contains HTML).
-  const tsvRow = cols.map(c => String(c.rawVal ?? c.val ?? '').replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Soul Break tab columns</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v = this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
-      () => { this.nextElementSibling.select(); document.execCommand('copy');
-              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="sbp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val, rawVal, tdId, src, tdExtra } of cols) {
-    const textVal   = String(rawVal ?? val ?? '');
-    const cls       = textVal === '' ? 'sbp-empty' : src ? 'sbp-sheet' : 'sbp-derived';
-    const idAttr    = tdId    ? ` id="${tdId}"`  : '';
-    const extraAttr = tdExtra ? ` ${tdExtra}`    : '';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}"${idAttr}${extraAttr}>${val}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-
-  html += `</div></details>`;
-  return html;
 }
 
 function renderStatusList(statuses, label) {
@@ -1977,42 +1971,11 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     '✓':           { val: ''                        },
   };
 
-  const SHEET_COL_ORDER = [
-    'Character', 'Source', 'SB Ver', 'Img', 'Name', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
-    'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'GL', '✓',
-  ];
-
-  const cols = SHEET_COL_ORDER.map(col => {
-    if (col === 'Img') return { col, val: imgFormula };
-    return { col, val: String(colValues[col]?.val ?? '') };
+  const COLUMN_ORDER = ['Character', 'Source', 'SB Ver', 'Img', 'Name', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Crystal Commands tab columns', idPrefix: 'cfp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
   });
-
-  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Crystal Commands tab columns</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="cfp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val } of cols) {
-    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
 }
 
 // ─── Extra sheet column preview (Extra Kiwami abilities) ─────────────────────
@@ -2047,34 +2010,11 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
     '✓':     {val: ''},
   };
 
-  const COL_ORDER = [
-    'Character','Source','SB Ver','Img','Name','Type','Target',
-    'Formula','Multiplier','Element','Time','Effects','Counter',
-    'Auto Target','SB','School','Name (JP)','ID','✓',
-  ];
-
-  const cols = COL_ORDER.map(col => {
-    if (col==='Img') return {col, val: imgFormula};
-    return {col, val: String(colValues[col]?.val??'')};
+  const COLUMN_ORDER = ['Character','Source','SB Ver','Img','Name','Type','Target', 'Formula','Multiplier','Element','Time','Effects','Counter', 'Auto Target','SB','School','Name (JP)','ID','✓'];
+  return renderSheetPreview({
+    title: 'Extra tab columns', idPrefix: 'ekp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
   });
-
-  const tsvRow  = cols.map(c=>c.val.replace(/[\t\n\r]/g,' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Extra tab columns</summary>`;
-  html += `<div class="sb-preview"><div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="const v=this.nextElementSibling.value;navigator.clipboard.writeText(v).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},()=>{this.nextElementSibling.select();document.execCommand('copy');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);})">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="ekp-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div><table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const {col, val} of cols) {
-    const cls = val===''?'sbp-empty':'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">&#9632;</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
 }
 
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
@@ -2104,38 +2044,12 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
     '✓':           { val: '✓'             },
   };
 
-  const SHEET_COL_ORDER = [
-    'Source Type', 'Source', 'Img', 'Name', 'Type', 'Target',
-    'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter',
-    'Auto Target', 'SB', 'School', 'ID', 'GL', '✓',
-  ];
-
-  const cols    = SHEET_COL_ORDER.map(col => ({ col, val: col === 'Img' ? '' : String(colValues[col]?.val ?? '') }));
-  const tsvRow  = cols.map(c => c.val.replace(/[\t\n\r]/g, ' ')).join('\t');
-  const tsvSafe = tsvRow.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  let html = `<details class="sb-preview-details"><summary>Other tab columns (Follow-Up)</summary>`;
-  html += `<div class="sb-preview">`;
-  html += `<div class="sbp-copy-row">`;
-  html += `<button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
-    navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
-    )">Copy row</button>`;
-  html += `<textarea class="sbp-tsv-area" id="fup-tsv-${id}" rows="1" readonly>${tsvSafe}</textarea>`;
-  html += `</div>`;
-  html += `<table class="sb-preview-table">`;
-  html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
-  for (const { col, val } of cols) {
-    const cls = val === '' ? 'sbp-empty' : 'sbp-derived';
-    html += `<tr><td class="sbp-col">${col}</td><td class="${cls}">${val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-derived-badge">■</span> derived from JSON</div>`;
-  html += `</div></details>`;
-  return html;
+  const imgFormula = ''; // Other-tab follow-up rows leave the image blank
+  const COLUMN_ORDER = ['Source Type', 'Source', 'Img', 'Name', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Other tab columns (Follow-Up)', idPrefix: 'fup', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
+  });
 }
 
 // Returns the top-level parsed ability followed by all sub-abilities, depth-first.

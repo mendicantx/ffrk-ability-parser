@@ -1362,11 +1362,11 @@ b: 2</td>
 <div class="sb-preview">
 <div class="sbp-copy-row">
 <button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
+    const v = this.nextElementSibling.value;
     navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
 <textarea class="sbp-tsv-area" id="fup-tsv-31546933" rows="1" readonly>Follow-Up Status			破撃・光の戦士	PHY	Single enemy	Physical	5.40	Holy, NE	0.01	Six single attacks (0.90 each).	Y	Single enemy	-	KNIGHT	31546933		✓</textarea>
 </div>
@@ -1456,7 +1456,7 @@ b: 2</td>
 </tbody>
 </table>
 <div class="sbp-legend">
-<span class="sbp-derived-badge">■</span> derived from JSON</div>
+<span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>
 </div>
 </details>
 <details>

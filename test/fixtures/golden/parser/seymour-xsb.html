@@ -946,7 +946,13 @@
 <summary>Extra tab columns</summary>
 <div class="sb-preview">
 <div class="sbp-copy-row">
-<button class="sbp-copy-btn" onclick="const v=this.nextElementSibling.value;navigator.clipboard.writeText(v).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},()=>{this.nextElementSibling.select();document.execCommand('copy');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);})">Copy row</button>
+<button class="sbp-copy-btn" onclick="
+    const v = this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
+    )">Copy row</button>
 <textarea class="sbp-tsv-area" id="ekp-tsv-30111823" rows="1" readonly>Seymour	超極静謐なる執念	XSB	=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/ability/30111823/30111823_128.png")	Cursed Requiem	BLK	Single enemy	Magical	23.70	Dark	1.20	Six single attacks (3.95 each). Grants [Buff Dark 10% (5s)] to all allies.	Y	Lowest HP% enemy	90	BLACK_MAGIC	カースレクイエム	30111823	</textarea>
 </div>
 <table class="sb-preview-table">
@@ -1037,7 +1043,7 @@
 </tbody>
 </table>
 <div class="sbp-legend">
-<span class="sbp-derived-badge">&#9632;</span> derived from JSON</div>
+<span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>
 </div>
 </details>
 <details>
@@ -1182,7 +1188,13 @@
 <summary>Extra tab columns</summary>
 <div class="sb-preview">
 <div class="sbp-copy-row">
-<button class="sbp-copy-btn" onclick="const v=this.nextElementSibling.value;navigator.clipboard.writeText(v).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},()=>{this.nextElementSibling.select();document.execCommand('copy');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);})">Copy row</button>
+<button class="sbp-copy-btn" onclick="
+    const v = this.nextElementSibling.value;
+    navigator.clipboard.writeText(v).then(
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
+    )">Copy row</button>
 <textarea class="sbp-tsv-area" id="ekp-tsv-30131523" rows="1" readonly>Seymour	超極静謐なる執念	XSB	=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/ability/30131523/30131523_128.png")	Anima's Pain	SUM	All enemies	Magical	37.80	Dark	1.80	Seven group attacks (5.40 each) capped at 19,999.	N	All enemies	90	SUMMONING	アニマ召喚・ペイン	30131523	</textarea>
 </div>
 <table class="sb-preview-table">
@@ -1273,7 +1285,7 @@
 </tbody>
 </table>
 <div class="sbp-legend">
-<span class="sbp-derived-badge">&#9632;</span> derived from JSON</div>
+<span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>
 </div>
 </details>
 <details>
@@ -1401,11 +1413,11 @@
 <div class="sb-preview">
 <div class="sbp-copy-row">
 <button class="sbp-copy-btn" onclick="
-    const v=this.nextElementSibling.value;
+    const v = this.nextElementSibling.value;
     navigator.clipboard.writeText(v).then(
-      ()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);},
-      ()=>{this.nextElementSibling.select();document.execCommand('copy');
-           this.textContent='Copied!';setTimeout(()=>this.textContent='Copy row',1500);}
+      () => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); },
+      () => { this.nextElementSibling.select(); document.execCommand('copy');
+              this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
 <textarea class="sbp-tsv-area" id="fup-tsv-22540040" rows="1" readonly>Follow-Up Status	超極静謐なる執念		アビリティクラッシュ	SUM	Single enemy	Magical	67.00	Dark, NE	0.01	Twenty single attacks (3.35 each) capped at 19,999.	N	Single enemy	-		22540040		✓</textarea>
 </div>
@@ -1495,7 +1507,7 @@
 </tbody>
 </table>
 <div class="sbp-legend">
-<span class="sbp-derived-badge">■</span> derived from JSON</div>
+<span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>
 </div>
 </details>
 <details>
