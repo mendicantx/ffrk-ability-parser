@@ -196,6 +196,61 @@ Next, largest first among the statuses the sheet is missing:
 
 These are multi-effect modes, which need per-family composition rules. The parser's Tactical mode-row summary will come from the same work.
 
+## Known bug to fix
+
+### Keep Japanese text when importing the sheets
+`SheetsImporter.parse_csv` (`lib/importers/sheets_importer.rb`) re-encodes the downloaded CSV from "binary", which deletes every non-ASCII character. Every Japanese value in the cached sheets is cut down to ASCII fragments (Name (JP) "覚醒チャージAショット" becomes "A"). The battle.js unpacker had the same bug and was fixed the same way.
+- **Fix:** treat the body as UTF-8 and drop only invalid bytes: `raw.dup.force_encoding('UTF-8').scrub('')`.
+- **Then:** run `rake data:refresh` and `rake data:snapshot`, and review the golden diffs (the Name (JP) cells will change).
+- **Test:** a minitest that `parse_csv` keeps "極星革命の象徴・のばら" from a byte string. Run `bin/rails test`.
+
+## Release: deploy from GitHub Actions (when the feature branch is ready to ship)
+
+### What the current config shows
+- **Repo fetch:** `repo_url` is SSH (`git@github.com:mendicantx/ffrk-ability-parser.git`), and `ssh_options` has `forward_agent: true`. So the server clones with whatever key the deploying machine's agent holds.
+- **Repo visibility:** the repo is public.
+- **Ruby on the server:** nothing hard-codes a Ruby version or PATH. `capistrano-asdf` uploads a wrapper that sources `~/.asdf/asdf.sh` (present in asdf v0.14.1) and runs commands through `asdf exec`. asdf reads the release's `.tool-versions` (`ruby 4.0.9`), which takes precedence over `~/.tool-versions`, so the server must have 4.0.9 installed, which it does.
+- **Gems on the server:** `capistrano/bundler` installs `without development:test`, so the server doesn't need the Capistrano gems.
+- **Stage:** `production` (`config/deploy/production.rb`, server `mendicant.com`, user `jason`).
+- **Capistrano gems:** in the Gemfile's `:development` group. `ruby/setup-ruby` with `bundler-cache: true` installs every group unless `BUNDLE_WITHOUT` is set, so the runner gets them. The workflow must not set `BUNDLE_WITHOUT`/`BUNDLE_DEPLOYMENT` to exclude development.
+
+### Story: add `.github/workflows/deploy.yml`
+As the owner, I want a push to `main` to deploy automatically, so that I don't have to run `cap production deploy` by hand.
+- Trigger on push to `main`, plus `workflow_dispatch`. Run on `ubuntu-latest`, with a `concurrency` group (for example `deploy-production`, `cancel-in-progress: false`) so two deploys never overlap.
+- Steps:
+  1. `actions/checkout@v4`.
+  2. `ruby/setup-ruby@v1` with `bundler-cache: true`, reading `.ruby-version`.
+  3. `webfactory/ssh-agent@v0.9.0` with `ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}`.
+  4. Append `${{ secrets.DEPLOY_KNOWN_HOSTS }}` to `~/.ssh/known_hosts`. Host key checking stays on.
+  5. `bundle exec cap production deploy`.
+- Only deploy when the tests pass: run after the existing `Tests` workflow succeeds on `main` (`workflow_run`), or make the test job a `needs:` of the deploy job.
+- Watch out for the Ruby version: `.ruby-version` is `4.0.9`, released 2026-10-23. If `ruby/setup-ruby` doesn't have a 4.0.9 build yet, the job fails at setup. The test workflow uses `ruby-version: "4.0"` for this reason; the deploy job can do the same until 4.0.9 is available.
+- Local deploys keep working unchanged, since nothing in the Capistrano config changes.
+- **Test:** a `workflow_dispatch` run deploys, `current/REVISION` on the server matches the pushed commit, and a second dispatch while one is running waits.
+
+### Story: decide how the server fetches the repo
+Agent forwarding means the server clones from GitHub over SSH with the runner's deploy key, so GitHub must accept that key. Even for a public repo, SSH clones need a registered key.
+- **Option A (no config change):** add `gha_deploy.pub` to the repo as a read-only Deploy Key.
+- **Option B:** since the repo is public, switch `repo_url` to `https://github.com/mendicantx/ffrk-ability-parser.git`. Then no GitHub key is needed for the clone, `forward_agent` becomes unnecessary, and local deploys work too. Recommended unless the repo might go private.
+
+### Manual steps for the owner
+1. **Generate the key pair:** `ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./gha_deploy -N ""`.
+2. **Let it log in:** append `gha_deploy.pub` to `/home/jason/.ssh/authorized_keys` on the droplet.
+3. **Let the server pull the repo:** with Option A, add `gha_deploy.pub` as a read-only Deploy Key on this repo. With Option B, skip this step.
+4. **Get the host key:** `ssh-keyscan mendicant.com`. Check the ed25519 fingerprint against `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the droplet.
+5. **Add repo secrets:**
+   - `DEPLOY_SSH_KEY`: the private key contents.
+   - `DEPLOY_KNOWN_HOSTS`: the keyscan output.
+
+   Then delete the local private key.
+6. **Check the firewall:** the DigitalOcean cloud firewall and ufw must allow SSH (22) from GitHub-hosted runners, whose IPs vary widely. If SSH is limited to a home IP, the alternatives are:
+   - a self-hosted runner on the droplet, which deploys to itself with no inbound SSH;
+   - a Tailscale step (`tailscale/github-action`) with the droplet on the tailnet.
+7. **Shared files:** `.env` is a Capistrano linked file. It already exists in `shared/` on the server, so nothing changes.
+
+### Cost
+GitHub-hosted runners are free for public repos (this repo is public).
+
 ## Requested features (owner, 2026-10-23, for later)
 
 1. **Jump from a placeholder to fixing it.** Where the decoder writes `<ability missing from Other Tab>`, show a popup or a link that opens a new tab directly on that item, ready to parse and add to the sheet. Open question: the missing item is an ability (a follow-up), and the Ability Parser needs its JSON to describe it. The link could open the parser pre-filled with what's known (ability ID, the status it belongs to, character), asking for the paste.
