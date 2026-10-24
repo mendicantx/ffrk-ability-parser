@@ -62,6 +62,7 @@ Used by the ability translator to know what each arg in an ability's JSON option
 | `lib/importers/battle_js_importer.rb` | Fetches battle.js, unpacks p,a,c,k,e,r JS (supports base 62), returns raw JS string |
 | `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
 | `app/javascript/pages/status_decoder.js` | Status Decoder page script (ES module, pinned with `pin_all_from` in `config/importmap.rb`) |
+| `app/javascript/pages/ability_parser.js` | Ability Parser page script (ES module) |
 | `test/browser/smoke.mjs` | Browser smoke test: drives both tools in headless Edge/Chrome over the DevTools Protocol |
 | `test/js/harness.mjs` | Runs both pages' scripts unchanged in a Node `vm` with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
 | `lib/data_snapshot.rb` | Writes the gzipped test snapshot of `data/` with a SHA-256 manifest |

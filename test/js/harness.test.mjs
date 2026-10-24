@@ -28,7 +28,9 @@ for (const file of pageModules) {
     const declared = new Set([...source.matchAll(/^(?:async\s+)?function\s+(\w+)|^(?:const|let|var)\s+(\w+)/gm)]
       .map(m => m[1] ?? m[2]));
     for (const [, body] of source.matchAll(/\son[a-z]+="([^"]*)"/g)) {
-      for (const [ident] of body.matchAll(/\b[A-Za-z_$][\w$]*\b/g)) {
+      // Only bare identifiers resolve to scope: skip string literals and property names (x.foo).
+      const code = body.replace(/'[^']*'|`[^`]*`/g, "''");
+      for (const [ident] of code.matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) {
         assert.ok(!declared.has(ident), `inline handler uses module-scoped ${ident}: ${body.trim().slice(0, 80)}`);
       }
     }

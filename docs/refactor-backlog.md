@@ -104,6 +104,7 @@ As the maintainer, I want the decoder's JavaScript in `app/javascript/pages/stat
 As the maintainer, I want the same for the parser, in `app/javascript/pages/ability_parser.js`.
 - As story 10. The copy buttons use delegated listeners.
 - **Test:** as story 10. The parser goldens are unchanged.
+- **Status:** done (`task/parser-module`).
 
 ### 12. Shared core module (no output change)
 As the maintainer, I want the logic both tools need in one `app/javascript/ffrk/core.js`, so that fixes land once.
