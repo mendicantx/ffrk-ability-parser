@@ -2500,7 +2500,9 @@ function renderParsedInfoSection(p) {
   return html;
 }
 
-function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = '', tamOtherMap = {}, weaponSkillParentMap = {}, busterShingiParentMap = {}, busterShingiOtherMap = {}, extraKiwamiParentMap = {}, extraAbilityCrushOtherMap = {}) {
+// ctx: { actorName, actorRealm, relations } — see recordRelations().
+function renderAbility(parsed, depth, ctx) {
+  const { actorName, actorRealm, relations } = ctx;
   depth = depth ?? 0;
   const sb = lookupSoulBreak(parsed.abilityId);
   const other = !sb ? lookupOtherAbility(parsed.abilityId) : null;
@@ -2538,17 +2540,17 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
 
   // Soul Break sheet column preview — only for depth-0 soul strikes
   // (sheet match present, or soul_strike_category_id indicates it's a soul strike without a sheet entry)
-  // Also forced for BUSTER_SHINGI sub-abilities (defaultAbilityId / repeatSkillAbilityId) via busterShingiParentMap.
-  const busterShingiParent = busterShingiParentMap[parseInt(parsed.abilityId)];
+  // Also forced for BUSTER_SHINGI sub-abilities (defaultAbilityId / repeatSkillAbilityId) via relations.busterParent.
+  const busterShingiParent = relations.busterParent[parseInt(parsed.abilityId)];
   if (depth === 0 && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
-    const wsParent = weaponSkillParentMap[parseInt(parsed.abilityId)] ?? busterShingiParent;
+    const wsParent = relations.weaponSkillParent[parseInt(parsed.abilityId)] ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
     const sbActorRealm = wsParent?.realm     || actorRealm;
     html += renderSBSheetPreview(parsed, sb, sbActorName, genText, sheetElement, sbActorRealm);
   }
 
   // Crystal Commands sheet column preview — for Crystal Force abilities
-  const cfParent = cfParentMap[parsed.abilityId];
+  const cfParent = relations.cfParent[parsed.abilityId];
   if (cfParent) {
     html += renderCFSheetPreview(parsed, cfParent, genText);
   }
@@ -2559,25 +2561,25 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   }
 
   // Other tab column preview — for TAM tpMaxAbilityId / weaponSkillAbilityId
-  const tamSource = tamOtherMap[parseInt(parsed.abilityId)];
+  const tamSource = relations.tamSource[parseInt(parsed.abilityId)];
   if (tamSource !== undefined) {
     html += renderFollowUpSheetPreview(parsed, genText, tamSource);
   }
 
   // Other tab column preview — for BUSTER_SHINGI chase/other sub-abilities
-  const busterOtherSource = busterShingiOtherMap[parseInt(parsed.abilityId)];
+  const busterOtherSource = relations.busterOtherSource[parseInt(parsed.abilityId)];
   if (busterOtherSource !== undefined && !DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]) {
     html += renderFollowUpSheetPreview(parsed, genText, busterOtherSource);
   }
 
   // Extra tab column preview — for EXTRA_ZETSUGI extra kiwami abilities
-  const ekParent = extraKiwamiParentMap[parseInt(parsed.abilityId)];
+  const ekParent = relations.extraKiwamiParent[parseInt(parsed.abilityId)];
   if (ekParent) {
     html += renderExtraSheetPreview(parsed, ekParent, genText);
   }
 
   // Other tab column preview — for EXTRA_ZETSUGI ability crush (arg2)
-  const ekCrushSource = extraAbilityCrushOtherMap[parseInt(parsed.abilityId)];
+  const ekCrushSource = relations.extraCrushSource[parseInt(parsed.abilityId)];
   if (ekCrushSource !== undefined) {
     html += renderFollowUpSheetPreview(parsed, genText, ekCrushSource);
   }
@@ -2595,6 +2597,128 @@ function renderAbility(parsed, depth, actorName, cfParentMap = {}, actorRealm = 
   html += `</div></details>`;
 
   return html;
+}
+
+// ─── Relations between abilities in one actor's kit ──────────────────────────
+// Sub-abilities that belong on another sheet tab (Crystal Commands, Extra, Other)
+// need their parent soul break's character, realm or name. recordRelations()
+// collects these while the actor's abilities are processed (soul_strikes come
+// before abilities, so parents are seen first); renderAbility() reads them.
+function newRelations() {
+  return {
+    cfParent:          {}, // CF ability ID → { character, sbName }
+    tamSource:         {}, // TAM tpMaxAbilityId → label
+    weaponSkillParent: {}, // weaponSkillAbilityId → { character, realm } from parent SB
+    busterParent:      {}, // BUSTER_SHINGI defaultAbilityId/repeatSkillAbilityId → { character, realm }
+    busterOtherSource: {}, // BUSTER_SHINGI chase/other sub-abilities → source label (chase mode status name)
+    extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
+    extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
+  };
+}
+
+// Records what parsed (a top-level ability card; ability is its raw JSON) says
+// about its sub-abilities into ctx.relations.
+function recordRelations(parsed, ability, ctx) {
+  const { actorName, actorRealm, relations } = ctx;
+  // Record parent SB info for any Crystal Force sub-abilities
+  const sbRow = lookupSoulBreak(parsed.abilityId);
+  if (sbRow) {
+    for (const sub of parsed.subAbilities) {
+      if (sub._label === 'crystalForceAbilityId') {
+        relations.cfParent[sub.abilityId] = {
+          character: sbRow['Character'] || actorName,
+          sbName:    sbRow['Name']      || '',
+        };
+      }
+    }
+  }
+
+  // Record TAM other-tab ability (tpMaxAbilityId only)
+  // Record weapon skill parent context for character/realm inheritance
+  const defaultAb = parsed.subAbilities.find(s => s._label === 'defaultAbilityId' || s._label === 'arg1');
+  let tamModeName = '';
+  if (defaultAb) {
+    outer: for (const sa of defaultAb.subActions) {
+      for (const s of sa.statuses) {
+        if ((s.commonName ?? '').startsWith('Tactical Awoken Mode')) { tamModeName = s.commonName; break outer; }
+      }
+    }
+  }
+  for (const sub of parsed.subAbilities) {
+    if (sub._label === 'tpMaxAbilityId') {
+      relations.tamSource[sub.abilityId] = tamModeName;
+    }
+    if (sub._label === 'weaponSkillAbilityId') {
+      relations.weaponSkillParent[sub.abilityId] = {
+        character: sbRow?.['Character'] || actorName,
+        realm:     sbRow?.['Realm']     || actorRealm,
+      };
+    }
+    if (sub._label === 'defaultAbilityId' || sub._label === 'repeatSkillAbilityId') {
+      if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
+        relations.busterParent[sub.abilityId] = {
+          character: sbRow?.['Character'] || actorName,
+          realm:     sbRow?.['Realm']     || actorRealm,
+        };
+        // Chase/other sub-abilities of defaultAbilityId go to the Other tab.
+        // Source = first CHASE_MODE_* status found in defaultAbilityId's sub-actions.
+        if (sub._label === 'defaultAbilityId') {
+          let chaseModeSource = '';
+          outer: for (const sa of sub.subActions) {
+            for (const s of sa.statuses) {
+              const ck = (s.codedName ?? '').toUpperCase();
+              const cn = s.commonName ?? '';
+              if (ck.startsWith('CHASE') || cn.toLowerCase().includes('chase')) {
+                chaseModeSource = cn || ck;
+                break outer;
+              }
+            }
+          }
+          for (const chase of sub.subAbilities) {
+            relations.busterOtherSource[chase.abilityId] = chaseModeSource;
+          }
+        }
+      }
+    }
+  }
+
+  // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
+  if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'EXTRA_ZETSUGI') {
+    const crushId = parseInt(ability.options?.arg2 ?? 0);
+    if (crushId > 0) {
+      relations.extraCrushSource[crushId] = sbRow?.['Name'] || parsed.name;
+    }
+    for (const argKey of ['arg3','arg5','arg7','arg9','arg11']) {
+      const ekId = parseInt(ability.options?.[argKey] ?? 0);
+      if (ekId > 0) {
+        relations.extraKiwamiParent[ekId] = {
+          character: sbRow?.['Character'] || actorName,
+          realm:     sbRow?.['Realm']     || actorRealm,
+          sbName:    sbRow?.['Name']      || parsed.name,
+        };
+      }
+    }
+  }
+}
+
+// Marks sub-abilities whose standalone cards are suppressed as already rendered.
+function markSuppressedSubAbilities(parsed, renderedIds) {
+  // Suppress standalone cards only for pure wrapper/visual sub-abilities.
+  // Independent abilities (crystalForceAbilityId etc.) keep their own cards.
+  // For BUSTER_SHINGI, defaultAbilityId is covered by the parent SB card.
+  const suppressLabels = new Set(['wrappedAbilityId', 'cutinAbilityId']);
+  if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
+    suppressLabels.add('defaultAbilityId');
+  }
+  function suppressChain(p) {
+    for (const sub of p.subAbilities) {
+      if (suppressLabels.has(sub._label)) {
+        renderedIds.add(sub.abilityId);
+        suppressChain(sub);
+      }
+    }
+  }
+  suppressChain(parsed);
 }
 
 // ─── Mixed-format parser: { soul_break_json }\n\nabilities:[...] ─────────────
@@ -2669,21 +2793,7 @@ function processBattleJson(jsonText) {
       ...(actor.abilities    ?? []),
     ];
     const renderedIds = new Set();
-    // cfParentMap: CF ability ID → { character, sbName } — built as we process soul breaks
-    // (soul_strikes come before abilities in allActorAbilities, so SBs are processed first)
-    const cfParentMap = {};
-    // tamOtherMap: TAM tpMaxAbilityId → label — built as we process soul breaks
-    const tamOtherMap = {};
-    // weaponSkillParentMap: weaponSkillAbilityId → { character, realm } from parent SB
-    const weaponSkillParentMap = {};
-    // busterShingiParentMap: BUSTER_SHINGI defaultAbilityId/repeatSkillAbilityId → { character, realm }
-    const busterShingiParentMap = {};
-    // busterShingiOtherMap: BUSTER_SHINGI chase/other sub-abilities → source label (chase mode status name)
-    const busterShingiOtherMap = {};
-    // extraKiwamiParentMap: EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
-    const extraKiwamiParentMap = {};
-    // extraAbilityCrushOtherMap: EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
-    const extraAbilityCrushOtherMap = {};
+    const ctx = { actorName, actorRealm, relations: newRelations() };
     if (allActorAbilities.length > 0) {
       html += `<h3>Abilities (${allActorAbilities.length})</h3>`;
       for (const ability of allActorAbilities) {
@@ -2691,103 +2801,9 @@ function processBattleJson(jsonText) {
         renderedIds.add(ability.ability_id);
         const parsed = parseAbility(ability, allAbilities, new Set());
         if (parsed) {
-          // Record parent SB info for any Crystal Force sub-abilities
-          const sbRow = lookupSoulBreak(parsed.abilityId);
-          if (sbRow) {
-            for (const sub of parsed.subAbilities) {
-              if (sub._label === 'crystalForceAbilityId') {
-                cfParentMap[sub.abilityId] = {
-                  character: sbRow['Character'] || actorName,
-                  sbName:    sbRow['Name']      || '',
-                };
-              }
-            }
-          }
-
-          // Record TAM other-tab ability (tpMaxAbilityId only)
-          // Record weapon skill parent context for character/realm inheritance
-          const defaultAb = parsed.subAbilities.find(s => s._label === 'defaultAbilityId' || s._label === 'arg1');
-          let tamModeName = '';
-          if (defaultAb) {
-            outer: for (const sa of defaultAb.subActions) {
-              for (const s of sa.statuses) {
-                if ((s.commonName ?? '').startsWith('Tactical Awoken Mode')) { tamModeName = s.commonName; break outer; }
-              }
-            }
-          }
-          for (const sub of parsed.subAbilities) {
-            if (sub._label === 'tpMaxAbilityId') {
-              tamOtherMap[sub.abilityId] = tamModeName;
-            }
-            if (sub._label === 'weaponSkillAbilityId') {
-              weaponSkillParentMap[sub.abilityId] = {
-                character: sbRow?.['Character'] || actorName,
-                realm:     sbRow?.['Realm']     || actorRealm,
-              };
-            }
-            if (sub._label === 'defaultAbilityId' || sub._label === 'repeatSkillAbilityId') {
-              if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
-                busterShingiParentMap[sub.abilityId] = {
-                  character: sbRow?.['Character'] || actorName,
-                  realm:     sbRow?.['Realm']     || actorRealm,
-                };
-                // Chase/other sub-abilities of defaultAbilityId go to the Other tab.
-                // Source = first CHASE_MODE_* status found in defaultAbilityId's sub-actions.
-                if (sub._label === 'defaultAbilityId') {
-                  let chaseModeSource = '';
-                  outer: for (const sa of sub.subActions) {
-                    for (const s of sa.statuses) {
-                      const ck = (s.codedName ?? '').toUpperCase();
-                      const cn = s.commonName ?? '';
-                      if (ck.startsWith('CHASE') || cn.toLowerCase().includes('chase')) {
-                        chaseModeSource = cn || ck;
-                        break outer;
-                      }
-                    }
-                  }
-                  for (const chase of sub.subAbilities) {
-                    busterShingiOtherMap[chase.abilityId] = chaseModeSource;
-                  }
-                }
-              }
-            }
-          }
-
-          // Populate extraKiwamiParentMap and extraAbilityCrushOtherMap from raw args.
-          if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'EXTRA_ZETSUGI') {
-            const crushId = parseInt(ability.options?.arg2 ?? 0);
-            if (crushId > 0) {
-              extraAbilityCrushOtherMap[crushId] = sbRow?.['Name'] || parsed.name;
-            }
-            for (const argKey of ['arg3','arg5','arg7','arg9','arg11']) {
-              const ekId = parseInt(ability.options?.[argKey] ?? 0);
-              if (ekId > 0) {
-                extraKiwamiParentMap[ekId] = {
-                  character: sbRow?.['Character'] || actorName,
-                  realm:     sbRow?.['Realm']     || actorRealm,
-                  sbName:    sbRow?.['Name']      || parsed.name,
-                };
-              }
-            }
-          }
-
-          // Suppress standalone cards only for pure wrapper/visual sub-abilities.
-          // Independent abilities (crystalForceAbilityId etc.) keep their own cards.
-          // For BUSTER_SHINGI, defaultAbilityId is covered by the parent SB card.
-          const suppressLabels = new Set(['wrappedAbilityId', 'cutinAbilityId']);
-          if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'BUSTER_SHINGI') {
-            suppressLabels.add('defaultAbilityId');
-          }
-          function suppressChain(p) {
-            for (const sub of p.subAbilities) {
-              if (suppressLabels.has(sub._label)) {
-                renderedIds.add(sub.abilityId);
-                suppressChain(sub);
-              }
-            }
-          }
-          suppressChain(parsed);
-          html += renderAbility(parsed, 0, actorName, cfParentMap, actorRealm, tamOtherMap, weaponSkillParentMap, busterShingiParentMap, busterShingiOtherMap, extraKiwamiParentMap, extraAbilityCrushOtherMap);
+          recordRelations(parsed, ability, ctx);
+          markSuppressedSubAbilities(parsed, renderedIds);
+          html += renderAbility(parsed, 0, ctx);
         }
       }
     }
