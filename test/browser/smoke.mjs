@@ -114,6 +114,9 @@ try {
   await sd.waitFor(`!!document.getElementById('tsv-out')`, 'a decoded status');
   const tsv = await sd.evaluate(`document.getElementById('tsv-out').value`);
   check('decoder decodes CRYSTAL_BUDDY_MODE_DESHI', /Crystal Force Mode/.test(tsv), tsv.slice(0, 80));
+  await sd.waitFor(`/configs|err/.test(document.getElementById('li-game-icon').className + ${text('li-game-detail')})`, 'battle.js to run in its Worker');
+  check('decoder runs battle.js in a Web Worker', await sd.evaluate(`document.getElementById('li-game-icon').className.includes('ok')`), await sd.evaluate(text('li-game-detail')));
+  check('decoder shows game data for a status', /ABILITY_BOOST/.test(await sd.evaluate(`document.getElementById('output').textContent`)));
   check('decoder page has no script errors', sd.errors.length === 0, sd.errors.join(' | '));
   sd.close();
 

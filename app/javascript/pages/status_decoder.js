@@ -4,6 +4,7 @@
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName } from 'ffrk/names';
+import { startBattleRuntime } from 'ffrk/battle_runtime';
 
 // ─── DB ──────────────────────────────────────────────────────────────────────
 const DB = {
@@ -20,6 +21,7 @@ const DB = {
   statusById:            {},   // id → STATUS_KEY
   damageFactor:          {},   // SIZE_NAME → numeric value
   statusAssignments:     {},   // STATUS_KEY → { funcName, argsText, defineModule, block }
+  game:                  null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   helperBodies:          {},   // 'module|helperName' → helper source (for decoder fingerprints)
   // NOTE: funcName is local to its define() block's namespace.
   // The same name in a different define() block is a completely different function.
@@ -105,10 +107,58 @@ async function loadBattleJs() {
     const statCount = Object.keys(SAT).length;
     setLoadState('battlejs', 'ok', `${statCount} statuses, ${Object.keys(DB.abilityIdOf).length} abilities`);
     battleJsReady = true;
+    loadGameData();
   } catch(e) {
     setLoadState('battlejs', 'err', e.message);
   }
   checkAllLoaded();
+}
+
+// ─── Game data: battle.js run in a Web Worker ──────────────────────────────────
+// Gives every status's real config (effects, durations, values) as the game defines it.
+async function loadGameData() {
+  setLoadState('game', 'loading', 'running battle.js…');
+  try {
+    const t0 = performance.now();
+    const { conf, statusParams, errors } = await startBattleRuntime(_rawBattleJs);
+    DB.game = { conf, statusParams };
+    const ms = Math.round(performance.now() - t0);
+    const note = errors.length ? ` · ${errors.length} module errors` : '';
+    setLoadState('game', errors.length ? 'err' : 'ok', `${Object.keys(statusParams).length} status configs in ${ms}ms${note}`);
+  } catch (e) {
+    setLoadState('game', 'err', e.message);
+  }
+}
+
+// Game names for a status config's numeric enums, from battle.js's Conf tables.
+const GAME_ENUMS = {
+  effects:   'STATUS_AILMENTS_PARAM_EFFECT_TYPE',
+  durations: 'STATUS_AILMENTS_PARAM_DURATION_TYPE',
+};
+
+// A status config as readable text: one line per effect and duration, with enum
+// names (effect/duration types, elements, statuses) spelled out.
+function formatGameParams(params) {
+  const conf = DB.game.conf;
+  const nameOf = (table, value) => Object.keys(conf[table] ?? {}).find(k => conf[table][k] === value);
+  const show = (key, value) => {
+    if (key === 'anyElementIds' || key === 'elementId') {
+      return [].concat(value).map(v => nameOf('ELEMENT_TYPE', v) ?? v).join(', ');
+    }
+    if (key === 'saId' || key === 'saIds') return [].concat(value).map(v => DB.statusById[v] ?? v).join(', ');
+    return typeof value === 'object' ? JSON.stringify(value, (k, v) => (k === 'anyElementIds' ? v.map(id => nameOf('ELEMENT_TYPE', id) ?? id) : v)) : String(value);
+  };
+  const lines = [];
+  for (const [part, table] of Object.entries(GAME_ENUMS)) {
+    for (const entry of params[part] ?? []) {
+      const fields = Object.entries(entry).filter(([k]) => k !== 'key' && k !== 'type')
+        .map(([k, v]) => `${k}: ${show(k, v)}`);
+      lines.push(`${part === 'effects' ? 'Effect' : 'Duration'} ${entry.key}: ${nameOf(table, entry.type) ?? entry.type}${fields.length ? `\n    ${fields.join('\n    ')}` : ''}`);
+    }
+  }
+  const flags = Object.entries(params).filter(([k]) => !(k in GAME_ENUMS)).map(([k, v]) => `${k}: ${show(k, v)}`);
+  if (flags.length) lines.unshift(flags.join(', '));
+  return lines.join('\n');
 }
 
 // ─── Sheet data (served from the server's cache; see Refresh data) ───────────
@@ -1437,6 +1487,13 @@ function renderResult(result) {
     html += `</details></div>`;
   }
 
+  // The game's own config for this status (battle.js run in a Worker)
+  const gameParams = DB.game?.statusParams[result.id];
+  html += `<div class="raw-section"><details${result.decoded ? '' : ' open'}>`;
+  html += `<summary>Game data (battle.js)</summary>`;
+  html += `<div class="raw-block">${escHtml(!DB.game ? 'Still running battle.js…' : gameParams ? formatGameParams(gameParams) : 'No config for this status in battle.js.')}</div>`;
+  html += `</details></div>`;
+
   // Sheet row (if exists)
   if (sheetRow) {
     html += `<div class="raw-section"><details>`;
@@ -1585,4 +1642,4 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
 Promise.all([loadBattleJs(), loadSheets()]);
 
 // Exposed for the Node tests (test/js); the page itself doesn't import anything from here.
-export { DB, decodeStatus, parseReady };
+export { DB, decodeStatus, parseReady, formatGameParams };

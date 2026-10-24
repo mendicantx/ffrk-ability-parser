@@ -160,6 +160,9 @@ function makeFetch(battleJsOverride) {
       json: async () => body,
     });
     const { pathname, searchParams } = new URL(url, 'http://localhost');
+    // Static files under public/ (e.g. /vendor/underscore-umd-1.13.7.min.js)
+    const publicFile = path.join(ROOT, 'public', pathname);
+    if (pathname.startsWith('/vendor/') && fs.existsSync(publicFile)) return ok(fs.readFileSync(publicFile, 'utf8'), false);
     if (BATTLE_JS_ROUTES.includes(pathname)) return ok(battleJs, false);
     if (pathname in SHEET_ROUTES) {
       const names = searchParams.get('names')?.split(',') ?? SHEET_ROUTES[pathname] ?? Object.keys(sheets);
@@ -198,6 +201,15 @@ let pageInstance = 0;
 
 // Boots a page against the snapshot and resolves once its data has loaded.
 // Load one page at a time: the globals belong to the most recently loaded page.
+// Runs battle.js in a fresh vm context, standing in for the browser's Web Worker
+// (app/javascript/ffrk/battle_runtime.js calls this when Worker is undefined).
+export async function runBattleJsInVm(battleJs, underscoreJs) {
+  const { runBattleJs } = await import('ffrk/battle_runtime');
+  const context = vm.createContext({ console });
+  const scope = vm.runInContext('globalThis', context);
+  return runBattleJs(battleJs, underscoreJs, scope, code => vm.runInContext(code, context));
+}
+
 export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
@@ -211,6 +223,7 @@ export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     location: { reload() {} },
     requestAnimationFrame: fn => setTimeout(fn, 0),
+    runBattleJsInline: runBattleJsInVm,
   });
 
   let exports = {};
