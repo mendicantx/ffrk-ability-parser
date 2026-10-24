@@ -5,6 +5,7 @@ import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
+import { describeStatus } from 'ffrk/status_text';
 
 // ─── DB ──────────────────────────────────────────────────────────────────────
 const DB = {
@@ -365,8 +366,11 @@ function elementDisplayName(key) {
   return ELEM_DISPLAY[key] ?? titleCase(key);
 }
 
+// Ability category as the sheet names it (SHOOTER is "Sharpshooter").
+const CATEGORY_DISPLAY = { SHOOTER: 'Sharpshooter' };
+
 function categoryDisplayName(key) {
-  return titleCase(key);
+  return CATEGORY_DISPLAY[key] ?? titleCase(key);
 }
 
 function titleCase(key) {
@@ -1148,6 +1152,22 @@ function decodeEbmP(statusKey, statusId, argsText) {
 }
 
 // ─── Decoder dispatcher ───────────────────────────────────────────────────────
+// ─── Describing from game data ───────────────────────────────────────────────
+// Statuses no helper decoder handles are described from their battle.js config
+// (DB.game, filled by loadGameData) by ffrk/status_text.
+function describeFromGameData(statusId) {
+  const params = DB.game?.statusParams[statusId];
+  if (!params) return null;
+  return describeStatus(params, {
+    conf:        DB.game.conf,
+    element:     key => elementDisplayName(key),
+    category:    key => categoryDisplayName(key),
+    statusName:  id => DB.statusMap[id]?.commonName || (DB.statusById[id] ? titleCase(DB.statusById[id]) : null),
+    abilityName: id => abilityDisplayName(id),
+    statusKey:   id => DB.statusById[id] ?? null,
+  });
+}
+
 // ─── Decoder registry ────────────────────────────────────────────────────────
 // Each status is assigned with a battle.js helper (X[Y.KEY]=helper(args)). Decoders
 // are chosen by a fingerprint of the helper's body — the effect types and option
@@ -1190,6 +1210,15 @@ function decodeStatus(statusKey) {
   if (id == null) return { error: `Status key not found in battle.js: ${statusKey}` };
 
   const assignment = DB.statusAssignments[statusKey];
+  if (!assignment && describeFromGameData(id)) {
+    const described = describeFromGameData(id);
+    return {
+      id, codedName: statusKey, commonName: described.name,
+      effects: described.effects, defaultDuration: described.defaultDuration,
+      mndModifier: '-', exclusiveStatus: '-', notes: '',
+      funcName: 'game data', decoded: true, _statusKey: statusKey,
+    };
+  }
   if (!assignment) {
     const raw = findRawAssignment(statusKey);
     return {
@@ -1231,6 +1260,24 @@ function decodeStatus(statusKey) {
     decoded._argsText   = argsText;
     decoded._statusKey  = statusKey;
     return decoded;
+  }
+
+  // No helper decoder: describe it from the game's own config (battle.js run in a Worker).
+  const described = describeFromGameData(id);
+  if (described) {
+    return {
+      id,
+      codedName:       statusKey,
+      commonName:      described.name,
+      effects:         described.effects,
+      defaultDuration: described.defaultDuration,
+      mndModifier:     '-',
+      exclusiveStatus: '-',
+      notes:           '',
+      funcName:        'game data',
+      decoded:         true,
+      _block: block, _funcName: funcName, _argsText: argsText, _statusKey: statusKey,
+    };
   }
 
   // Fallback: not yet implemented

@@ -174,6 +174,35 @@ This depends on battle.js being unpacked byte-for-byte, so the unpacker undoes t
 
 ---
 
+## Describing statuses from game data
+
+Statuses that no helper decoder handles are described from their battle.js config by `app/javascript/ffrk/status_text.js`: one clause per game effect, joined with ", ". A status is described only when every effect is understood, so there is never partial text. Duration comes from the config: TURN gives "N turns", TIME gives "N seconds".
+
+Where the Status sheet words the same thing more than one way, the wording that matches more of the sheet's rows for the statuses being described wins:
+- **Element damage and resistance:** "Increases Fire damage dealt by 20%, cumulable" / "Reduces …"; "Fire Resistance +10%" / "-10%".
+- **Multicast:** "Fire or Holy abilities trigger 1 additional time".
+- **Ability damage:** "Fire or Holy abilities deal 15% more damage".
+- **Cast speed:**
+  - "Cast speed x2.00 for Fire abilities"; elements slash-joined ("Water/Holy"); "attacks" when the condition isn't ability-only.
+  - "Cast speed x… for Fire while in Tactical Awoken Mode" when tied to another status.
+- **Tied to another status (other effects):** ", removed if the character hasn't [X]".
+- **Category names:** follow the sheet (SHOOTER is "Sharpshooter").
+
+Elements are listed in game order (Fire, Ice, … Poison).
+
+**Names** for single-effect statuses follow the sheet's patterns:
+- "Buff Fire 20% (5s)" / "Debuff …", "Resist …" / "Imperil …".
+- "Dualcast / Triplecast / Quadracast / Pentacast Fire, Dark 1" ("Prismatic" for all nine elements).
+- "Water/Holy Ability Quick Cast 1" and "… Instant Cast …" (`castTimeFactor` 10000000 is instant).
+- "Fire, Holy Ability +15% Boost 3", "Summoning +15% Boost 1", "Weakness +9% Boost 1".
+- "Damage Cap +20000 1".
+
+The trailing number is the turn count, "(15s)" a timed duration, and "(Tactical)" a status tied to Tactical Awoken Mode.
+
+`decoder.sheet-match.test.mjs` tracks the result. For the 1486 decoded statuses with sheet rows, names matching went from 481 to 1226 and effects from 329 to 1049.
+
+---
+
 ## Sheet conventions (owner decisions, 2026-10-23)
 
 The community sheet is the reference: where the tools and the sheet disagree, the tools should match the sheet.

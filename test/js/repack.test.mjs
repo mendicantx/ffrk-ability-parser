@@ -1,6 +1,7 @@
 // Simulates a battle.js repack: every minified name the decoder could depend on
 // (the X[Y. assignment prefixes and the helper names) is renamed, and the
-// decoder must still decode exactly the same statuses with the same text.
+// decoder must still decode exactly the same statuses with the same text. Game data is
+// off: a renamed battle.js can't be executed, and this test is about the helper decoders.
 // See docs/decisions.md "Status decoder: assignment scanning and decoder dispatch".
 
 import test from 'node:test';
@@ -30,7 +31,7 @@ function defineRange(js, moduleName) {
 }
 
 test('decoder output survives a simulated battle.js repack', async () => {
-  const original = await loadPage('status_decoder');
+  const original = await loadPage('status_decoder', { gameData: false });
   const before = decodedRows(original);
   assert.ok(before.length > 800, `expected over 800 decoded statuses, got ${before.length}`);
 
@@ -65,7 +66,7 @@ test('decoder output survives a simulated battle.js repack', async () => {
   });
   assert.ok(sites >= Object.keys(assignments).length, `renamed ${sites} assignment sites`);
 
-  const repacked = await loadPage('status_decoder', { battleJs: js });
+  const repacked = await loadPage('status_decoder', { battleJs: js, gameData: false });
   const renamedHelpers = new Set([...helpers.values()].map(h => h.renamed));
   const sample = repacked.eval(`DB.statusAssignments[${JSON.stringify(before[0].codedName)}].funcName`);
   assert.ok(renamedHelpers.has(sample), `repack simulation didn't take effect (helper is still ${sample})`);

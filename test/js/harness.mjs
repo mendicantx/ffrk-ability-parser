@@ -184,7 +184,7 @@ const PAGES = {
   ability_parser: {
     ready: `['battlejs','sheets'].every(k => /\\b(ok|err)\\b/.test(document.getElementById('li-' + k + '-icon').className))`,
   },
-  status_decoder: { ready: 'parseReady' },
+  status_decoder: { ready: 'parseReady', gameReady: 'DB.game !== null' },
 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -210,7 +210,9 @@ export async function runBattleJsInVm(battleJs, underscoreJs) {
   return runBattleJs(battleJs, underscoreJs, scope, code => vm.runInContext(code, context));
 }
 
-export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
+// gameData: false keeps battle.js from running (the decoder then has no game data),
+// e.g. for a simulated repack whose renamed battle.js can't be executed.
+export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = true } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
 
@@ -223,7 +225,7 @@ export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     location: { reload() {} },
     requestAnimationFrame: fn => setTimeout(fn, 0),
-    runBattleJsInline: runBattleJsInVm,
+    runBattleJsInline: gameData ? runBattleJsInVm : () => new Promise(() => {}),
   });
 
   let exports = {};
@@ -238,7 +240,8 @@ export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
 
   const evalIn = expr => new Function(...Object.keys(exports), `return (${expr});`)(...Object.values(exports));
   const deadline = Date.now() + timeoutMs;
-  while (!evalIn(page.ready)) {
+  const ready = gameData && page.gameReady ? `(${page.ready}) && (${page.gameReady})` : page.ready;
+  while (!evalIn(ready)) {
     if (Date.now() > deadline) throw new Error(`${view}: data did not load within ${timeoutMs} ms`);
     await sleep(5);
   }
