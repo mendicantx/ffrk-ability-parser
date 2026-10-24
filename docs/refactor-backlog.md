@@ -179,6 +179,23 @@ A battle capture holds every soul break for every party member, so one or two ca
 - **Learning Mode wording differs from the sheet.** The newly decoded Learning Mode statuses use the decoder's wording ("Keeps track of Learning Mode: Aerith (Wind) level, increases damage dealt by Wind Abilities by 5/10/…%"), while the sheet says "(0~5)" and "Wind attacks deal …% more damage", and names the no-element variants with a series ("Learning Mode: Aerith (VII)"). Names match the sheet for 40 of 68, effects for 16 of 68.
 - **Gordon's SB cost reduction names its soul break by coded name** (`[SHIN_OUGI_OF_MISSION_TIME]`) because the soul break isn't found by ID; the sheet calls it "Hour of Purpose".
 
+## Describing statuses from game data (in progress)
+
+Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
+- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 417 of 1259.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1296 names and 1258 effects.
+
+Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, and single-ability follow-ups (including Chain Force limits).
+
+Next, largest first among the statuses the sheet is missing:
+- Master Mode (about 230).
+- Single follow-ups with extra fields (about 110).
+- Dual Awoken modes (about 90).
+- Soul Drive (about 40).
+- Awoken modes.
+
+These are multi-effect modes, which need per-family composition rules. The parser's Tactical mode-row summary will come from the same work.
+
 ## Owner answers (2026-10-23)
 
 Recorded in `docs/decisions.md` under "Sheet conventions":
