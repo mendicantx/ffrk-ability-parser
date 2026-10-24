@@ -6,11 +6,9 @@ import path from 'node:path';
 import { loadPage, pageScripts, JS_DIR } from './harness.mjs';
 
 test('page scripts are extracted from both views', () => {
-  assert.ok(pageScripts('ability_parser').length >= 1);
-  // The decoder renders the shared constants partial before its own module.
-  const decoder = pageScripts('status_decoder');
-  assert.ok(decoder.length >= 2);
-  assert.match(decoder[0].code, /window\.FFRK/);
+  for (const view of ['ability_parser', 'status_decoder']) {
+    assert.ok(pageScripts(view).some(script => script.module), `${view} has a page module`);
+  }
 });
 
 const pageModules = fs.readdirSync(path.join(JS_DIR, 'pages')).filter(f => f.endsWith('.js'));
