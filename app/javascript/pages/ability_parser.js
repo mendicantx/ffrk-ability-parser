@@ -811,6 +811,10 @@ function generateEffectsText(parsed) {
     const kind = sa?.target === 'OPPONENT_ALIVE_ALL' ? 'group' : 'single';
     return hits === 1 ? `${kind} attack` : `${kind} attacks`;
   }
+  // "[A], [B] and [C]", as the sheet lists statuses.
+  function joinWithAnd(items) {
+    return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+  }
   function perHitText(hits, factors) { return ` (${factors}${hits === 1 ? '' : ' each'})`; }
 
   // Damage cap for an attack sub-action.
@@ -907,19 +911,19 @@ function generateEffectsText(parsed) {
   function targetLabel(target) {
     if (!target) return '';
     const raw = String(target);
-    if (raw === 'default') return ' to user';
+    if (raw === 'default') return ' to the user';
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
     const isSelf  = t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF') || t.startsWith('EXECUTER');
     const isAllT  = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
-    if (isSelf)             return ' to user';
+    if (isSelf)             return ' to the user';
     if (isAlly  && isAllT)  return ' to all allies';
     if (isAlly)             return ' to single ally';
     if (isEnemy && isAllT)  return ' to enemies';
     if (isEnemy)            return ' to enemy';
     // Numeric fallbacks for common IDs not in the DB map
-    if (raw === '1001') return ' to user';
+    if (raw === '1001') return ' to the user';
     if (raw === '2001' || raw === '4001') return ' to all allies';
     if (raw === '3003') return ' to enemies';
     return '';
@@ -937,7 +941,7 @@ function generateEffectsText(parsed) {
     const capVal  = sa.props.overflow ? 99999
                   : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
-    const capStr  = capVal ? ` capped at ${capVal.toLocaleString()}` : '';
+    const capStr  = capVal ? ` capped at ${capVal}` : '';
     const flags   = [
       // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
       sa.props.ranged   ? 'ranged'           : null,
@@ -1325,15 +1329,15 @@ function generateEffectsText(parsed) {
       const perHitStr  = basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const allEnLabels = [enLabel.label,
         ...elseIfAtks.map(ei => parseEnElementLabel(ei.conditionArg)?.label).filter(Boolean)];
-      const capStr = baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '';
+      const capStr = baseCap !== 9999 ? ` capped at ${baseCap}` : '';
       segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr}${capStr} based on ${allEnLabels.join(' or ')}${hpStr}`);
     } else {
       const perHitStr = boostPerHit != null && basePerHit != null
         ? perHitText(hits, `${basePerHit.toFixed(2)} or ${boostPerHit.toFixed(2)}`)
         : basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const capStr    = boostCap != null && baseCap !== boostCap
-        ? ` capped at ${baseCap.toLocaleString()}/${boostCap.toLocaleString()}`
-        : (baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '');
+        ? ` capped at ${baseCap}/${boostCap}`
+        : (baseCap !== 9999 ? ` capped at ${baseCap}` : '');
       const afterStr  = condLabel ? ` after ${condLabel.elseLabel}/${condLabel.ifLabel} uses` : '';
       const basedStr  = statLabel ? ` based on ${statLabel}` : (enLabel ? ` based on ${enLabel.label}` : '');
       segs.push(`${hitsWord(hits)} ${atkWord}${perHitStr}${capStr}${afterStr}${basedStr}${hpStr}`);
@@ -1402,7 +1406,7 @@ function generateEffectsText(parsed) {
         byTargetUnc.get(tLabel).push(s);
       }
       for (const [tLabel, group] of byTargetUnc) {
-        const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+        const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
         } else {
@@ -1424,7 +1428,7 @@ function generateEffectsText(parsed) {
         const condSuffix = ' ' + formatPartyCondition(cond);
         const enemyParts = [], allyParts = [];
         for (const [tLabel, group] of bt) {
-          const statusStr = group.map(s => `[${statusName(s)}]`).join(', ');
+          const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
           if (tLabel.includes('enem')) enemyParts.push(`${statusStr}${tLabel.replace(' to ', ' on ')}`);
           else                         allyParts.push(`${statusStr}${tLabel}`);
         }
@@ -1599,7 +1603,12 @@ function generateEffectsText(parsed) {
   // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
 
-  return segs.length ? segs.join('. ') + '.' : '(No effects detected)';
+  // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
+  // segments start lower-case when they open with a verb, and there is no final period
+  // (docs/decisions.md "Effects punctuation").
+  const SEGMENT_VERBS = /^(Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
+  const sentence = segs.map((seg, i) => (i > 0 && SEGMENT_VERBS.test(seg) ? seg.charAt(0).toLowerCase() + seg.slice(1) : seg));
+  return segs.length ? sentence.join(', ') : '(No effects detected)';
 }
 
 // ─── Soul break lookup ────────────────────────────────────────────────────────
