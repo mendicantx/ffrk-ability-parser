@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage, snapshot } from './harness.mjs';
 
-const FLOOR = 417;
+const FLOOR = 725;
 
 test('decodes statuses that are missing from the Status sheet', async t => {
   const sheet = new Map(snapshot().sheets.status.map(r => [r['Coded Name'], r]));

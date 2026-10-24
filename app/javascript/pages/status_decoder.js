@@ -31,6 +31,8 @@ const DB = {
   // Sheets
   statusMap:             {},   // id → { commonName, effects, duration, codedName }
   otherNameMap:          {},   // other ability id → name
+  otherNamesBySource:    {},   // Other-tab Source → [ability names] (e.g. a mode's follow-ups)
+  otherNamesByIdAndSource: {}, // 'id|Source' → name (one ability can be listed under several modes)
   extraByCharacter:      {},   // character name → [ability Name strings] from Extra sheet
   charRealm:             {},   // character name → realm (Characters sheet)
   characterNames:        {},   // lower-case name → Characters sheet name
@@ -182,9 +184,13 @@ async function loadSheets() {
       };
     }
 
+    DB.otherNamesBySource = {};
+    DB.otherNamesByIdAndSource = {};
     for (const r of (data.other || [])) {
       const id = parseInt(r['ID']);
       if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
+      if (r['Source'] && r['Name']) (DB.otherNamesBySource[r['Source']] ??= []).push(r['Name']);
+      if (r['Source'] && r['Name'] && !isNaN(id)) DB.otherNamesByIdAndSource[`${id}|${r['Source']}`] = r['Name'];
     }
 
     // Characters sheet: name → realm (e.g. 'VII'), for series qualifiers in names
@@ -1163,8 +1169,14 @@ function describeFromGameData(statusId) {
     element:     key => elementDisplayName(key),
     category:    key => categoryDisplayName(key),
     statusName:  id => DB.statusMap[id]?.commonName || (DB.statusById[id] ? titleCase(DB.statusById[id]) : null),
-    abilityName: id => abilityDisplayName(id),
+    // Abilities not yet on the Other tab get a visible placeholder to fill in.
+    abilityName: id => abilityDisplayName(id) ?? '<ability missing from Other Tab>',
+    abilityNameFrom: (id, source) => DB.otherNamesByIdAndSource[`${id}|${source}`] ?? null,
     statusKey:   id => DB.statusById[id] ?? null,
+    selfKey:     DB.statusById[statusId] ?? null,
+    statusParams: key => DB.game.statusParams[DB.statusAilmentsForward[key]] ?? null,
+    characterName: raw => canonicalCharacterName(titleCase(raw)),
+    followUps:   source => DB.otherNamesBySource[source] ?? [],
   });
 }
 

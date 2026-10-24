@@ -201,6 +201,14 @@ The trailing number is the turn count, "(15s)" a timed duration, and "(Tactical)
 
 `decoder.sheet-match.test.mjs` tracks the result. For the 1486 decoded statuses with sheet rows, names matching went from 481 to 1226 and effects from 329 to 1049.
 
+**Mode families** bundle several effects into one sentence, so each is recognised by its effects and composed in the sheet's wording (`MODE_FAMILIES` in `status_text.js`). **Master Mode: <character>** reads: "Casts [Star Strike: X] every 2s (max 5), grants Damage Cap +20000/…/+70000 after 0/…/5 chases, casts [North Star: …] after 15s, removed if user hasn't Master Mode".
+- The North Star isn't part of the status. It is the Master soul break's closing follow-up, found on the Other tab under the mode's Source.
+- The 15s is the base Master Mode status's timer.
+- Instant cast, SB cost and Hero Boost belong to the base [Master Mode] row and are left out, as the sheet does.
+- When one ability is listed under several modes on the Other tab, the row under this mode wins.
+
+**Abilities not yet on the Other tab** are written as `<ability missing from Other Tab>` (the old decoder's convention), so a new status is still described and the gap is obvious to fill.
+
 ---
 
 ## Sheet conventions (owner decisions, 2026-10-23)
