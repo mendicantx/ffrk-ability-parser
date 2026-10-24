@@ -256,6 +256,19 @@ A Tactical (TASB) soul break has two Soul Breaks rows with the same ID (166 of 2
 
 The parser shows the weapon skill under the soul break's ID and "(Weapon Skill)" name; its on-page ids carry a `-ws` suffix. The mode row's Effects in the sheet is a hand-written summary of the Tactical Awoken Mode status, which the parser doesn't produce yet. TP MAX follow-ups without an Other row are named `TPMAX<Character>`, as the sheet names them.
 
+### Dual Awoken soul breaks
+A Dual Awoken (DASB) soul break has two Soul Breaks rows with the same ID, like a Tactical soul break:
+- **The soul break itself.**
+- **"<name> (Dual Shift)":** the `dualShiftAbilityId` (arg2) ability, Self, with the same SB Ver.
+
+The parser shows the Dual Shift under the soul break's ID and "(Dual Shift)" name; its on-page ids carry a `-ds` suffix. Both kinds of second row ("(Weapon Skill)" and "(Dual Shift)") come from `SECOND_ROWS` in `ability_parser.js`.
+
+### Action 226 arg1 is not a wrapped ability
+`SubActionAction` (action 226) never reads its own arg1: battle.js uses only arg6 and the parent ability's args. arg1 points at a related ability, such as a mode's chase (Trey's Dual Shift points at the Dual Awoken Mode II chase, Rain's Zenith at its Spirit Attack). `ACTION_ARG_SUPPLEMENTS` names it `relatedAbilityId`, so the parser no longer describes the related ability's effects as the ability's own.
+
+### Party conditions with several thresholds
+IF / ELSE IF / ELSE blocks on the same kind of ally are listed fewest allies first, as in the sheet's "0-3/4/5 VII allies": "Grants [A] to the user/[A], [B] to the user/[A], [C] to the user if there are 0-2/3/4+ Sharpshooter allies in the party". Job names use the sheet's school names (`schoolName()` in `ffrk/names.js`: SHOOTER is "Sharpshooter"), in both tools.
+
 ### Attack wording
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".

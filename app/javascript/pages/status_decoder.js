@@ -3,7 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
-import { realmName } from 'ffrk/names';
+import { realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
 import { describeStatus } from 'ffrk/status_text';
 
@@ -376,10 +376,8 @@ function elementDisplayName(key) {
 }
 
 // Ability category as the sheet names it (SHOOTER is "Sharpshooter").
-const CATEGORY_DISPLAY = { SHOOTER: 'Sharpshooter' };
-
 function categoryDisplayName(key) {
-  return CATEGORY_DISPLAY[key] ?? titleCase(key);
+  return schoolName(key);
 }
 
 function titleCase(key) {
