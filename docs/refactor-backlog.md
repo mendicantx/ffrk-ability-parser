@@ -114,10 +114,11 @@ As the maintainer, I want the logic both tools need in one `app/javascript/ffrk/
 - **Status:** done (`task/shared-core`). Only `extractConstantMap`, `invert` and the `/data` helpers were truly shared without changing output. The name formatting, target classification and `describeStatus` differ between the pages, so they move in story 13 along with the owner's naming decisions. The harness now imports the pages as real ES modules.
 
 ### 13. Shared display tables
-As the maintainer, I want the hard-coded tables in `config/ffrk/*.yml`, read by both tools and the Python script, so that names can't drift again.
-- The tables are characters, series, elements, soul break tiers, cast-time factors, action-arg supplements and hard-coded ability names. They are served at `/api/tables`.
-- The owner's answers on naming are applied (see *Open questions*), with golden diffs.
-- **Test:** `node --test "test/js/*.test.mjs"; bin/rails test`
+As the maintainer, I want the hard-coded naming tables in one shared module, read by both tools, so that names can't drift again.
+- `app/javascript/ffrk/names.js` holds series, element and character naming, used by both pages. Character names come from the Characters sheet where possible, with corrections only for coded names that don't title-case correctly.
+- The owner's naming answers are applied (see *Owner answers*), each as its own commit with its golden diff.
+- The decoder's Learning Mode wording matches the sheet. `decoder.sheet-match.test.mjs` reports how many decoded names and effects match the sheet, and fails if that drops.
+- **Test:** `node --test "test/js/*.test.mjs"`
 
 ### 14. Decoder dispatch that survives repacks
 As the maintainer, I want decoders chosen by status-key family and function-body fingerprint, so that a battle.js repack doesn't break decoding.
@@ -160,6 +161,7 @@ As the maintainer, I want one status inference engine, so that Python and JavaSc
 - The work is ported one family at a time, starting with the CBM and TAM families the decoder already handles.
 - The Python script is deleted once the diff is empty or every remaining difference is accepted.
 - **Test:** `node scripts/infer_statuses.mjs --diff` reports zero unaccepted differences.
+- **Status:** dropped. The owner scoped the refactor to the two tools.
 
 ## Battle captures needed
 
@@ -177,23 +179,21 @@ A battle capture holds every soul break for every party member, so one or two ca
 - **Learning Mode wording differs from the sheet.** The newly decoded Learning Mode statuses use the decoder's wording ("Keeps track of Learning Mode: Aerith (Wind) level, increases damage dealt by Wind Abilities by 5/10/…%"), while the sheet says "(0~5)" and "Wind attacks deal …% more damage", and names the no-element variants with a series ("Learning Mode: Aerith (VII)"). Names match the sheet for 40 of 68, effects for 16 of 68.
 - **Gordon's SB cost reduction names its soul break by coded name** (`[SHIN_OUGI_OF_MISSION_TIME]`) because the soul break isn't found by ID; the sheet calls it "Hour of Purpose".
 
-## Open questions for the owner
+## Owner answers (2026-10-23)
 
-`docs/decisions.md` doesn't settle these. Answers go into story 13 or story 15.
+Recorded in `docs/decisions.md` under "Sheet conventions":
+- Naming defaults accepted: `Cid (XIV)` and the other Cids as in the Characters sheet (`Cid Raines` for FFXIII, `Cidolfus` for FFXVI), series as `FFVII`, `NE`, the Characters sheet as the master list, and the sheet's Tier when a row exists.
+- Decoder wording should match the sheet (Learning Mode first).
+- The Element column always includes NE. Conditional elements are joined with "or".
+- Hybrid means two damage types, not "Type is NAT".
+- Non-CF chase text is handled case by case.
+- `scripts/infer_statuses.py` is out of scope (story 19 dropped).
+- Keep the translate call.
+- Soul break JSON will come as pasted soul breaks, not whole battles.
 
-1. Cid: `Cid (XIV)`/`Cid (IV)` or `Cid (Garlond)`/`Cid (Pollendina)`?
-2. Series style: `FFVII` or `FF VII`?
-3. Element label: `NE` or `Non-elemental`?
-4. Which character list is the master, the JavaScript one or the Python one? (Python has entries the JavaScript list lacks, such as Onion Knight.)
-5. Tier labels for categories 10 and 14–16, ADSB, and the + variants (Glint+, Glint++, CSB+, LBG+).
-6. Should the Tier column prefer the sheet's value when the soul break already has a row, the way Realm and Character do?
-7. Target: which of the four preview builders' rules is right?
-8. Elements: should NE be filtered out, and should Follow-up rows merge elements across all hits?
-9. Should NAT attacks show as Hybrid in the Extra tab?
-10. Chase text: "Crystal Force abilities (max 2)" appears on every chase status, including non-CF ones. What should non-CF chases say?
-11. The parser translates Japanese names with the unofficial `translate.googleapis.com` endpoint. Keep it, move it server-side with a cache, or drop it?
-12. Is `scripts/infer_statuses.py` still in active use? If so, its CSV format is the one the Node port must match.
-13. Learning Mode wording: should the decoder match the sheet's wording ("(0~5)", "Wind attacks deal …", series in the name), or keep its own?
+Still open, to settle with examples once the Buster and Tactical captures arrive:
+- **Target rules:** the four preview builders pick the Target column differently.
+- **Follow-up elements:** merge across all hits, with "or" for conditional elements, as Kiros's Buster chase does.
 
 ## Cross-cutting items
 

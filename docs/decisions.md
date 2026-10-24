@@ -154,6 +154,36 @@ The `extraRepeat: !0` effect uses `abilityCondition:{isExtraKiwamiAbility:true}`
 
 ---
 
+## Sheet conventions (owner decisions, 2026-10-23)
+
+The community sheet is the reference: where the tools and the sheet disagree, the tools should match the sheet.
+
+### Element column includes NE
+A non-elemental hit is listed as `NE` alongside the real elements (for example `Dark, NE`), in every tab. If a boss resists every other element, the attack falls back to NE, so NE matters. The sheet already does this, including in Other-tab follow-up rows (`Water, NE`).
+
+### Elements that depend on a condition are joined with "or"
+When the element depends on a condition, such as the character's attach element, the alternatives are joined with ` or `. Example: Kiros's Buster chase is `Ice, NE or Dark, NE`.
+
+### Hybrid formula
+`Hybrid` in the Formula column means the attack deals two damage types (for example physical and magical). It does not mean "Type is NAT": a NAT ability can be Hybrid or not. Hybrid rows show both multipliers in the effects, such as "(8.00 or 26.50 each)", and `-` in the Multiplier column.
+
+### Naming
+- **Series:** written without a space: `FFVII`, `FFXIII`, `FF Type-0`, as in the sheet's Effects text.
+- **Element label:** `NE`.
+- **Characters:** the Characters sheet is the master list. The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
+- **Tier column:** use the Soul Breaks sheet's Tier when the soul break already has a row. Otherwise derive it from the soul strike category, using the sheet's own labels (Glint, Glint+, CSB, LBG, LBGS, ADSB, …).
+
+### Decoder wording follows the sheet
+Where the Status Decoder generates a name or effects text for a status family the sheet already covers (for example Learning Mode), it should produce the sheet's wording.
+
+### Chase text for non-Crystal Force chases
+This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
+
+### Scope
+The refactor covers the Ability Parser and the Status Decoder. `scripts/infer_statuses.py` is left as it is.
+
+---
+
 ## Status terminology
 
 ### "Zenith" = `ULTIMATE_BUDDY_MODE`
