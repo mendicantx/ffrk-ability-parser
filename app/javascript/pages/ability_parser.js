@@ -3,7 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
-import { realmName } from 'ffrk/names';
+import { realmName, schoolName } from 'ffrk/names';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -36,7 +36,7 @@ const DB = {
   statusMap:     {},   // id (number) → { commonName, effects, duration }
   actionMap:     [],   // array of row objects {action_id, className, arg1..arg30}
   soulBreaksMap:      {},   // id (number) → soul break row
-  soulBreakWeaponSkillMap: {}, // id (number) → a Tactical soul break's "(Weapon Skill)" row
+  soulBreakSecondRows: {},    // 'id|suffix' → a soul break's second row: "(Weapon Skill)" (Tactical) or "(Dual Shift)" (Dual Awoken)
   charactersMap:      {},   // id (number) → character row { Name, Realm, ... }
   otherMap:           [],   // array of other rows
   otherNameMap:       {},   // other ability id → name
@@ -157,13 +157,15 @@ async function loadSheets() {
     DB.actionMap = actionRows;
 
     // Soul breaks map: ID → row
-    // A Tactical soul break has two rows with the same ID: the mode and its
-    // "(Weapon Skill)" row (docs/decisions.md "Tactical soul breaks").
-    DB.soulBreakWeaponSkillMap = {};
+    // Tactical and Dual Awoken soul breaks have a second row with the same ID, named
+    // "<name> (Weapon Skill)" or "<name> (Dual Shift)" (docs/decisions.md "Tactical soul
+    // breaks", "Dual Awoken soul breaks").
+    DB.soulBreakSecondRows = {};
     for (const r of sbRows) {
       const id = parseInt(r['ID']);
       if (isNaN(id)) continue;
-      if (/\(Weapon Skill\)\s*$/.test(r['Name'] ?? '')) DB.soulBreakWeaponSkillMap[id] = r;
+      const second = /\((Weapon Skill|Dual Shift)\)\s*$/.exec(r['Name'] ?? '');
+      if (second) DB.soulBreakSecondRows[`${id}|${second[1]}`] = r;
       else DB.soulBreaksMap[id] = r;
     }
 
@@ -223,6 +225,10 @@ const ACTION_ARG_SUPPLEMENTS = {
   },
   // 236 — CutinAbilityAction
   236: { arg1: 'wrappedAbilityId', arg2: 'cutinAbilityId' },
+  // 226 — SubActionAction never reads its own arg1 (battle.js uses only arg6 and the parent
+  // ability's args). arg1 points at a related ability, such as a mode's chase, which isn't
+  // what this ability executes.
+  226: { arg1: 'relatedAbilityId' },
   // 239 — MasterShingiAction: arg2 is the follow-up cast when Master Mode ends ("North Star: …")
   239: { arg2: 'masterFinishAbilityId' },
 };
@@ -273,12 +279,6 @@ function resolveStatuses(idOrIds) {
 function busterFirstUseCost(opts) {
   const firstUse = opts.buster_shingi_abilities?.[0]?.relational_ability;
   return firstUse && firstUse.consume_point !== undefined ? Number(firstUse.consume_point) : null;
-}
-
-// Sheet display name for an ability category: BLACK_MAGIC → "Black Magic".
-function schoolName(category) {
-  if (!category) return '';
-  return String(category).toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 // Name of the status whose chase ability this is (CHASE_ABILITY_FOR_<status key>), from
@@ -622,6 +622,8 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'amount':
           if (rawVal) result.props[argType] = rawVal;
           break;
+        case 'relatedAbilityId':
+          break; // Not used by the action (see ACTION_ARG_SUPPLEMENTS 226).
         default:
           if (rawVal && rawVal !== '0') result.unknownArgs.push({ type: argType, value: rawVal });
       }
@@ -876,7 +878,7 @@ function generateEffectsText(parsed) {
     const jobIds = Array.isArray(src.anyJobId) ? src.anyJobId : (src.anyJobId != null ? [src.anyJobId] : []);
     for (const id of jobIds) {
       const key = DB.jobIds[id];
-      names.push(key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`);
+      names.push(key ? schoolName(key) : `Job #${id}`);
     }
     const serIds = Array.isArray(src.anyBuddySeriesId) ? src.anyBuddySeriesId : (src.anyBuddySeriesId != null ? [src.anyBuddySeriesId] : []);
     for (const id of serIds) names.push(seriesDisplayName(id));
@@ -905,6 +907,13 @@ function generateEffectsText(parsed) {
   // Handles anyJobId and anyBuddySeriesId (OR logic via `any:` wrapper is transparent to regex).
   // Returns "if there are 0-2/3+ Job/Series allies in the party" style string, or null.
   function parsePartyConditionLabel(condArgStr) {
+    const pc = partyConditionParts(condArgStr);
+    if (!pc) return null;
+    const below = pc.count <= 1 ? '0' : `0-${pc.count - 1}`;
+    return `if there are ${below}/${pc.count}+ ${pc.names.join('/')} allies in the party`;
+  }
+  // { count, names } of a partyCondition ("at least count of names"), or null.
+  function partyConditionParts(condArgStr) {
     if (!condArgStr || !condArgStr.includes('partyCondition')) return null;
     const countM = condArgStr.match(/greaterEqual\s*:\s*(\d+)/);
     if (!countM) return null;
@@ -914,16 +923,14 @@ function generateEffectsText(parsed) {
     if (jobM) {
       for (const id of (jobM[1].match(/\d+/g) ?? []).map(Number)) {
         const key = DB.jobIds[id];
-        names.push(key ? key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : `Job #${id}`);
+        names.push(key ? schoolName(key) : `Job #${id}`);
       }
     }
     const serM = condArgStr.match(/anyBuddySeriesId\s*:\s*\[([^\]]+)\]/);
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
     }
-    if (!names.length) return null;
-    const below = count <= 1 ? '0' : `0-${count - 1}`;
-    return `if there are ${below}/${count}+ ${names.join('/')} allies in the party`;
+    return names.length ? { count, names } : null;
   }
 
   // Human-readable target suffix, e.g. " to user" / " to all allies"
@@ -1248,12 +1255,14 @@ function generateEffectsText(parsed) {
   // Skips blocks that contain any attacks (those are handled by the attack conditional logic).
   function findConditionalStatus(sas) {
     const isAtk = sa => sa.props.hits != null || sa.props.multiplier != null;
-    let depth = 0, blockStart = -1, blockElse = -1;
+    let depth = 0, blockStart = -1, blockElse = -1, blockElifs = [];
     for (let i = 0; i < sas.length; i++) {
       const raw = sas[i].controlTypeRaw ?? 0;
       if (raw === 1) {
-        if (depth === 0) { blockStart = i; blockElse = -1; }
+        if (depth === 0) { blockStart = i; blockElse = -1; blockElifs = []; }
         depth++;
+      } else if (raw === 2 && depth === 1) {
+        blockElifs.push(i);
       } else if (raw === 3 && depth === 1) {
         blockElse = i;
       } else if (raw === 4) {
@@ -1261,23 +1270,54 @@ function generateEffectsText(parsed) {
         if (depth === 0 && blockStart >= 0) {
           const blockEnd   = i;
           const elseIdx    = blockElse >= 0 ? blockElse : blockEnd;
-          const ifBranch   = sas.slice(blockStart + 1, elseIdx);
+          const ifBranch   = sas.slice(blockStart + 1, blockElifs[0] ?? elseIdx);
           const elseBranch = blockElse >= 0 ? sas.slice(blockElse + 1, blockEnd) : [];
-          if (![...ifBranch, ...elseBranch].some(isAtk)) {
-            const ifSA   = ifBranch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
-            const elseSA = elseBranch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
+          // ELSE IF branches, in order.
+          const elifBranches = blockElifs.map((start, k) => sas.slice(start + 1, blockElifs[k + 1] ?? elseIdx));
+          if (![...ifBranch, ...elseBranch, ...elifBranches.flat()].some(isAtk)) {
+            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
+            const ifSA   = statusSA(ifBranch);
+            const elseSA = statusSA(elseBranch);
             if (ifSA || elseSA) {
+              const elifs = elifBranches.map((branch, k) => ({
+                statuses: statusSA(branch)?.statuses ?? [], target: statusSA(branch)?.target,
+                conditionArg: sas[blockElifs[k]].conditionArg ?? '',
+              }));
               return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
                        ifTarget: ifSA?.target, elseTarget: elseSA?.target,
                        conditionArg: sas[blockStart].conditionArg ?? '',
-                       hasElse: !!elseSA };
+                       hasElse: !!elseSA, elifs };
             }
           }
-          blockStart = -1; blockElse = -1;
+          blockStart = -1; blockElse = -1; blockElifs = [];
         }
       }
     }
     return null;
+  }
+
+  // IF / ELSE IF / ELSE on party counts → "[A] to the user/[B], [C] to the user if there
+  // are 0-2/3/4+ Shooter allies in the party", fewest allies first (as in the sheet's
+  // "0-3/4/5 VII allies"). Null when the branches count different kinds of ally.
+  function partyTiers(condStat) {
+    const branches = [
+      { pc: partyConditionParts(condStat.conditionArg), statuses: condStat.ifStatuses, target: condStat.ifTarget },
+      ...condStat.elifs.map(e => ({ pc: partyConditionParts(e.conditionArg), statuses: e.statuses, target: e.target })),
+    ];
+    const who = b => b.pc?.names.join('/');
+    if (branches.some(b => !b.pc || who(b) !== who(branches[0]))) return null;
+    branches.sort((a, b) => a.pc.count - b.pc.count);
+    const tiers = [
+      ...(condStat.hasElse ? [{ from: 0, statuses: condStat.elseStatuses, target: condStat.elseTarget }] : []),
+      ...branches.map(b => ({ from: b.pc.count, statuses: b.statuses, target: b.target })),
+    ];
+    const labels = tiers.map((t, k) => {
+      const next = tiers[k + 1]?.from;
+      if (next == null) return `${t.from}+`;
+      return next - 1 === t.from ? `${t.from}` : `${t.from}-${next - 1}`;
+    });
+    const parts = tiers.map(t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ') + targetLabel(t.target));
+    return `${parts.join('/')} if there are ${labels.join('/')} ${who(branches[0])} allies in the party`;
   }
 
   const nestedCondAtk = findNestedConditionalAtk(exec.subActions);
@@ -1492,7 +1532,10 @@ function generateEffectsText(parsed) {
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const pcLabel        = parsePartyConditionLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      if (pcLabel) {
+      const tiers = pcLabel && condStat.elifs.length ? partyTiers(condStat) : null;
+      if (tiers) {
+        clauses.push(tiers);
+      } else if (pcLabel) {
         // Party condition: "Grants [X] to user/[X] to all allies if there are 0-2/3+ Job allies in the party"
         // ELSE branch listed first (fewer allies = lower threshold), IF branch second (more allies).
         const elseStr   = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
@@ -1686,6 +1729,12 @@ async function translateSBName(abilityId, jpText) {
 // the same way for every sheet tab (Soul Breaks, Crystal Commands, Extra, Other).
 // Each rule follows the community sheet's most common convention (docs/decisions.md
 // "Sheet conventions"); the preview builders only choose their tab's columns.
+
+// Sub-abilities listed as a second Soul Breaks row under their soul break's ID.
+const SECOND_ROWS = {
+  weaponSkillAbilityId: { suffix: 'Weapon Skill', domSuffix: '-ws', tier: 'TASB' },
+  dualShiftAbilityId:   { suffix: 'Dual Shift',   domSuffix: '-ds', tier: 'DASB' },
+};
 
 // Sub-ability labels that mean "this sub-ability is what actually executes".
 const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
@@ -1884,13 +1933,14 @@ function renderSheetPreview({ title, idPrefix, id, columns }) {
 }
 
 // ─── SB sheet column preview ──────────────────────────────────────────────────
-// sheetAs: { id, name, sbVer } when the row is listed under another ID and name — a
-// Tactical soul break's weapon skill is "<soul break> (Weapon Skill)" under the soul
-// break's ID. Its on-page ids get a "-ws" suffix so the two rows stay distinct.
+// sheetAs: { id, name, sbVer, domSuffix } when the row is listed under another ID and
+// name — a Tactical soul break's weapon skill is "<soul break> (Weapon Skill)" and a Dual
+// Awoken soul break's Dual Shift is "<soul break> (Dual Shift)", both under the soul
+// break's ID. Their on-page ids get a "-ws" or "-ds" suffix so the rows stay distinct.
 function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '', sheetAs = null) {
   const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
   const id                     = sheetAs?.id ?? parsed.abilityId;
-  const domId                  = sheetAs ? `${id}-ws` : id;
+  const domId                  = sheetAs ? `${id}${sheetAs.domSuffix}` : id;
   const imgFormula             = `=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",${id},"/",${id},"_256.png"),4,64,64)`;
 
   // ── Per-column value/src for all columns we know how to derive ──
@@ -2293,15 +2343,16 @@ function renderAbility(parsed, depth, ctx) {
   const isAbilityCrash = relations.extraCrushSource[parseInt(parsed.abilityId)] !== undefined;
   const masterFinishSource = relations.masterFinish[parseInt(parsed.abilityId)];
   if (depth === 0 && !isAbilityCrash && masterFinishSource === undefined && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
-    const weaponSkillOf = relations.weaponSkillParent[parseInt(parsed.abilityId)];
-    const wsParent = weaponSkillOf ?? busterShingiParent;
+    const secondRowOf = relations.secondRowParent[parseInt(parsed.abilityId)];
+    const wsParent = secondRowOf ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
     const sbActorRealm = wsParent?.realm     || actorRealm;
-    const sheetAs = weaponSkillOf?.parentId ? {
-      id:    weaponSkillOf.parentId,
-      name:  `${weaponSkillOf.parentName} (Weapon Skill)`,
-      sbVer: weaponSkillOf.sbVer,
-      row:   DB.soulBreakWeaponSkillMap[weaponSkillOf.parentId] ?? null,
+    const sheetAs = secondRowOf?.parentId ? {
+      id:        secondRowOf.parentId,
+      name:      `${secondRowOf.parentName} (${secondRowOf.suffix})`,
+      sbVer:     secondRowOf.sbVer,
+      domSuffix: secondRowOf.domSuffix,
+      row:       DB.soulBreakSecondRows[`${secondRowOf.parentId}|${secondRowOf.suffix}`] ?? null,
     } : null;
     html += renderSBSheetPreview(parsed, sheetAs ? sheetAs.row : sb, sbActorName, genText, sheetElement, sbActorRealm, sheetAs);
   }
@@ -2370,7 +2421,7 @@ function newRelations() {
   return {
     cfParent:          {}, // CF ability ID → { character, sbName }
     tamSource:         {}, // TAM tpMaxAbilityId → label
-    weaponSkillParent: {}, // weaponSkillAbilityId → { character, realm } from parent SB
+    secondRowParent:   {}, // weaponSkillAbilityId / dualShiftAbilityId → the parent soul break's row context
     busterParent:      {}, // BUSTER_SHINGI defaultAbilityId/repeatSkillAbilityId → { character, realm }
     busterOtherSource: {}, // BUSTER_SHINGI chase/other sub-abilities → source label (chase mode status name)
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
@@ -2412,15 +2463,18 @@ function recordRelations(parsed, ability, ctx) {
     if (sub._label === 'tpMaxAbilityId') {
       relations.tamSource[sub.abilityId] = tamModeName;
     }
-    if (sub._label === 'weaponSkillAbilityId') {
-      relations.weaponSkillParent[sub.abilityId] = {
+    const secondRow = SECOND_ROWS[sub._label];
+    if (secondRow) {
+      relations.secondRowParent[sub.abilityId] = {
         character:  sbRow?.['Character'] || actorName,
         realm:      sbRow?.['Realm']     || actorRealm,
-        // A Tactical soul break's weapon skill is listed under the soul break's own ID
-        // as "<name> (Weapon Skill)", with the soul break's version.
+        // Listed under the soul break's own ID as "<name> (Weapon Skill)" or
+        // "<name> (Dual Shift)", with the soul break's version.
         parentId:   parsed.abilityId,
         parentName: sbRow?.['Name'] || parsed.name,
-        sbVer:      soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'TASB'),
+        sbVer:      soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || secondRow.tier),
+        suffix:     secondRow.suffix,
+        domSuffix:  secondRow.domSuffix,
       };
     }
     if (sub._label === 'defaultAbilityId' || sub._label === 'repeatSkillAbilityId') {

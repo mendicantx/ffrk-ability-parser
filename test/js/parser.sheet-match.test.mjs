@@ -16,7 +16,7 @@ import { loadPage, snapshot, FIXTURES } from './harness.mjs';
 const TABS = { sbp: 'soul_breaks', ekp: 'extra', fup: 'other' };
 
 // Matching generated cells, as of the last improvement.
-const FLOOR_TOTAL = 222;
+const FLOOR_TOTAL = 249;
 
 const decode = s => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
@@ -25,7 +25,7 @@ const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 // Each preview: its id, the TSV fields, and the column names with a flag for sheet-sourced cells.
 export function previews(html) {
   const out = [];
-  const re = /<textarea class="sbp-tsv-area" id="([a-z]+)-tsv-(\d+(?:-ws)?)"[^>]*>([\s\S]*?)<\/textarea>[\s\S]*?<table class="sb-preview-table">([\s\S]*?)<\/table>/g;
+  const re = /<textarea class="sbp-tsv-area" id="([a-z]+)-tsv-(\d+(?:-ws|-ds)?)"[^>]*>([\s\S]*?)<\/textarea>[\s\S]*?<table class="sb-preview-table">([\s\S]*?)<\/table>/g;
   for (const [, prefix, id, tsv, table] of html.matchAll(re)) {
     const cols = [...table.matchAll(/<td class="sbp-col">([\s\S]*?)<\/td>\s*<td([^>]*)>/g)]
       .map(m => ({ name: decode(m[1]).trim(), fromSheet: /sbp-sheet/.test(m[2]) }));
@@ -36,11 +36,12 @@ export function previews(html) {
 
 test('generated sheet-preview cells match the sheet at least as often as before', async t => {
   const sheets = snapshot().sheets;
-  // A Tactical soul break's "(Weapon Skill)" row shares the soul break's ID; the
-  // preview marks it with a "-ws" suffix.
-  const isWeaponSkillRow = r => /\(Weapon Skill\)\s*$/.test(r.Name ?? '');
-  const byId = Object.fromEntries(Object.entries(TABS).map(([p, tab]) => [p, new Map(sheets[tab].filter(r => !isWeaponSkillRow(r)).map(r => [String(r.ID), r]))]));
-  for (const r of sheets.soul_breaks.filter(isWeaponSkillRow)) byId.sbp.set(`${r.ID}-ws`, r);
+  // A soul break's "(Weapon Skill)" (Tactical) or "(Dual Shift)" (Dual Awoken) row shares
+  // the soul break's ID; the preview marks it with a "-ws" or "-ds" suffix.
+  const SECOND_ROW_SUFFIX = { 'Weapon Skill': '-ws', 'Dual Shift': '-ds' };
+  const secondRow = r => /\((Weapon Skill|Dual Shift)\)\s*$/.exec(r.Name ?? '')?.[1];
+  const byId = Object.fromEntries(Object.entries(TABS).map(([p, tab]) => [p, new Map(sheets[tab].filter(r => p !== 'sbp' || !secondRow(r)).map(r => [String(r.ID), r]))]));
+  for (const r of sheets.soul_breaks.filter(secondRow)) byId.sbp.set(`${r.ID}${SECOND_ROW_SUFFIX[secondRow(r)]}`, r);
   const files = fs.readdirSync(path.join(FIXTURES, 'battles')).filter(f => /\.(json|txt)$/.test(f)).sort();
 
   const perColumn = {};

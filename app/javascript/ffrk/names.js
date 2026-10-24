@@ -12,3 +12,11 @@ export const REALM_NAMES = {
 export function realmName(seriesKey) {
   return REALM_NAMES[seriesKey] ?? seriesKey;
 }
+
+// battle.js ABILITY_CATEGORY_ID / JOB_ID key → the sheet's school name
+// ('BLACK_MAGIC' → 'Black Magic', 'SHOOTER' → 'Sharpshooter').
+const SCHOOL_NAMES = { SHOOTER: 'Sharpshooter' };
+export function schoolName(key) {
+  if (!key) return '';
+  return SCHOOL_NAMES[key] ?? String(key).toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
