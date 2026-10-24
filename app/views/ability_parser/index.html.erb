@@ -104,7 +104,7 @@
   <textarea id="json-input" placeholder="Paste FFRK battle JSON here…"></textarea>
   <br>
   <button id="parse-btn" disabled>Parse</button>
-  <button id="reload-btn" style="background:#2d6a4f;margin-left:8px">Reload sheets &amp; re-parse</button>
+  <button id="reload-btn" style="background:#2d6a4f;margin-left:8px">Refresh data &amp; re-parse</button>
 
   <div id="parse-error"></div>
 </div>
@@ -258,8 +258,8 @@ function invert(map) {
 async function loadBattleJs() {
   setLoadState('battlejs', 'loading', 'fetching…');
   try {
-    const resp = await fetch('/ability_parser/battle_js');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch('/data/battle_js');
+    if (!resp.ok) throw new Error(resp.status === 503 ? 'no cached data — run rake data:refresh' : `HTTP ${resp.status}`);
     rawBattleJs = await resp.text();
     const js = rawBattleJs;
     setLoadState('battlejs', 'loading', 'extracting constants…');
@@ -293,6 +293,8 @@ async function loadBattleJs() {
     DB.seriesIds           = invert(maps.SERIES_ID);
     DB.soulStrikeCategories = invert(maps.SOUL_STRIKE_CATEGORY);
     DB.abilityIdOf         = extractConstantMap(js, 'ABILITY_ID_OF');
+    DB.chaseAbilityIdToKey = {};
+    DB.bundleContents      = {};
     for (const [k, v] of Object.entries(DB.abilityIdOf)) {
       if (k.startsWith('CHASE_ABILITY_FOR_')) DB.chaseAbilityIdToKey[v] = k;
     }
@@ -317,9 +319,16 @@ async function loadBattleJs() {
 async function loadSheets() {
   setLoadState('sheets', 'loading', 'fetching…');
   try {
-    const resp = await fetch('/ability_parser/sheet_data');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch('/data/sheets');
     const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    // Start from empty maps so a reload never keeps rows removed from the sheet.
+    DB.statusMap = {};
+    DB.soulBreaksMap = {};
+    DB.otherNameMap = {};
+    DB.charactersMap = {};
 
     const statusRows       = data.status           || [];
     const actionRows       = data.action_args      || [];
@@ -375,8 +384,9 @@ async function loadSheets() {
       if (!isNaN(id)) DB.extraMap[id] = r;
     }
 
+    const refreshed = data.last_refreshed_at ? ` · refreshed ${new Date(data.last_refreshed_at).toLocaleString()}` : '';
     setLoadState('sheets', 'ok',
-      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length}`);
+      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length}${refreshed}`);
   } catch(e) {
     setLoadState('sheets', 'err', e.message);
   }
@@ -3000,15 +3010,31 @@ document.getElementById('parse-btn').addEventListener('click', () => {
 });
 
 
+// Asks the server to re-fetch the sheets and battle.js (rate-limited server-side).
+// Resolves to an error message, or null on success.
+async function refreshServerData() {
+  const token = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+  try {
+    const resp = await fetch('/data/refresh', { method: 'POST', headers: { 'X-CSRF-Token': token } });
+    if (resp.ok) return null;
+    const body = await resp.json().catch(() => ({}));
+    return body.error ?? `HTTP ${resp.status}`;
+  } catch (e) {
+    return e.message;
+  }
+}
+
 document.getElementById('reload-btn').addEventListener('click', async () => {
   const btn = document.getElementById('reload-btn');
+  const errEl = document.getElementById('parse-error');
   btn.disabled = true;
-  await loadSheets();
+  errEl.textContent = '';
+  const refreshError = await refreshServerData();
+  await Promise.all([loadBattleJs(), loadSheets()]);
   btn.disabled = false;
+  if (refreshError) errEl.textContent = `Refresh skipped: ${refreshError} (using cached data)`;
   const json = document.getElementById('json-input').value.trim();
   if (json) {
-    const errEl = document.getElementById('parse-error');
-    errEl.textContent = '';
     try { processBattleJson(json); }
     catch(e) { errEl.textContent = `Parse error: ${e.message}`; }
   }

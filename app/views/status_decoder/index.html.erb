@@ -90,6 +90,10 @@
     <span class="load-label">Status assignments</span>
     <span class="load-detail" id="li-parse-detail">waiting…</span>
   </div>
+  <div class="load-item">
+    <button id="refresh-btn" title="Re-fetch the sheets and battle.js on the server, then reload this page">Refresh data</button>
+    <span class="load-detail" id="refresh-detail"></span>
+  </div>
 </div>
 
 <div id="search-area">
@@ -205,8 +209,8 @@ let _rawBattleJs = '';
 async function loadBattleJs() {
   setLoadState('battlejs', 'loading', 'fetching…');
   try {
-    const resp = await fetch('/ability_parser/battle_js');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch('/data/battle_js');
+    if (!resp.ok) throw new Error(resp.status === 503 ? 'no cached data — run rake data:refresh' : `HTTP ${resp.status}`);
     _rawBattleJs = await resp.text();
     setLoadState('battlejs', 'loading', 'extracting constants…');
 
@@ -240,14 +244,14 @@ async function loadBattleJs() {
   checkAllLoaded();
 }
 
-// ─── Sheet data (fetched live from STATUS_SHEET_URL on every load) ────────────
+// ─── Sheet data (served from the server's cache; see Refresh data) ───────────
 async function loadSheets() {
-  setLoadState('sheets', 'loading', 'fetching live from sheet…');
+  setLoadState('sheets', 'loading', 'fetching…');
   try {
-    const resp = await fetch('/status_decoder/sheet_data');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch('/data/sheets?names=status,other,extra');
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
     for (const r of (data.status || [])) {
       const id = parseInt(r['ID']);
@@ -275,7 +279,8 @@ async function loadSheets() {
       }
     }
 
-    setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows (live)`);
+    const refreshed = data.last_refreshed_at ? ` · refreshed ${new Date(data.last_refreshed_at).toLocaleString()}` : '';
+    setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows${refreshed}`);
     sheetsReady = true;
   } catch(e) {
     setLoadState('sheets', 'err', e.message);
@@ -1628,6 +1633,25 @@ input.addEventListener('keydown', e => {
 });
 
 document.getElementById('decode-btn').addEventListener('click', runDecode);
+
+// Asks the server to re-fetch the sheets and battle.js (rate-limited server-side),
+// then reloads the page so every derived map is rebuilt from the new data.
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('refresh-btn');
+  const detail = document.getElementById('refresh-detail');
+  btn.disabled = true;
+  detail.textContent = 'refreshing on the server…';
+  const token = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+  try {
+    const resp = await fetch('/data/refresh', { method: 'POST', headers: { 'X-CSRF-Token': token } });
+    if (resp.ok) { location.reload(); return; }
+    const body = await resp.json().catch(() => ({}));
+    detail.textContent = body.error ?? `HTTP ${resp.status}`;
+  } catch (e) {
+    detail.textContent = e.message;
+  }
+  btn.disabled = false;
+});
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 Promise.all([loadBattleJs(), loadSheets()]);

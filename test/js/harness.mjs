@@ -113,10 +113,13 @@ class FakeDocument {
 }
 
 // ─── Fake fetch ──────────────────────────────────────────────────────────────
+// Mirrors config/routes.rb: path → default sheet names (null = every sheet).
 const SHEET_ROUTES = {
-  '/ability_parser/sheet_data': null, // every sheet
+  '/data/sheets': null,
+  '/ability_parser/sheet_data': null,
   '/status_decoder/sheet_data': ['status', 'other', 'extra'],
 };
+const BATTLE_JS_ROUTES = ['/data/battle_js', '/ability_parser/battle_js'];
 
 function makeFetch() {
   return async url => {
@@ -127,10 +130,13 @@ function makeFetch() {
       text: async () => (json ? JSON.stringify(body) : body),
       json: async () => body,
     });
-    if (url === '/ability_parser/battle_js') return ok(battleJs, false);
-    if (url in SHEET_ROUTES) {
-      const names = SHEET_ROUTES[url] ?? Object.keys(sheets);
-      return ok(Object.fromEntries(names.filter(n => sheets[n]).map(n => [n, sheets[n]])), true);
+    const { pathname, searchParams } = new URL(url, 'http://localhost');
+    if (BATTLE_JS_ROUTES.includes(pathname)) return ok(battleJs, false);
+    if (pathname in SHEET_ROUTES) {
+      const names = searchParams.get('names')?.split(',') ?? SHEET_ROUTES[pathname] ?? Object.keys(sheets);
+      const body = Object.fromEntries(names.filter(n => sheets[n]).map(n => [n, sheets[n]]));
+      body.last_refreshed_at = '2026-01-01T00:00:00Z';
+      return ok(body, true);
     }
     if (String(url).startsWith('https://translate.googleapis.com/')) {
       // Echo the input back so translation is deterministic and offline.
