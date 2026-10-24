@@ -37,7 +37,7 @@ As the maintainer, I want `node --test` to run the existing `<script>` blocks fr
 - `test/js/harness.mjs` extracts the scripts from the two views and `shared/_ffrk_constants.html.erb`. It runs them in a Node `vm` with a minimal fake DOM.
 - Its fake `fetch` serves the snapshot for `/ability_parser/battle_js`, `/ability_parser/sheet_data` and `/status_decoder/sheet_data`, and stubs the translate call.
 - No npm dependencies (Node 24's built-in test runner).
-- **Test:** `node --test test/js/` passes a smoke test that decodes a known status key.
+- **Test:** `node --test "test/js/*.test.mjs"` passes a smoke test that decodes a known status key.
 
 ### 4. Decoder golden output for every status key
 As the maintainer, I want today's `decodeStatus` output saved for every `STATUS_AILMENTS_TYPE` key, so that any change in decoding is caught.
@@ -61,7 +61,7 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - **Tier column:** 27 gives XSB, 21 gives CASB ("Soul Breaks sheet Tier column").
 - **Python Roman numerals:** include X and XIII–XVI ("`_cap_word`").
 - Each fix is its own commit with its golden diff.
-- **Test:** `node --test test/js/`, plus a Python unit test for the Roman numeral set.
+- **Test:** `node --test "test/js/*.test.mjs"`, plus a Python unit test for the Roman numeral set.
 - **Release point:** worth merging to `main` after this story.
 
 ### 7. Keep data across deploys
@@ -77,21 +77,21 @@ As a user of the tools, I want pages to load from cached data, so that they open
 - The old routes stay as aliases. The decoder stops calling the parser's route.
 - A **Refresh data** button triggers a server-side refresh, so a sheet edit still shows up on demand.
 - The reload button clears every `DB` map, fixing the stale `statusMap` after a reload.
-- **Test:** `bin/rails test test/controllers/api/data_controller_test.rb; node --test test/js/`
+- **Test:** `bin/rails test test/controllers/api/data_controller_test.rb; node --test "test/js/*.test.mjs"`
 
 ### 9. Remove dead code and add Ruby unit tests
 As the maintainer, I want unused code gone and the importers covered by tests, so that what's left is what runs.
 - Delete `BattleJsImporter.extract_json` and `extract_json_string`, and `parseCSV`/`csvToObjects` in the parser view.
 - One shared `get_with_redirects` in `lib/http_fetch.rb`.
 - Minitest for `BattleJsImporter.unpack`, the base-62 `word_to_index`, and `SheetsImporter` CSV parsing.
-- **Test:** `bin/rails test; node --test test/js/`
+- **Test:** `bin/rails test; node --test "test/js/*.test.mjs"`
 - **Release point.**
 
 ### 10. Move the Status Decoder script into a module
 As the maintainer, I want the decoder's JavaScript in `app/javascript/pages/status_decoder.js`, so that the view only holds markup.
 - The code moves unchanged and is pinned in `config/importmap.rb`. Inline handlers become `addEventListener`.
 - The harness loads the module instead of the view.
-- **Test:** `node --test test/js/; $env:RAILS_ENV='production'; bin/rails assets:precompile`
+- **Test:** `node --test "test/js/*.test.mjs"; $env:RAILS_ENV='production'; bin/rails assets:precompile`
 
 ### 11. Move the Ability Parser script into a module
 As the maintainer, I want the same for the parser, in `app/javascript/pages/ability_parser.js`.
@@ -102,35 +102,35 @@ As the maintainer, I want the same for the parser, in `app/javascript/pages/abil
 As the maintainer, I want the logic both tools need in one `app/javascript/ffrk/core.js`, so that fixes land once.
 - It covers constant extraction (`extractConstantMap`, `invert`), battle.js loading, element, series and character name formatting, target classification, character-from-status-key and ability-condition text.
 - The duplicate copies are deleted. Goldens stay byte-identical.
-- **Test:** `node --test test/js/`, which also runs `core.test.mjs` with a unit test per helper.
+- **Test:** `node --test "test/js/*.test.mjs"`, which also runs `core.test.mjs` with a unit test per helper.
 
 ### 13. Shared display tables
 As the maintainer, I want the hard-coded tables in `config/ffrk/*.yml`, read by both tools and the Python script, so that names can't drift again.
 - The tables are characters, series, elements, soul break tiers, cast-time factors, action-arg supplements and hard-coded ability names. They are served at `/api/tables`.
 - The owner's answers on naming are applied (see *Open questions*), with golden diffs.
-- **Test:** `node --test test/js/; bin/rails test`
+- **Test:** `node --test "test/js/*.test.mjs"; bin/rails test`
 
 ### 14. Decoder dispatch that survives repacks
 As the maintainer, I want decoders chosen by status-key family and function-body fingerprint, so that a battle.js repack doesn't break decoding.
 - A registry of family, module, fingerprint and decoder replaces the function-name `if` chain in `decodeStatus`.
 - The assignment scan finds its pattern instead of hard-coding `O[m.`, `c[s.` and `h[o.`.
 - The copied name and condition parsing in the seven decoders uses the core helpers.
-- **Test:** `node --test test/js/`, which includes `repack.test.mjs`. That test renames minified identifiers in the snapshot and checks that the goldens still pass.
+- **Test:** `node --test "test/js/*.test.mjs"`, which includes `repack.test.mjs`. That test renames minified identifiers in the snapshot and checks that the goldens still pass.
 - **Release point.**
 
 ### 15. Fix the drift bugs the owner decides
 As the owner, I want the four preview builders to agree on shared columns, using the rules I choose.
 - One commit per answered question from *Open questions*, each with its golden diff and a `docs/decisions.md` entry.
-- **Test:** `node --test test/js/`. This includes `preview-consistency.test.mjs`, which checks that all builders give the same values for shared columns on every capture.
+- **Test:** `node --test "test/js/*.test.mjs"`. This includes `preview-consistency.test.mjs`, which checks that all builders give the same values for shared columns on every capture.
 
 ### 16. One column derivation with a schema per tab
 As the maintainer, I want one `deriveCombatColumns` and a column schema per sheet tab, so that the four copies of the type, target, multiplier and element logic disappear.
 - `renderSBSheetPreview`, `renderCFSheetPreview`, `renderExtraSheetPreview` and `renderFollowUpSheetPreview` shrink to a schema plus overrides.
-- **Test:** `node --test test/js/`. Goldens unchanged. `schema.test.mjs` checks each schema against the snapshot sheet's header row.
+- **Test:** `node --test "test/js/*.test.mjs"`. Goldens unchanged. `schema.test.mjs` checks each schema against the snapshot sheet's header row.
 
 ### 17. One relations map and a render context
 As the maintainer, I want one `relations` map and `renderAbility(parsed, depth, ctx)`, so that the seven lookup maps and eleven positional arguments go away.
-- **Test:** `node --test test/js/`. Goldens byte-identical.
+- **Test:** `node --test "test/js/*.test.mjs"`. Goldens byte-identical.
 
 ### 18. Soul break type registry
 As the maintainer, I want each soul break type described in one place, so that a new type is data rather than new branches.
@@ -142,7 +142,7 @@ As the maintainer, I want each soul break type described in one place, so that a
   - Extra soul breaks: role args, plus the Extra and Other tabs.
 - Rules keyed on an arg's role label (weapon skill, cut-in) apply to every type and live in a separate table.
 - Tactical Awoken detection uses the coded `TACTICAL_AWAKE_MODE_*` name, not sheet text.
-- **Test:** `node --test test/js/`. Goldens unchanged. `sb_types.test.mjs` fails if battle.js has a category the registry doesn't know.
+- **Test:** `node --test "test/js/*.test.mjs"`. Goldens unchanged. `sb_types.test.mjs` fails if battle.js has a category the registry doesn't know.
 
 ### 19. Retire infer_statuses.py
 As the maintainer, I want one status inference engine, so that Python and JavaScript stop disagreeing.

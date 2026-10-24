@@ -58,6 +58,7 @@ Used by the ability translator to know what each arg in an ability's JSON option
 | `lib/importers/sheets_importer.rb` | Fetches and parses Google Sheets CSV |
 | `lib/importers/battle_js_importer.rb` | Fetches battle.js, unpacks p,a,c,k,e,r JS (supports base 62), returns raw JS string |
 | `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
+| `test/js/harness.mjs` | Runs both pages' scripts unchanged in a Node `vm` with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
 | `lib/data_snapshot.rb` | Writes the gzipped test snapshot of `data/` with a SHA-256 manifest |
 | `config/initializers/data_refresh.rb` | Triggers `DataLoader.refresh_all` on server boot (skipped during rake tasks) |
 | `app/controllers/dashboard_controller.rb` | Root page; reads from DataStore |
@@ -80,6 +81,9 @@ rake data:status
 
 # Run the Ruby tests
 bin/rails test
+
+# Run the JavaScript tests (page scripts run in Node against the test snapshot)
+node --test "test/js/*.test.mjs"
 
 # Freeze data/ into the gzipped test snapshot (test/fixtures/snapshot)
 rake data:snapshot
