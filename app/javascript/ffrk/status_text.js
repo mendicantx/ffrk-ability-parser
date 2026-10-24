@@ -10,6 +10,7 @@
 //   statusName(id),      // status id → sheet name (for "removed if the user hasn't [X]")
 //   abilityName(id),     // ability id → name (for ability-specific effects)
 //   abilityNameFrom(id, source), // the Other-tab name of ability id listed under source
+//   abilitySources(id),  // the Other-tab Sources ability id is listed under
 //   statusKey(id),       // status id → STATUS_AILMENTS_TYPE key
 //   selfKey,             // this status's STATUS_AILMENTS_TYPE key
 //   statusParams(key),   // another status's game config
@@ -220,11 +221,13 @@ const effectName = (e, ctx) => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE
 const ELEMENT_KEYS = ['FIRE', 'ICE', 'LIGHTNING', 'EARTH', 'WIND', 'WATER', 'HOLY', 'DARK', 'POISON'];
 
 // "MASTER_BUDDY_MODE_VIVI_ICE_LIGHTNING" → { character: 'Vivi', elements: ['Ice', 'Lightning'] }
+// A second mode for the same character ends in a roman numeral: "RINOA_II" → 'Rinoa II'.
 function modeOwner(key, prefix, ctx) {
   const words = key.slice(prefix.length).split('_');
+  const numeral = words.length > 1 && /^(II|III|IV)$/.test(words[words.length - 1]) ? ` ${words.pop()}` : '';
   const elements = [];
   while (words.length > 1 && ELEMENT_KEYS.includes(words[words.length - 1])) elements.unshift(ctx.element(words.pop()));
-  return { character: ctx.characterName(words.join('_')), elements };
+  return { character: ctx.characterName(words.join('_')) + numeral, elements };
 }
 
 // Master Mode: <character> — "Casts [Star Strike: X] every 2s (max 5), grants Damage Cap
@@ -259,7 +262,91 @@ function describeMasterMode(params, ctx) {
   return { name, effects: clauses.join(', '), defaultDuration: '-' };
 }
 
-const MODE_FAMILIES = [describeMasterMode];
+// Zenith Mode: <character> — "Increases [Fire/Earth Infusion] damage bonus by 20%, cast
+// speed x1.10 for PHY attacks, Fire or Earth abilities trigger 1 additional time, casts
+// Spirit Attack: Rain after using three Fire or Earth abilities (max 1), maximum HP +1500,
+// grants [Astra] after taking the next action, removed if the character hasn't [Zenith
+// Mode]". Clauses go in the sheet's most common order, whatever the effects' order.
+const ZENITH_CAST_SUBJECTS = {
+  physicalDamageAbilities: 'PHY attacks',
+  magicDamageAbilities: 'BLK, WHT, BLU, SUM or NAT attacks that deal magical damage',
+};
+const ZENITH_CLAUSES = {
+  ATTACH_ELEMENT_KIWAMI: (e, ctx) => {
+    const elements = conditionSubject({ anyElementIds: e.attachElementIds }, ctx, '/');
+    return elements && e.additionalFactor != null
+      ? ['infusion', `Increases [${elements} Infusion] damage bonus by ${e.additionalFactor}%`] : null;
+  },
+  INCREASE_CAST_TIME_FACTOR: (e, ctx) => {
+    const instant = e.castTimeFactor >= INSTANT_CAST;
+    const conds = [].concat(e.condName ?? e.anyCondName ?? []);
+    let subject;
+    if (!e.abilityCondition && !conds.length) subject = '';
+    else if (conds.length) subject = conds.every(c => ZENITH_CAST_SUBJECTS[c]) ? conds.map(c => ZENITH_CAST_SUBJECTS[c]).join(' and ') : null;
+    else if (e.abilityCondition?.isFlightAttack && Object.keys(e.abilityCondition).length === 1) subject = 'Jump attacks';
+    else subject = conditionSubject(e.abilityCondition, ctx, 'or') && `${conditionSubject(e.abilityCondition, ctx, 'or')} abilities`;
+    if (subject == null || subject === false) return null;
+    const forWhat = subject ? ` for ${subject}` : '';
+    if (!instant) return ['cast', `cast speed x${(e.castTimeFactor / 100).toFixed(2)}${forWhat}`];
+    return ['instant', `instant cast speed${forWhat}${e.turnCountForIsDone ? ` (max ${plural(e.turnCountForIsDone, 'turn')})` : ''}`];
+  },
+  REGISTER_SEQ_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    const subject = conditionSubject(e.abilityCondition, ctx, 'or');
+    const repeat = e.repeatNum ?? 1;
+    return subject ? ['seq', `${subject} abilities trigger ${repeat} additional time${repeat === 1 ? '' : 's'}`] : null;
+  },
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => zenithChase(e, ctx, false),
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE_REACT_ALL_ACTOR: (e, ctx) => zenithChase(e, ctx, true),
+  INCREASE_STATUS: e => (e.statusParams?.length === 1 && e.statusParams[0].name === 'maxHp'
+    ? ['hp', `maximum HP +${e.statusParams[0].boostValue}`] : null),
+  INFLICT_SA_AT_NEXT_ACTION: (e, ctx) => {
+    const names = (e.saIds ?? []).map(id => ctx.statusName(id));
+    return names.length && names.every(Boolean) && (e.actionRequiredNum ?? 1) === 1
+      ? ['astra', `grants ${names.map(n => `[${n}]`).join(', ')} after taking the next action`] : null;
+  },
+  // Highlights the ability panels in the UI only; the sheet doesn't mention it.
+  NORMAL_PANEL_HIGHLIGHT: () => ['none', ''],
+};
+const ZENITH_ORDER = ['infusion', 'cast', 'instant', 'seq', 'chase', 'hp', 'astra'];
+
+// "casts Spirit Attack: Rain after using three Fire or Earth abilities (max 1)", or
+// "… after another ally uses a Lightning ability (max 4)" when allies' abilities count.
+function zenithChase(e, ctx, byAllies) {
+  if (e.chaseAbilityId == null) return null;
+  if (byAllies && (e.isAbilityOwner !== false || !e.targetActorCondition?.all?.isBuddy)) return null;
+  const uses = e.abilityUseCountCondition?.multiple ?? 1;
+  const subject = conditionSubject(e.abilityCondition, ctx, 'or');
+  if (!subject || !COUNT_WORDS[uses]) return null;
+  const what = `${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}`;
+  const when = byAllies ? `after another ally uses ${what}` : `after using ${what}`;
+  const max = e.chaseAbilityDoneCountForIsDone != null ? ` (max ${e.chaseAbilityDoneCountForIsDone})` : '';
+  return ['chase', `casts ${ctx.abilityName(e.chaseAbilityId)} ${when}${max}`];
+}
+
+function describeZenithMode(params, ctx) {
+  const prefix = 'ULTIMATE_BUDDY_MODE_';
+  if (!ctx.selfKey?.startsWith(prefix)) return null;
+  const clauses = [];
+  for (const e of params.effects) {
+    const clause = ZENITH_CLAUSES[effectName(e, ctx)]?.(e, ctx);
+    if (!clause) return null;
+    if (clause[0] !== 'none') clauses.push(clause);
+  }
+  const durations = describeDurations(params.durations, ctx);
+  if (!durations) return null;
+  const ordered = ZENITH_ORDER.flatMap(kind => clauses.filter(c => c[0] === kind).map(c => c[1]));
+  for (const { removedUnless } of durations.suffixes) ordered.push(`removed if the character hasn't [${removedUnless}]`);
+  ordered[0] = ordered[0].charAt(0).toUpperCase() + ordered[0].slice(1);
+
+  // The Spirit Attack's Other-tab Source is the mode's sheet name ("Zenith Mode: Ace (Fire)").
+  const chase = params.effects.find(e => e.chaseAbilityId != null);
+  const listed = chase && (ctx.abilitySources?.(chase.chaseAbilityId) ?? []).find(s => s.startsWith('Zenith Mode: '));
+  const { character, elements } = modeOwner(ctx.selfKey, prefix, ctx);
+  const name = listed ?? `Zenith Mode: ${character}${elements.length ? ` (${elements.join(', ')})` : ''}`;
+  return { name, effects: ordered.join(', '), defaultDuration: durations.duration };
+}
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode];
 
 // { name, effects, defaultDuration } in the sheet's wording (name may be null), or null when any part of the
 // status isn't understood yet.
