@@ -19,6 +19,7 @@ const DB = {
   statusById:            {},   // id → STATUS_KEY
   damageFactor:          {},   // SIZE_NAME → numeric value
   statusAssignments:     {},   // STATUS_KEY → { funcName, argsText, defineModule, block }
+  helperBodies:          {},   // 'module|helperName' → helper source (for decoder fingerprints)
   // NOTE: funcName is local to its define() block's namespace.
   // The same name in a different define() block is a completely different function.
   // Always resolve function bodies using the block stored with the assignment.
@@ -180,79 +181,82 @@ function extractDefineBlock(moduleName) {
 }
 
 // ─── Parse status assignments — scoped to their define() block ────────────────
+const MAIN_MODULE   = 'scenes/battle/StatusAilmentsConfig';
+const CBM_MODULE    = 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
+const TAM_MODULE    = 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
+const BUSTER_MODULE = 'scenes/battle/statusAilmentsConfig/BusterAttack';
+const EBM_MODULE    = 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
+
+// Status assignments look like  X[Y.STATUS_KEY]=helper(args).  X, Y and helper are
+// minified names that change on every battle.js repack, so the X[Y. prefix is
+// detected per block: the one used most often with known STATUS_AILMENTS_TYPE keys.
+const ASSIGNMENT_RE = /([a-zA-Z$_][\w$]*)\[([a-zA-Z$_][\w$]*)\.([A-Z_0-9]+)\]=([a-zA-Z$_][\w$]*)\(/g;
+
+function detectAssignmentPrefix(text, keyFilter = () => true) {
+  const counts = new Map();
+  for (const m of text.matchAll(ASSIGNMENT_RE)) {
+    if (!(m[3] in DB.statusAilmentsForward) || !keyFilter(m[3])) continue;
+    const prefix = `${m[1]}[${m[2]}.`;
+    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+  }
+  let best = null, bestCount = 0;
+  for (const [prefix, count] of counts) if (count > bestCount) { best = prefix; bestCount = count; }
+  return best;
+}
+
+// RegExp capturing [KEY, helperName] for assignments with the given X[Y. prefix,
+// positioned just after the opening '(' of the args.
+function assignmentRegex(prefix, keyPattern = '[A-Z_0-9]+') {
+  const escaped = prefix.replace(/[[\].$]/g, '\\$&');
+  return new RegExp(`${escaped}(${keyPattern})\\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\\(`, 'g');
+}
+
+// Returns the argument text of a call whose '(' ends just before argsStart.
+function callArgs(text, argsStart) {
+  let pdepth = 1, i = argsStart;
+  while (i < text.length && pdepth > 0) {
+    const ch = text[i];
+    if (ch === '(') pdepth++;
+    else if (ch === ')') pdepth--;
+    i++;
+  }
+  return text.slice(argsStart, i - 1);
+}
+
 function buildStatusAssignments() {
+  DB.helperBodies = {};
+
   // Scans one define() block for status assignments and adds them to DB.statusAssignments.
-  // patternFn(block) must return a RegExp that captures [KEY, funcName] and leaves
-  // the regex positioned just before the opening '(' of the args.
-  function scanBlock(moduleName, assignPattern) {
+  function scanBlock(moduleName) {
     const src = extractDefineBlock(moduleName);
     if (!src) return 0;
     const { defineModule, block } = src;
-    let m, count = 0;
-    assignPattern.lastIndex = 0;
-    while ((m = assignPattern.exec(block)) !== null) {
-      const statusKey = m[1];
-      const funcName  = m[2];
-      const argsStart = m.index + m[0].length;
-      let pdepth = 1, i = argsStart;
-      while (i < block.length && pdepth > 0) {
-        const ch = block[i];
-        if (ch === '(') pdepth++;
-        else if (ch === ')') pdepth--;
-        i++;
-      }
-      const argsText = block.slice(argsStart, i - 1);
-      DB.statusAssignments[statusKey] = { funcName, argsText, defineModule, block };
+    const prefix = detectAssignmentPrefix(block);
+    if (!prefix) return 0;
+    let count = 0;
+    for (const m of block.matchAll(assignmentRegex(prefix))) {
+      const argsText = callArgs(block, m.index + m[0].length);
+      DB.statusAssignments[m[1]] = { funcName: m[2], argsText, defineModule, block };
       count++;
     }
     return count;
   }
 
-  // Main StatusAilmentsConfig block — assignments use O[m.KEY]=FUNC(
-  // (previously A[v.KEY] — variable names change between battle.js repacks)
-  const mainCount = scanBlock(
-    'scenes/battle/StatusAilmentsConfig',
-    /O\[m\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
-  );
+  const mainCount = scanBlock(MAIN_MODULE);
   if (mainCount === 0) throw new Error('StatusAilmentsConfig block not found or empty');
-
-  // Crystal Buddy Mode block — assignments use c[s.KEY]=FUNC(
-  scanBlock(
-    'scenes/battle/statusAilmentsConfig/CrystalBuddyMode',
-    /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
-  );
-
-  // Tactical Awoken Mode block — assignments use h[o.KEY]=FUNC(
-  scanBlock(
-    'scenes/battle/statusAilmentsConfig/TacticalAwakeMode',
-    /h\[o\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
-  );
-
-  // Buster Attack block — assignments use c[s.KEY]=FUNC(
-  scanBlock(
-    'scenes/battle/statusAilmentsConfig/BusterAttack',
-    /c\[s\.([A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g
-  );
+  scanBlock(CBM_MODULE);
+  scanBlock(TAM_MODULE);
+  scanBlock(BUSTER_MODULE);
 
   // Extra Buddy Mode — scan raw JS directly for EXTRA_BUDDY_MODE_* assignments.
-  // extractDefineBlock is unreliable for this module; the key prefix is unique enough
-  // that a raw scan won't pick up false positives.
-  {
-    const ebmModule = 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
-    const ebmPat    = /c\[s\.(EXTRA_BUDDY_MODE_[A-Z_0-9]+)\]=([a-zA-Z$_][a-zA-Z0-9$_]*)\(/g;
-    let em;
-    while ((em = ebmPat.exec(_rawBattleJs)) !== null) {
-      const statusKey = em[1];
-      const funcName  = em[2];
-      const argsStart = em.index + em[0].length;
-      let pdepth = 1, ei = argsStart;
-      while (ei < _rawBattleJs.length && pdepth > 0) {
-        if (_rawBattleJs[ei] === '(') pdepth++;
-        else if (_rawBattleJs[ei] === ')') pdepth--;
-        ei++;
-      }
-      const argsText = _rawBattleJs.slice(argsStart, ei - 1);
-      DB.statusAssignments[statusKey] = { funcName, argsText, defineModule: ebmModule, block: '' };
+  // extractDefineBlock is unreliable for finding these assignments; the key prefix is
+  // unique enough that a raw scan won't pick up false positives.
+  const isEbmKey = key => key.startsWith('EXTRA_BUDDY_MODE_');
+  const ebmPrefix = detectAssignmentPrefix(_rawBattleJs, isEbmKey);
+  if (ebmPrefix) {
+    for (const m of _rawBattleJs.matchAll(assignmentRegex(ebmPrefix, 'EXTRA_BUDDY_MODE_[A-Z_0-9]+'))) {
+      const argsText = callArgs(_rawBattleJs, m.index + m[0].length);
+      DB.statusAssignments[m[1]] = { funcName: m[2], argsText, defineModule: EBM_MODULE, block: '' };
     }
   }
 }
@@ -1061,6 +1065,43 @@ function decodeEbmP(statusKey, statusId, argsText) {
 }
 
 // ─── Decoder dispatcher ───────────────────────────────────────────────────────
+// ─── Decoder registry ────────────────────────────────────────────────────────
+// Each status is assigned with a battle.js helper (X[Y.KEY]=helper(args)). Decoders
+// are chosen by a fingerprint of the helper's body — the effect types and option
+// names it uses, which survive minification — not by the helper's minified name,
+// which changes on every repack. Where several decoders match, the first one that
+// accepts the arguments (returns non-null) wins.
+const STATUS_DECODERS = [
+  // ADJUST_DAMAGE_ZERO_* and friends: received damage scaled by a factor.
+  { module: MAIN_MODULE, fingerprint: /\.INCREASE_RECEIVED_DAMAGE,damageFactor:\w+,abilityCondition:\w+\}/, decode: decodeNt },
+  // LEARNING_MODE_*: damage rate by state level; decodeOr rejects non-"learningMode…" args.
+  { module: MAIN_MODULE, fingerprint: /generalValueToAbilityDamageRateMap/, decode: decodeOr },
+  // REDUCE_CONSUME_POINT_* for a specific soul strike.
+  { module: MAIN_MODULE, fingerprint: /\.REDUCE_CONSUME_POINT,reduceConsumePoint:[\w.]+\*\w+,abilityCondition:\{abilityId:/, decode: decodeXr },
+  // Crystal Force Mode: ability boost + repeat + no consumption + piercing.
+  { module: CBM_MODULE, fingerprint: /\.ABILITY_BOOST,damageFactorMapType:/, decode: decodeCbmP },
+  // Crystal Force Mode: cast-time factor + no consumption.
+  { module: CBM_MODULE, fingerprint: /\.INCREASE_CAST_TIME_FACTOR,castTimeFactor:\w+\.castTimeFactor,abilityCondition:\w+\},\{key:2,type:\w+\.NO_CONSUMPTION_ABILITY_NUM/, decode: decodeCbmD },
+  // Tactical Awoken Mode: chase ability (the plain variant, without battle-attack chases).
+  { module: TAM_MODULE, fingerprint: /chaseAbilityId:\w+\.CHASE_ABILITY_FOR_[A-Z_]+,flightDuration:/, decode: decodeTamV },
+  // Tactical Awoken Mode: DEF/RES piercing.
+  { module: TAM_MODULE, fingerprint: /\.DEF_AND_MDEF_PENETRATION,penetrationFactorMapType:\w+\.penetrationFactorMapType/, decode: decodeTamD },
+  // Buster chase mode.
+  { module: BUSTER_MODULE, fingerprint: /chaseAbilityDoneCountForIsDone:\w+\.chaseAbilityDoneCountForIsDone/, decode: decodeBusterP },
+  // Extra Mode: thin wrapper that defaults repeatNum to 1.
+  { module: EBM_MODULE, fingerprint: /\{repeatNum:1\},\w+\),\w+\(\w+\)/, decode: decodeEbmP },
+];
+
+// Source of the helper a status is assigned with (cached per module + helper name).
+function helperBody(assignment) {
+  const key = `${assignment.defineModule}|${assignment.funcName}`;
+  if (!(key in DB.helperBodies)) {
+    const block = assignment.block || extractDefineBlock(assignment.defineModule)?.block || '';
+    DB.helperBodies[key] = extractFuncDef(assignment.funcName, block) ?? '';
+  }
+  return DB.helperBodies[key];
+}
+
 function decodeStatus(statusKey) {
   const id = DB.statusAilmentsForward[statusKey];
   if (id == null) return { error: `Status key not found in battle.js: ${statusKey}` };
@@ -1094,22 +1135,12 @@ function decodeStatus(statusKey) {
   // Decoders receive `block` so they can look up any helper function bodies
   // within the correct define() namespace — never cross-referencing other blocks.
   let decoded = null;
-  const isCbm    = defineModule === 'scenes/battle/statusAilmentsConfig/CrystalBuddyMode';
-  const isTam    = defineModule === 'scenes/battle/statusAilmentsConfig/TacticalAwakeMode';
-  const isBuster = defineModule === 'scenes/battle/statusAilmentsConfig/BusterAttack';
-  const isEbm    = defineModule === 'scenes/battle/statusAilmentsConfig/ExtraBuddyMode';
-
-  if (funcName === 'nt') decoded = decodeNt(statusKey, id, argsText, block);
-  if (['qr', 'Rr', 'zr'].includes(funcName)) decoded = decodeOr(statusKey, id, argsText);
-  // Note: 'Xr' was previously REDUCE_CONSUME_POINT — it was repurposed to INCREASE_ELEMENT_ATK in the last repack.
-  // REDUCE_CONSUME_POINT now uses 'oi' (same args as old Xr) and 'ni' (empty args, no decoder yet).
-  if (funcName === 'oi') decoded = decodeXr(statusKey, id, argsText);
-  if (isCbm    && funcName === 'p') decoded = decodeCbmP(statusKey, id, argsText);
-  if (isCbm    && funcName === 'd') decoded = decodeCbmD(statusKey, id, argsText);
-  if (isTam    && funcName === 'v') decoded = decodeTamV(statusKey, id, argsText);
-  if (isTam    && funcName === 'd') decoded = decodeTamD(statusKey, id, argsText);
-  if (isBuster && funcName === 'p') decoded = decodeBusterP(statusKey, id, argsText);
-  if (isEbm    && funcName === 'p') decoded = decodeEbmP(statusKey, id, argsText);
+  const body = helperBody(assignment);
+  for (const d of STATUS_DECODERS) {
+    if (d.module !== defineModule || !d.fingerprint.test(body)) continue;
+    decoded = d.decode(statusKey, id, argsText, block);
+    if (decoded) break;
+  }
 
   if (decoded) {
     decoded._block      = block;

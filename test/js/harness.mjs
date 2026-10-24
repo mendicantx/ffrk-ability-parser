@@ -148,9 +148,11 @@ const SHEET_ROUTES = {
 };
 const BATTLE_JS_ROUTES = ['/data/battle_js', '/ability_parser/battle_js'];
 
-function makeFetch() {
+// battleJsOverride replaces the snapshot's battle.js (e.g. a simulated repack).
+function makeFetch(battleJsOverride) {
   return async url => {
-    const { battleJs, sheets } = snapshot();
+    const { sheets } = snapshot();
+    const battleJs = battleJsOverride ?? snapshot().battleJs;
     const ok = (body, json) => ({
       ok: true,
       status: 200,
@@ -196,7 +198,7 @@ let pageInstance = 0;
 
 // Boots a page against the snapshot and resolves once its data has loaded.
 // Load one page at a time: the globals belong to the most recently loaded page.
-export async function loadPage(view, { timeoutMs = 60000 } = {}) {
+export async function loadPage(view, { timeoutMs = 60000, battleJs } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
 
@@ -204,7 +206,7 @@ export async function loadPage(view, { timeoutMs = 60000 } = {}) {
   installGlobals({
     document,
     window: globalThis,
-    fetch: makeFetch(),
+    fetch: makeFetch(battleJs),
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     location: { reload() {} },
