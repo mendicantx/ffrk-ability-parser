@@ -12,7 +12,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { realmName, schoolName, elementName, titleCase, canonicalCharacterName as sharedCharacterName } from 'ffrk/names';
-import { statusDescriber, KNOWN_ABILITY_NAMES, ABILITY_NAME_CORRECTIONS } from 'ffrk/status_context';
+import { statusDescriber, KNOWN_ABILITY_NAMES } from 'ffrk/status_context';
 import { describeStatusFromKey } from 'ffrk/status_text';
 
 // ─── Source code extraction ───────────────────────────────────────────────────
@@ -309,7 +309,7 @@ export function createStatusDecoder() {
   // Look up a display name for any ability ID: Other sheet first, then known names.
   function abilityDisplayName(id) {
     if (id == null) return null;
-    return ABILITY_NAME_CORRECTIONS[id] ?? DB.otherNameMap[id] ?? KNOWN_ABILITY_NAMES[id] ?? null;
+    return DB.otherNameMap[id] ?? KNOWN_ABILITY_NAMES[id] ?? null;
   }
 
   // ─── Chase ability name lookup ────────────────────────────────────────────────
