@@ -9,12 +9,23 @@ module DataLoader
   # Maps DataStore sheet keys to their environment variable names.
   # Add a new entry here to support an additional Google Sheet tab.
   GOOGLE_SHEETS = {
-    soul_breaks:  'SOUL_BREAKS_SHEET_URL',
-    characters:   'CHARACTERS_SHEET_URL',
-    status:       'STATUS_SHEET_URL',
-    other:        'OTHER_SHEET_URL',
-    action_args:  'ACTION_ARGS_SHEET_URL',
+    soul_breaks:     'SOUL_BREAKS_SHEET_URL',
+    characters:      'CHARACTERS_SHEET_URL',
+    status:          'STATUS_SHEET_URL',
+    other:           'OTHER_SHEET_URL',
+    hero_abilities:  'HERO_ABILITIES_SHEET_URL',
+    extra:           'EXTRA_SHEET_URL',
+    action_args:     'ACTION_ARGS_SHEET_URL',
   }.freeze
+
+  # Returns { name => url } for the given sheet names (all by default),
+  # leaving out any whose env var is not set.
+  def self.sheet_urls(names = GOOGLE_SHEETS.keys)
+    names.each_with_object({}) do |name, result|
+      url = ENV[GOOGLE_SHEETS.fetch(name)]
+      result[name] = url if url.present?
+    end
+  end
 
   def self.refresh_all
     FileUtils.mkdir_p(DataStore::SHEETS_DIR)

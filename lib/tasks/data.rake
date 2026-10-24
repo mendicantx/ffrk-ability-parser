@@ -1,4 +1,5 @@
 require_relative '../data_loader'
+require_relative '../data_snapshot'
 
 namespace :data do
   desc "Refresh all data sources and store results in DataStore"
@@ -17,6 +18,18 @@ namespace :data do
     puts BattleJsImporter.fetch(url)
   rescue => e
     abort "[data:battle_js] ERROR: #{e.message}"
+  end
+
+  desc "Copy data/ into the gzipped test snapshot (test/fixtures/snapshot)"
+  task snapshot: :environment do
+    changed = DataSnapshot.write
+    if changed.empty?
+      puts "[data:snapshot] Snapshot already matches data/. Nothing written."
+    else
+      puts "[data:snapshot] Updated: #{changed.join(', ')}"
+    end
+  rescue => e
+    abort "[data:snapshot] ERROR: #{e.message}"
   end
 
   desc "Show current DataStore status"

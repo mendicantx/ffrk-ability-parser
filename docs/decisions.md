@@ -45,23 +45,19 @@ Tier values used for different soul strike categories:
 "Y" = enemy can counter-attack; "N" = cannot be countered.
 Driven by `counter_enable` (top-level) and `shouldIgnoreReflection` (sub-action arg).
 
-### Status decoder O[m.KEY] pattern
-As of the current battle.js, the main `StatusAilmentsConfig` block uses `O[m.KEY]=FUNC(` for assignments.
-This was previously `A[v.KEY]=FUNC(`. Variable names shift each time battle.js is repacked by the minifier.
-If `buildStatusAssignments` throws "StatusAilmentsConfig block not found or empty", check the pattern.
-To find the current pattern: search for `STATUS_AILMENTS_TYPE:{` in the unpacked JS, then look for `VAR[SHORT_VAR.KEY]=FUNC(` assignments nearby.
+### Status decoder: assignment scanning and decoder dispatch
+battle.js assigns statuses as `X[Y.STATUS_KEY]=helper(args)`. `X`, `Y` and `helper` are minified names that change on every repack (for example `A[v.` became `O[m.`, and the Learning Mode helper went from `Or` to `qr`/`Rr`/`zr` to `Wr`).
 
-### Function name dispatch (main StatusAilmentsConfig block)
-The local function names change on every repack. `decodeStatus` dispatches by funcName; update these if statuses stop decoding after a repack:
+Decision: the decoder depends on none of those names.
+- **Scanning:** `buildStatusAssignments` detects each block's `X[Y.` prefix as the one used most often with known `STATUS_AILMENTS_TYPE` keys (`detectAssignmentPrefix`).
+- **Dispatch:** `STATUS_DECODERS` in `status_decoder.js` picks a decoder by the define() module plus a fingerprint of the helper's body: the effect types and option names it uses (`INCREASE_RECEIVED_DAMAGE`, `generalValueToAbilityDamageRateMap`, `ABILITY_BOOST`, `chaseAbilityDoneCountForIsDone`, …). These are game-logic strings, which the minifier leaves alone. When several fingerprints match, the first decoder that accepts the arguments wins.
 
-| Status type | Old funcName | Current funcName (July 2026) | Decoder |
-|-------------|-------------|------------------------------|---------|
-| General damage boost | `nt` | `nt` (unchanged) | `decodeNt` |
-| Learning Mode (`LEARNING_MODE_*`) | `Or` | `qr` / `Rr` / `zr` | `decodeOr` |
-| SS gauge cost reduction (`REDUCE_CONSUME_POINT_*`) | `Xr` | `oi` (+ `ni` with no args) | `decodeXr` (for `oi` only) |
-| Element ATK debuffs (`INCREASE_ELEMENT_ATK_*`) | *(new)* | `Xr` | no decoder yet |
+`test/js/repack.test.mjs` renames the minified names in the snapshot and checks the decoder still gives the same output. If a real repack stops a family decoding, check its fingerprint against the helper body (the decoder page's "Source" panel shows it).
 
-The per-module scanners (CrystalBuddyMode `c[s.]`, TacticalAwakeMode `h[o.]`, BusterAttack `c[s.]`, ExtraBuddyMode raw scan) and their internal function names (`p`, `d`, `v`, `h`) were unchanged in this repack.
+Switching to fingerprints fixed three name-dispatch bugs from the July 2026 repack:
+- 74 `LEARNING_MODE_*` statuses weren't decoded (helper now `Wr`).
+- `REDUCE_CONSUME_POINT_SHIN_OUGI_FOR_GORDON` wasn't decoded (helper now `hi`).
+- 20 `SEQ_ABILITY_REPEAT_*_WHILE_TACTICAL_AWAKE_MODE` statuses were mis-decoded as "Reduced SS Cost" (`oi` now builds sequence abilities).
 
 ---
 
@@ -155,6 +151,206 @@ The `extraRepeat: !0` effect uses `abilityCondition:{isExtraKiwamiAbility:true}`
 - **Status decoder**: `app/views/status_decoder/index.html.erb`
   - `decodeEbmP`: decodes `EXTRA_BUDDY_MODE_*` statuses
   - EBM scan in `buildStatusAssignments`: raw JS scan for `c[s.(EXTRA_BUDDY_MODE_*)]` pattern
+
+---
+
+## Running battle.js
+
+Decision (owner, 2026-10-23): the tools may run battle.js to read the game's own data, instead of picking values out of the source text.
+
+`app/javascript/ffrk/battle_runtime.js` runs battle.js's AMD modules with stand-ins for what the game framework provides:
+- a stub `define`/`require`;
+- an auto-creating `FF` namespace;
+- underscore 1.13.7 (`public/vendor/`);
+- small shims for the game's `util` and `lib/ClassBase`.
+
+It builds the `Conf` modules first, because other modules read `FF.ns.battle.Conf` at build time without declaring it. It returns plain data:
+- `conf`: the 194 battle constant tables;
+- `statusParams`: the real config (effects, durations, values) for about 6,700 of the 7,965 statuses, via the game's own `StatusAilmentsConfig.getParam`.
+
+In the browser it runs in a Web Worker, isolated from the page. In the Node tests it runs in a `vm` context. The Status Decoder shows this data for every status ("Game data (battle.js)"), and it is the base for describing statuses from the game's data rather than from regex-decoded helper calls. The Ability Parser runs it too, to name statuses the Status tab doesn't have yet.
+
+This depends on battle.js being unpacked byte-for-byte, so the unpacker undoes the packed payload's JS string escapes, keeps UTF-8 (Japanese text), and uses ASCII-only word boundaries.
+
+---
+
+## Describing statuses from game data
+
+Statuses that no helper decoder handles are described from their battle.js config by `app/javascript/ffrk/status_text.js`: one clause per game effect, joined with ", ". A status is described only when every effect is understood, so there is never partial text. Duration comes from the config: TURN gives "N turns", TIME gives "N seconds".
+
+Where the Status sheet words the same thing more than one way, the wording that matches more of the sheet's rows for the statuses being described wins:
+- **Element damage and resistance:** "Increases Fire damage dealt by 20%, cumulable" / "Reduces …"; "Fire Resistance +10%" / "-10%".
+- **Multicast:** "Fire or Holy abilities trigger 1 additional time".
+- **Ability damage:** "Fire or Holy abilities deal 15% more damage".
+- **Cast speed:**
+  - "Cast speed x2.00 for Fire abilities"; elements slash-joined ("Water/Holy"); "attacks" when the condition isn't ability-only.
+  - "Cast speed x… for Fire while in Tactical Awoken Mode" when tied to another status.
+- **Tied to another status (other effects):** ", removed if the character hasn't [X]".
+- **Category names:** follow the sheet (SHOOTER is "Sharpshooter").
+
+Elements are listed in game order (Fire, Ice, … Poison).
+
+**Names** for single-effect statuses follow the sheet's patterns:
+- "Buff Fire 20% (5s)" / "Debuff …", "Resist …" / "Imperil …".
+- "Dualcast / Triplecast / Quadracast / Pentacast Fire, Dark 1" ("Prismatic" for all nine elements).
+- "Water/Holy Ability Quick Cast 1" and "… Instant Cast …" (`castTimeFactor` 10000000 is instant).
+- "Fire, Holy Ability +15% Boost 3", "Summoning +15% Boost 1", "Weakness +9% Boost 1".
+- "Damage Cap +20000 1".
+
+The trailing number is the turn count, "(15s)" a timed duration, and "(Tactical)" a status tied to Tactical Awoken Mode.
+
+`decoder.sheet-match.test.mjs` tracks the result. For the 1486 decoded statuses with sheet rows, names matching went from 481 to 1226 and effects from 329 to 1049.
+
+**Mode families** bundle several effects into one sentence, so each is recognised by its effects and composed in the sheet's wording (`MODE_FAMILIES` in `status_text.js`). **Master Mode: <character>** reads: "Casts [Star Strike: X] every 2s (max 5), grants Damage Cap +20000/…/+70000 after 0/…/5 chases, casts [North Star: …] after 15s, removed if user hasn't Master Mode".
+- The North Star isn't part of the status. It is the Master soul break's closing follow-up, found on the Other tab under the mode's Source.
+- The 15s is the base Master Mode status's timer.
+- Instant cast, SB cost and Hero Boost belong to the base [Master Mode] row and are left out, as the sheet does.
+- When one ability is listed under several modes on the Other tab, the row under this mode wins.
+
+**Abilities not yet on the Other tab** are written as `<ability missing from Other Tab>` (the old decoder's convention), so a new status is still described and the gap is obvious to fill.
+
+---
+
+## Sheet conventions (owner decisions, 2026-10-23)
+
+The community sheet is the reference: where the tools and the sheet disagree, the tools should match the sheet.
+
+### Element column includes NE
+A non-elemental hit is listed as `NE` alongside the real elements (for example `Dark, NE`), in every tab. If a boss resists every other element, the attack falls back to NE, so NE matters. The sheet already does this, including in Other-tab follow-up rows (`Water, NE`).
+
+### Elements that depend on a condition are joined with "or"
+When the element depends on a condition, such as the character's attach element, the alternatives are joined with ` or `. Example: Kiros's Buster chase is `Ice, NE or Dark, NE`.
+
+### Hybrid formula
+`Hybrid` in the Formula column means the attack deals two damage types (for example physical and magical). It does not mean "Type is NAT": a NAT ability can be Hybrid or not. The Type column is the ability's class (NAT for INBORN abilities). Formula comes from the attacks' sub-action types: PHYSICAL_ATTACK is Physical; BLACK_MAGIC, WHITE_MAGIC, SUMMON and NINJUTSU attacks are Magical; both kinds together, or an INBORN attack, is Hybrid. For example, Firion's "North Star: Rose Requiem" is NAT / Physical. Hybrid rows show both multipliers in the effects, such as "(8.00 or 26.50 each)", and `-` in the Multiplier column.
+
+### Naming
+- **Realms (series):** the Soul Breaks sheet's Realm column values: `Core`, `I`–`XVI`, `FFT`, `Type-0`, `KH`, `Beyond`. Effects text uses the same names ("if the character's Realm is VII", "VII characters"). Both tools use `realmName()` in `app/javascript/ffrk/names.js`.
+- **Element label:** `NE`.
+- **Ability names come from the Other tab** as it has them, Japanese included: the Tactical ATB follow-ups 31545795 and 31545796 are "ATB短縮_10%" and "ATB短縮_20%", (owner decision, 2026-10-24). A follow-up and the status it grants are different things, even when similarly named: 31545795 is a follow-up that grants [111% ATB 1]. The "[ATB_10%]" / "[ATB_20%]" in 34 Status-tab Tactical rows is not these follow-ups' names; those rows are shown as the tab has them, since the Status tab comes first for statuses.
+- **Characters:** the Characters sheet is the master list. The decoder corrects JP romanisations in `CHAR_CORRECTIONS` (`app/views/shared/_ffrk_constants.html.erb`): for example `SHERUKU` is Shelke, `ARDEN` is Ardyn, `ORLANDU` is Orlandeau and `CID_HIGHWIND` is Cid (VII). The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
+- **School "Special":** battle.js names no ability category 18 (Spirit Attacks such as "Spirit Attack: Rain", and Crystal Force abilities). The sheet calls them "Special" (104 Spirit Attack rows in the Other tab), so the parser does too.
+- **Tier column:** use the Soul Breaks sheet's Tier when the soul break already has a row. Otherwise derive it from the soul strike category, using the sheet's own labels (Glint, Glint+, CSB, LBG, LBGS, ADSB, …).
+
+### Decoder wording follows the sheet
+Where the Status Decoder generates a name or effects text for a status family the sheet already covers (for example Learning Mode), it should produce the sheet's wording.
+
+### Target and Auto Target
+- **Target:** the first attack's target. With no attack, the widest target among the sub-actions; otherwise the ability's own range.
+- **Auto Target:** repeats the Target ("All enemies", "Self", "All allies") unless the game picks a specific target: "Lowest HP% enemy" (lowercase, the sheet's majority), "Random enemy", and so on.
+- **Other-tab follow-ups:** the same rule. A single-target follow-up is "Lowest HP% enemy" (902 rows in the Other tab), and the SB column is "0" (1189 rows vs 389 for "-").
+
+All four previews take these columns, plus Type, Formula, Multiplier, Element and Counter, from `combatColumns()` in `ability_parser.js`. Where the sheet is ambiguous, the most common form in the sheet wins.
+
+### Buster soul breaks
+A Buster has two Soul Breaks rows:
+- **Break Glint**, under the Buster's own ID. It describes the first use, and its Points is the first use's cost from `buster_shingi_abilities[0]` (0).
+- **Break Arte**, under the repeat ability's ID (`arg2`).
+
+### Master soul breaks
+A Master (MASB) soul break's Soul Breaks row lists its statuses by name ("Grants [Master Mode], [Master Mode: Firion], …"). Each status is described in its own Status-tab row, which is the style the owner prefers. Its `arg2` (`masterFinishAbilityId`, the follow-up cast when Master Mode ends, "North Star: …") goes on the Other tab with Source "Master Mode: <character>". The Action Args sheet has no arg names for action 239, so `ACTION_ARG_SUPPLEMENTS` fills them in. Supplements fill blanks in a sheet row and never override it.
+
+### Tactical soul breaks
+A Tactical (TASB) soul break has two Soul Breaks rows with the same ID (166 of 280 TASB IDs in the sheet):
+- **The mode:** NAT, Self.
+- **"<name> (Weapon Skill)":** the `weaponSkillAbilityId` attack, Points 0, the same SB Ver.
+
+The parser shows the weapon skill under the soul break's ID and "(Weapon Skill)" name; its on-page ids carry a `-ws` suffix. The mode row's Effects in the sheet is a hand-written summary of the Tactical Awoken Mode status, which the parser doesn't produce yet. TP MAX follow-ups without an Other row are named `TPMAX<Character>`, as the sheet names them.
+
+### Dual Awoken soul breaks
+A Dual Awoken (DASB) soul break has two Soul Breaks rows with the same ID, like a Tactical soul break:
+- **The soul break itself.**
+- **"<name> (Dual Shift)":** the `dualShiftAbilityId` (arg2) ability, Self, with the same SB Ver.
+
+The parser shows the Dual Shift under the soul break's ID and "(Dual Shift)" name; its on-page ids carry a `-ds` suffix. Both kinds of second row ("(Weapon Skill)" and "(Dual Shift)") come from `SECOND_ROWS` in `ability_parser.js`.
+
+### Action 226 arg1 is not a wrapped ability
+`SubActionAction` (action 226) never reads its own arg1: battle.js uses only arg6 and the parent ability's args. arg1 points at a related ability, such as a mode's chase (Trey's Dual Shift points at the Dual Awoken Mode II chase, Rain's Zenith at its Spirit Attack). `ACTION_ARG_SUPPLEMENTS` names it `relatedAbilityId`, so the parser no longer describes the related ability's effects as the ability's own.
+
+### Party conditions on Infusions
+A party condition that counts allies with an Infusion reads "…if there are 0-1/2+ allies with Attach Dark" (the sheet writes "2+ allies with Attach Earth"). A wrapped ability's party-condition IF/ELSE is one conditional clause, like a direct ability's. Crystal Force I is a Crystal soul break's arg2 and Crystal Force II its arg3.
+
+### Party conditions with several thresholds
+IF / ELSE IF / ELSE blocks on the same kind of ally are listed fewest allies first, as in the sheet's "0-3/4/5 VII allies": "Grants [A] to the user/[A], [B] to the user/[A], [C] to the user if there are 0-2/3/4+ Sharpshooter allies in the party". Job names use the sheet's school names (`schoolName()` in `ffrk/names.js`: SHOOTER is "Sharpshooter"), in both tools.
+
+### Attack wording
+The Effects text follows the sheet's majority wording:
+- A hit on all enemies is a **group** attack: "One group attack (8.00)".
+- "(x each)" is used only for more than one hit: "Six single attacks (0.90 each)", but "One single attack (26.50)".
+
+### Effects punctuation
+Effects text is one sentence in the sheet's most common style:
+- Clauses are joined with ", ", and a following verb is lower-case ("…capped at 19999, grants [X] to the user").
+- No final period.
+- Statuses are listed as "[A], [B] and [C]", in follow-ups too.
+- An attach element chosen by the entry attack: "grants [Attach Fire 2 with Stacking]/[Attach Earth 2 with Stacking] if entry damage was Fire/Earth" (42 rows, vs 22 for "based on").
+- "to the user".
+- Caps have no thousands separator ("19999").
+
+This holds in every ID range of the sheet, including the newest soul breaks (about 2:1). Rows written in the other style ("capped at 99,999. Grants … to user.") are the minority.
+
+### Learning Mode wording (decoder)
+The Status sheet's Learning Mode rows use several wordings, so the decoder uses the most common one:
+- **Name:** `Learning Mode: <Character>`, plus `(<Element or category>)` only when the character has more than one Learning Mode and this one is conditional, for example `Learning Mode: Aerith (Wind)`.
+- **Effects:** `Keeps track of Learning Mode: <Character> level (0~5), <Qualifier> attacks deal 5/10/…% more damage at Learning Mode: <Character> level 0/1/2/3/4/5`, or `increases damage dealt by 5/10/…%` when there is no condition. No trailing period.
+- **Damage table:** taken from the status's arguments, otherwise the helper's own default (some helpers use 25–50%), otherwise 5–30%.
+
+About 20 older sheet rows use the decoder's previous wording and now differ. `test/js/decoder.sheet-match.test.mjs` tracks how many names and effects match the sheet; the counts may only go up.
+
+### Zenith Mode wording (decoder)
+`Zenith Mode: <Character>` statuses (`ULTIMATE_BUDDY_MODE_*`) use the sheet's most common order (176 of 307 rows): Infusion, cast speed, extra triggers, Spirit Attack, zero hone cost, maximum HP, Astra, "removed if the character hasn't [Zenith Mode]". For example: "Increases [Fire/Earth Infusion] damage bonus by 20%, cast speed x1.10 for PHY attacks, Fire or Earth abilities trigger 1 additional time, casts Spirit Attack: Rain after using three Fire or Earth abilities (max 1), Hero Abilities have zero hone cost, maximum HP +1500, grants [Astra] after taking the next action, removed if the character hasn't [Zenith Mode]".
+- **Name:** the Spirit Attack's Other-tab Source ("Zenith Mode: Ace (Fire)"). Without one, it's built from the coded name, with a trailing roman numeral kept ("Zenith Mode: Rinoa II").
+- **Elements:** in element order ("Fire/Ice/Holy", "Fire, Ice or Holy"), the sheet's majority (22 rows vs 13 in game-config order).
+- **Cast speed:** `physicalDamageAbilities` is "PHY attacks"; `magicDamageAbilities` is "BLK, WHT, BLU, SUM or NAT attacks that deal magical damage". With no condition it's just "cast speed x1.10".
+- **Chases:** "(max N)" only when the chase has a limit; "after another ally uses …" when allies' abilities trigger it.
+- **"Hero Abilities have zero hone cost"** is on every generated Zenith, just before "maximum HP" (owner decision, 2026-10-23). It isn't a per-status effect: the Hero Abilities a Zenith swaps in are Kiwami panels, and battle.js's `AbilityPanel.isNoConsumption()` is always true for those. Only 64 of 307 sheet rows (mostly the newer Zeniths) have the line, so `decoder.sheet-match.test.mjs` counts a row as matching if the sheet has the decoder's text with or without that line.
+
+### The Status tab comes first
+For a status, both tools use what the Status tab actually has, and generate text only for what it doesn't (owner decision, 2026-10-24). The Ability Parser names statuses from their Status-tab row. The Status Decoder page shows the tab's Common Name, Effects and Default Duration when the tab has them, labels the card "From the Status tab" or "Not on the Status tab: generated by the decoder", and lists the decoder's own text underneath only where it reads differently. The sheet-match tests still compare the decoder's generated text with the tab, to measure the generator.
+
+### Status names in the Ability Parser
+The Ability Parser names a status from its Status-tab row. When the sheet has no row, it uses the Status Decoder's description (`ffrk/status_decoder`, the same engine as the Status Decoder page: its helper decoders and its game-data descriptions), so new modes appear by name ("[Dual Awoken Sharpshooter Mode II (Trey v2)]") instead of by coded name. The parser runs battle.js in the background; parsing doesn't wait for it, and the last parse is shown again when the game data arrives.
+
+Statuses without a Status-tab row are marked and listed for pasting:
+- In the sheet previews, their "[Name]" has a dotted underline and the tooltip "Not on the Status tab yet". The copyable TSV is unchanged.
+- A "Not on the Status tab" section after the results has one row per status in the Status tab's column order (ID, Common Name, Effects, Default Duration, MND Modifier, Exclusive Status, Coded Name, Notes), with "Copy row". The tab is kept in ascending ID order and rows are added one at a time, so there is no "copy all": each row says where it goes, after the existing status with the highest ID below it, or "its row is there but blank: fill it in" when the tab already has a row with that ID and no name. MND Modifier and Exclusive Status are "-", as in the Status Decoder. A status the decoder can't describe yet keeps blank Common Name, Effects and Default Duration cells and the note "Not decoded yet".
+
+### Dual Awoken Mode wording (decoder)
+`DUAL_AWAKE_MODE_FIRST_*` / `_SECOND_*` statuses use the sheet's most common order and wording: damage cap, rank boost ("Sharpshooter abilities deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5"), extra triggers, cast speed, use-count tiers ("cast speed x2.00/x2.50/x3.00 and critical chance =50%/75%/100% for equipped Sharpshooter abilities after casting 1/2/3+ Sharpshooter abilities"), damage, critical chance, chase ("casts Dual Arrow Force after using Sharpshooter abilities"), "casts X when removed".
+- **Subjects** join with "and" (79 rows vs 76 with slashes). Elements keep the game's order ("Dark and Fire", 28 rows vs 2 sorted), unlike Zenith rows.
+- **Cast speed:** "instant cast speed" (191 vs 31 for "x999999"); fixed speeds are "for X abilities" (Mode I rows split 30/30 with "for equipped X abilities"; Mode II rows are plain).
+- **Chases** that need several uses: "after using two X abilities".
+- **Name:** from the Other-tab Source of the mode's chase; Mode I borrows its Mode II partner's. Otherwise built from the coded name: "Dual Awoken Earth Mode I (Biggs)", and a trailing `II` is "(Fang v2)", the sheet's usual form.
+- **Default Duration:** Mode I is 15 seconds. Mode II lasts as long as its soul break's Dual Shift pattern (`dualShiftPatternId`, arg4: pattern 0 is [3,3,2,1,0] turns, pattern 1 is [1]), which the status doesn't know, so the decoder uses the sheet's most common value, "1 turn" (149 vs 120 for "3/3/2/1/0 turns (Dual Shift)").
+
+### Awoken Mode wording (decoder)
+`AWAKE_MODE_*` statuses: "Sharpshooter abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5", then cast speed ("cast speed x3.00 for X abilities", "cast speed x2.00/2.25/2.50/2.75/3.00 for X abilities at ability rank 1/2/3/4/5", "instant cast speed for Jump attacks"), extra triggers, and the chase ("casts Holy Wave after using White Magic abilities": plural, 54 rows vs 36 singular; "after using two X or Y abilities" when it takes several uses). 15 seconds. The name is the Other-tab Source of the chase (the English localization, e.g. "Awoken Savior"), else "Awoken <element or school>" from the coded name.
+
+### Simple statuses (decoder)
+- **ATB:** "Increase ATB charge speed by x2.00" (x9999999 for instant), named "200% ATB 1", "Instant ATB 2", "125% ATB (Synchro)"; a status that ends when its effects are used up lasts `countForIsDone` turns.
+- **Follow-ups that only grant statuses:** when the follow-up's Other-tab Effects is "Grants [X] to user.", the status reads "Grants [X] after using a Lightning ability", and a Tactical one granting an ATB boost is named "Lightning 125% ATB Quick Cycle (Tactical)".
+- **"removed if the user/character hasn't [X]":** "user" for Crystal Force, Extra and Master Mode (every sheet row) and for Tactical statuses that start with "Grants" (56 rows, none say "character"); "character" otherwise.
+- **Stat changes:** stats are ATK, MAG, DEF, RES, MND; equal values are grouped in the order they appear, increases first ("MND +30%, DEF and RES -30%"). Older statuses with no game config (`CUSTOM_PARAM_MULTI_*`, `CUSTOM_ATK_*`, `CUSTOM_CRITICAL_*`) are read from the coded name: a trailing number is milliseconds or turns, LARGE is 25 seconds, MEDIUM 15 seconds, and no duration means 25 seconds (the sheet's most common). Templates without a value read "ATK and DEF +X%".
+- **Names of stat changes:** "ATK +30%, DEF -30% (8s)", "100% Critical 2". Many older rows have names from the English Global version's localization ("Dark Bargain", "Focus") that can't be derived; statuses added after Global closed have none, so the generated form is what new rows use.
+- **Resonance:** "Fire abilities deal 5% more damage", named "Fire Resonance +5% Boost"; several elements read "Wind and Dark abilities…" and "(Wind/Dark) Resonance +5% Boost"; healing: "Dancer abilities restore 5% more HP", "Dancer Healing Resonance +5% Boost".
+- **Damage by elemental buff level:** "Increases damage dealt by 5/10/15/20/25/30% at Dark Elemental Buff Level 1/2/3/4/5/6", named "Dark Buff Damage Boost (15s)" (each 10% of the element's attack buff is one level).
+- **Damage boosts on attacks:** "Ranged attacks deal 30% more damage" ("Ranged +30% Boost 2"); all nine elements are "Prismatic +30% Boost".
+- **Follow-up use counters** (`COUNT_ABILITY_DONE` + `IS_DONE_WHEN_SPECIFIC_ABILITY_DONE`): "Keeps track of the number of uses of Kindred Guidance: Cloud (0~2), removed after reaching 2", named "Kindred Guidance: Cloud Uses".
+- **Master Mode conditional follow-ups:** "casts Auto Revenge if any enemy gains a DEF/RES/MND buff" / "if the user gains an ATK/DEF/MAG/RES debuff", after the North Star clause. A flat damage cap (no per-chase steps) is left out, as in most sheet rows (8 of 15).
+- **Piercing for some abilities:** "Fire abilities ignore 30% of the target's DEF and RES", named "Fire Ability DEF and RES 30% Piercing (Tactical)" ("Prismatic" for all elements).
+
+### Soul Drive Mode wording (decoder)
+`Soul Drive Mode: <Character>` statuses (`LIMIT_BREAK_SOUL_DRIVE_*`) use the wording every one of the 160 sheet rows shares: "Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks, Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]". The cap and damage clauses appear only when the status has them.
+
+What the Soul Break use grants isn't part of the status. The base [Soul Drive Mode] casts the soul break's own follow-up (its arg2), and battle.js doesn't link it to the character's mode. The decoder takes it from the Other-tab row listed under the mode (Source "Soul Drive Mode: <Character>"). Without one, a standard mode (with the cap and damage boosts) is assumed to grant [Instant ATB 1], as 102 of 107 sheet rows do (owner decision, 2026-10-23); a plain mode gets the usual placeholder, "casts <ability missing from Other Tab> after using a Soul Break", because plain modes grant different things.
+
+Names keep an element suffix (15 of 18 sheet rows) and drop the `KOKI` word from the coded name.
+
+### Chase text for non-Crystal Force chases
+This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
+
+### Scope
+The refactor covers the Ability Parser and the Status Decoder. `scripts/infer_statuses.py` is left as it is.
 
 ---
 

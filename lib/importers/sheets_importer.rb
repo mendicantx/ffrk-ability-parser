@@ -1,6 +1,5 @@
 require 'csv'
-require 'net/http'
-require 'uri'
+require_relative '../http_fetch'
 
 # Fetches a publicly published Google Sheet as CSV and returns an array of
 # row hashes keyed by the header row.
@@ -9,33 +8,18 @@ require 'uri'
 #   SheetsImporter.fetch("https://docs.google.com/spreadsheets/d/.../export?format=csv")
 #   # => [{ "Name" => "foo", "Value" => "bar" }, ...]
 module SheetsImporter
-  MAX_REDIRECTS = 5
-
   def self.fetch(url)
-    raw_csv = get_with_redirects(url)
+    raw_csv = HttpFetch.get(url)
     parse_csv(raw_csv)
   end
 
   private
 
-  def self.get_with_redirects(url, redirect_limit = MAX_REDIRECTS)
-    raise "Too many redirects fetching Google Sheet" if redirect_limit.zero?
-
-    uri = URI.parse(url)
-    response = Net::HTTP.get_response(uri)
-
-    case response
-    when Net::HTTPSuccess
-      response.body
-    when Net::HTTPRedirection
-      get_with_redirects(response['location'], redirect_limit - 1)
-    else
-      raise "Failed to fetch Google Sheet (HTTP #{response.code}): #{url}"
-    end
-  end
-
+  # The body arrives as bytes: read it as UTF-8 (keeping Japanese text such as the
+  # Name (JP) column), drop only invalid bytes, and drop a leading byte-order mark so
+  # the first header stays "ID".
   def self.parse_csv(raw)
-    raw = raw.encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')
+    raw = raw.dup.force_encoding('UTF-8').scrub('').delete_prefix("﻿")
     rows = CSV.parse(raw, headers: true)
     rows.map(&:to_h)
   end
