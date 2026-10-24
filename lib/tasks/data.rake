@@ -4,8 +4,10 @@ require_relative '../data_snapshot'
 namespace :data do
   desc "Refresh all data sources and store results in DataStore"
   task refresh: :environment do
-    DataLoader.refresh_all
+    errors = DataLoader.refresh_all
     puts "[data:refresh] Done. Last refreshed: #{DataStore.instance.last_refreshed_at}"
+    # Fail loudly (non-zero exit) so cron and the deploy hook notice; failed sources kept their previous data.
+    abort "[data:refresh] FAILED: #{errors.map { |name, message| "#{name}: #{message}" }.join('; ')}" if errors.any?
   end
 
   desc "Fetch battle.js and print the extracted JSON to stdout"

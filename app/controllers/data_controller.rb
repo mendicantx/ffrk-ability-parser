@@ -55,6 +55,7 @@ class DataController < ApplicationController
       last_refreshed_at: store.last_refreshed_at&.iso8601,
       sheets: store.sheets.transform_values(&:size),
       battle_js_chars: store.battle_js_data&.length || 0,
+      refresh_errors: store.refresh_errors,
     }
   end
 end

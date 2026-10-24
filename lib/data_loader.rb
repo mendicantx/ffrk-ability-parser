@@ -18,6 +18,22 @@ module DataLoader
     action_args:     'ACTION_ARGS_SHEET_URL',
   }.freeze
 
+  # The column each sheet must have for the tools to use it. A download without it
+  # (an error page, an unpublished or reshaped sheet) is rejected, keeping the old file.
+  REQUIRED_COLUMNS = {
+    soul_breaks:    'ID',
+    characters:     'Name',
+    status:         'ID',
+    other:          'ID',
+    hero_abilities: 'Name',
+    extra:          'Name',
+    action_args:    'action_id',
+  }.freeze
+
+  # A source that comes back with fewer than this share of its previous rows (or
+  # characters, for battle.js) is treated as broken and not saved.
+  MIN_SHARE_OF_PREVIOUS = 0.5
+
   # Returns { name => url } for the given sheet names (all by default),
   # leaving out any whose env var is not set.
   def self.sheet_urls(names = GOOGLE_SHEETS.keys)
@@ -27,8 +43,12 @@ module DataLoader
     end
   end
 
+  # Fetches every source. A source that fails or doesn't look right keeps its previous
+  # file. Returns { source => error message } for the ones that failed ({} when all
+  # succeeded); the errors are also saved in metadata.json for /data/status.
   def self.refresh_all
     FileUtils.mkdir_p(DataStore::SHEETS_DIR)
+    errors = {}
 
     GOOGLE_SHEETS.each do |name, env_var|
       url = ENV[env_var]
@@ -38,35 +58,78 @@ module DataLoader
       end
 
       Rails.logger.info "[DataLoader] Fetching #{name} sheet..."
+      path = DataStore::SHEETS_DIR.join("#{name}.json")
       rows = SheetsImporter.fetch(url)
-      write_json(DataStore::SHEETS_DIR.join("#{name}.json"), rows)
+      check_sheet(name, rows, previous_size(path))
+      write_json(path, rows)
       Rails.logger.info "[DataLoader] #{name}: #{rows.size} rows written."
     rescue => e
-      Rails.logger.error "[DataLoader] #{name} failed: #{e.message}"
+      errors[name.to_s] = e.message
+      Rails.logger.error "[DataLoader] #{name} failed, previous data kept: #{e.message}"
     end
 
     battle_js_url = ENV['BATTLE_JS_URL']
     if battle_js_url.nil? || battle_js_url.empty?
       Rails.logger.warn "[DataLoader] SKIPPED battle.js: BATTLE_JS_URL is not set."
     else
-      Rails.logger.info "[DataLoader] Fetching battle.js..."
-      data = BattleJsImporter.fetch(battle_js_url)
-      File.write(DataStore::BATTLE_JS_FILE, data, encoding: 'UTF-8')
-      Rails.logger.info "[DataLoader] battle.js: #{data.length} chars written."
-
-      ailments = BattleJsImporter.extract_status_ailments(data)
-      write_json(DataStore::AILMENTS_FILE, ailments)
-      Rails.logger.info "[DataLoader] battle.js: #{ailments.size} status ailment types written."
+      begin
+        Rails.logger.info "[DataLoader] Fetching battle.js..."
+        data = BattleJsImporter.fetch(battle_js_url)
+        ailments = BattleJsImporter.extract_status_ailments(data)
+        check_battle_js(data, ailments)
+        File.write(DataStore::BATTLE_JS_FILE, data, encoding: 'UTF-8')
+        write_json(DataStore::AILMENTS_FILE, ailments)
+        Rails.logger.info "[DataLoader] battle.js: #{data.length} chars, #{ailments.size} status ailment types written."
+      rescue => e
+        errors['battle_js'] = e.message
+        Rails.logger.error "[DataLoader] battle.js failed, previous data kept: #{e.message}"
+      end
     end
 
-    write_json(DataStore::METADATA_FILE, { 'last_refreshed_at' => Time.current.iso8601 })
-    DataStore.instance.reload!
+    finish(errors)
   rescue => e
+    errors ||= {}
+    errors['refresh'] = e.message
     Rails.logger.error "[DataLoader] refresh failed: #{e.message}"
+    finish(errors)
+  end
+
+  # Always records the attempt, so the server reloads what did succeed, the refresh
+  # cooldown applies to failed refreshes too, and /data/status shows what went wrong.
+  def self.finish(errors)
+    write_json(DataStore::METADATA_FILE, { 'last_refreshed_at' => Time.current.iso8601, 'errors' => errors })
+    DataStore.instance.reload!
+    errors
+  end
+  private_class_method :finish
+
+  def self.check_sheet(name, rows, previous)
+    raise 'no rows' if rows.empty?
+    column = REQUIRED_COLUMNS[name]
+    raise "no #{column} column (first columns: #{rows.first.keys.first(3).join(', ')})" if column && !rows.first.key?(column)
+    if previous && rows.size < previous * MIN_SHARE_OF_PREVIOUS
+      raise "only #{rows.size} rows, down from #{previous}"
+    end
+  end
+
+  def self.check_battle_js(data, ailments)
+    raise 'no STATUS_AILMENTS_TYPE entries found' if ailments.empty?
+    previous = File.exist?(DataStore::BATTLE_JS_FILE) ? File.size(DataStore::BATTLE_JS_FILE) : nil
+    if previous && data.bytesize < previous * MIN_SHARE_OF_PREVIOUS
+      raise "only #{data.bytesize} bytes, down from #{previous}"
+    end
+  end
+
+  # Rows in the cached file, or nil when there is none (or it can't be read).
+  def self.previous_size(path)
+    return nil unless File.exist?(path)
+    JSON.parse(File.read(path, encoding: 'UTF-8')).size
+  rescue JSON::ParserError
+    nil
   end
 
   def self.write_json(path, data)
     File.write(path, JSON.generate(data), encoding: 'UTF-8')
   end
-  private_class_method :write_json
+  private_class_method :write_json, :check_sheet, :check_battle_js, :previous_size
 end

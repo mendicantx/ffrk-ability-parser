@@ -23,7 +23,7 @@ class DataStore
   AILMENTS_FILE  = DATA_DIR.join('status_ailments.json').freeze
   METADATA_FILE  = DATA_DIR.join('metadata.json').freeze
 
-  attr_reader :sheets, :battle_js_data, :status_ailments_from_js, :last_refreshed_at
+  attr_reader :sheets, :battle_js_data, :status_ailments_from_js, :last_refreshed_at, :refresh_errors
 
   def initialize
     @mutex = Mutex.new
@@ -56,6 +56,7 @@ class DataStore
     @battle_js_data          = load_text(BATTLE_JS_FILE)
     @status_ailments_from_js = load_json(AILMENTS_FILE) || {}
     @last_refreshed_at       = load_timestamp
+    @refresh_errors          = load_json(METADATA_FILE)&.dig('errors') || {}
   end
 
   def load_sheets
