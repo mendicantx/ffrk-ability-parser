@@ -61,7 +61,8 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - **Tier column:** 27 gives XSB, 21 gives CASB ("Soul Breaks sheet Tier column").
 - **Python Roman numerals:** include X and XIII–XVI ("`_cap_word`").
 - Each fix is its own commit with its golden diff.
-- **Test:** `node --test "test/js/*.test.mjs"`, plus a Python unit test for the Roman numeral set.
+- **Test:** `node --test "test/js/*.test.mjs"; python -I -m unittest discover -s test/python`
+- **Status:** done. The Counter fix is covered by the counter-enabled Ace variant. The stacking wording and XSB tier still need an Extra soul break capture to be covered by golden files.
 - **Release point:** worth merging to `main` after this story.
 
 ### 7. Keep data across deploys

@@ -1708,7 +1708,10 @@ function generateEffectsText(parsed) {
   const attachStrsSeen = new Set();
   for (const sa of [...parsed.subActions, ...(exec !== parsed ? exec.subActions : [])]) {
     if (sa.type === 'ATTACH_ELEMENT_BY_ATTACK_ELEMENT' || sa.type === '18') {
-      const stackStr = sa.props.maxLevel != null ? ' with Secondary Stacking' : '';
+      // maxLv 5 → Secondary Stacking, 3 → Stacking (docs/decisions.md "increaseLv + maxLv").
+      const stackStr = sa.props.maxLevel === 5 ? ' with Secondary Stacking'
+                     : sa.props.maxLevel === 3 ? ' with Stacking'
+                     : '';
       const elemTags = sa.elements.filter(e => e && e !== 'NE' && !ebmAttachElems.has(e)).map(e => `[Attach ${e}${stackStr}]`);
       if (elemTags.length) {
         const key = elemTags.join('/');
@@ -1972,8 +1975,12 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     11: 'AASB',              12: 'SASB',   13: 'LBO',  14: 'LIMIT_BREAK_SENGI', 15: 'LBG',
     16: 'LBG',               17: 'DASB',  18: 'LBC',  19: 'ZSB',  20: 'OZSB',
     21: 'CASB',              22: 'ASB',   23: 'MASB',  24: 'LBSD', 25: 'TASB',
-    26: 'Buster',
+    26: 'Buster',            27: 'XSB',
   };
+
+  // Counter is N when the attack ignores reflection or counter_enable is 0 (docs/decisions.md "Counter column").
+  const hasIgnoreReflect = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
+  const counter = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
 
   const colValues = {
     'Realm':          { val: sb?.['Realm']     || actorRealm || '',                                                             src: !!sb?.['Realm'] },
@@ -1988,7 +1995,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'Element':        { val: element,                                                                                     src: false },
     'Time':           { val: parsed.castTime ?? '',                                                                      src: false },
     'Effects':        { val: genEffects,                                                                                  src: false },
-    'Counter':        { val: parsed.counterable === 'Yes' ? 'Y' : 'N',                                                   src: false },
+    'Counter':        { val: counter,                                                                                     src: false },
     'Auto Target':    { val: autoTarget,                                                                                  src: false },
     'Points':         { val: parsed.sbCost ?? '',                                                                        src: false },
     'Mastery Bonus':  { val: '',                                                                                          src: false },
@@ -2196,7 +2203,8 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     multiplier = '';
   }
   const element                   = inferElement();
-  const counter                   = parsed.counterable === 'Yes' ? 'Y' : 'N';
+  const hasIgnoreReflect          = [...parsed.subActions, ...(getExec().subActions ?? [])].some(sa => sa.props.ignoresReflection);
+  const counter                   = (parsed.counterable === 'Yes' && !hasIgnoreReflect) ? 'Y' : 'N';
   const imgFormula                = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/crystal_force/crystal_force.png")`;
 
   const colValues = {
