@@ -138,6 +138,14 @@ const EFFECTS = {
       const subject = conditionSubject(cond, ctx, e.summationDamageFactor != null ? 'and' : 'or');
       return subject ? `${subject} abilities deal ${percent(factor)}% more damage` : null;
     }
+    // Attacks of any kind: "Ranged attacks deal 30% more damage", "Fire, …, Dark and Poison attacks deal …"
+    if (cond.isIndirectAttack && Object.keys(cond).every(k => ['isIndirectAttack', 'hasDamage'].includes(k))) {
+      return `Ranged attacks deal ${percent(factor)}% more damage`;
+    }
+    if (cond.hasDamage && (cond.anyElementIds || cond.elementId) && Object.keys(cond).every(k => ['hasDamage', 'anyElementIds', 'elementId'].includes(k))) {
+      const subject = conditionSubject(cond, ctx, 'and');
+      return subject ? `${subject} attacks deal ${percent(factor)}% more damage` : null;
+    }
     return null;
   },
   // "Ignores 50% of the target's DEF and RES"; "Fire abilities ignore 30% of the target's DEF and RES"
@@ -216,7 +224,9 @@ const NAMES = {
     const pct = (e.damageFactor ?? e.maximumDamageFactor) - 100;
     const when = t.suffix || t.timeSuffix;
     if (cond.hasWeakness) return `Weakness +${pct}% Boost${when}`;
+    if (cond.isIndirectAttack) return `Ranged +${pct}% Boost${when}`;
     const elements = elementNames(cond, ctx);
+    if (!cond.isAbility && elements.length === ALL_ELEMENTS) return `Prismatic +${pct}% Boost${when}`;
     if (elements.length) return `${elements.join(', ')} Ability +${pct}% Boost${when}`;
     const categories = categoryNames(cond, ctx);
     return categories.length ? `${categories.join(', ')} +${pct}% Boost${when}` : null;
@@ -316,12 +326,27 @@ function modeOwner(key, prefix, ctx) {
 // hasn't Master Mode". Instant cast, SB cost and Hero Boost belong to the base
 // [Master Mode] status's row, so they're left out here as in the sheet.
 const MASTER_EFFECTS = new Set(['COUNT_ABILITY_DONE', 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED', 'INCREASE_DAMAGE_THRESHOLD_LV',
-  'INCREASE_CAST_TIME_FACTOR', 'REDUCE_CONSUME_POINT', 'IS_DONE_EFFECTS_WHEN_SPECIFIC_EFFECT_KEYS', 'BUDDY_ENHANCE']);
+  'INCREASE_CAST_TIME_FACTOR', 'REDUCE_CONSUME_POINT', 'IS_DONE_EFFECTS_WHEN_SPECIFIC_EFFECT_KEYS', 'BUDDY_ENHANCE',
+  'REGISTER_CHASE_ABILITY_WHEN_EXISTS_CONDITIONAL_ACTOR']);
+
+// "if any enemy gains a DEF/RES/MND buff" / "if the user gains an ATK/DEF/MAG/RES debuff",
+// from a follow-up's condition on stat buffs or debuffs (PARAM_ID_OF ids).
+function statChangeCondition(e, ctx) {
+  const enemies = e.targetActorCondition?.all?.isEnemy ? e.targetActorCondition.all : null;
+  const cond = enemies?.upParamsNum ? { who: 'any enemy', kind: 'buff', ids: enemies.upParamsNum.paramIds }
+    : e.executerCondition?.downParamsNum ? { who: 'the user', kind: 'debuff', ids: e.executerCondition.downParamsNum.paramIds } : null;
+  if (!cond) return null;
+  const stats = cond.ids.map(id => STAT_NAMES[nameOf(ctx.conf.PARAM_ID_OF, id)]);
+  if (stats.some(s => !s)) return null;
+  return `if ${cond.who} gains ${/^[AEIOU]/.test(stats[0]) ? 'an' : 'a'} ${stats.join('/')} ${cond.kind}`;
+}
+
 function describeMasterMode(params, ctx) {
   const prefix = 'MASTER_BUDDY_MODE_';
   if (!ctx.selfKey?.startsWith(prefix) || !params.effects.every(e => MASTER_EFFECTS.has(effectName(e, ctx)))) return null;
   const chase = params.effects.find(e => effectName(e, ctx) === 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED');
   const cap = params.effects.find(e => effectName(e, ctx) === 'INCREASE_DAMAGE_THRESHOLD_LV' && e.generalValueToDamageThresholdLvMap);
+  // A flat cap (no per-chase steps) is left out, as in most sheet rows (8 of 15).
   if (!chase || chase.time == null || chase.chaseAbilityDoneCountForIsDone == null) return null;
 
   const { character, elements } = modeOwner(ctx.selfKey, prefix, ctx);
@@ -339,6 +364,12 @@ function describeMasterMode(params, ctx) {
   const northStar = ctx.followUps(name).find(n => /^North Star: /.test(n));
   const baseTimer = ctx.statusParams('MASTER_BUDDY_MODE')?.effects?.find(e => effectName(e, ctx) === 'REGISTER_CHASE_ABILITY_WHEN_AFTER_TIME_EXCEED');
   if (northStar && baseTimer?.time) clauses.push(`casts [${northStar}] after ${baseTimer.time / 1000}s`);
+  // "casts Auto Revenge if any enemy gains a DEF/RES/MND buff"
+  for (const e of params.effects.filter(x => effectName(x, ctx) === 'REGISTER_CHASE_ABILITY_WHEN_EXISTS_CONDITIONAL_ACTOR')) {
+    const when = statChangeCondition(e, ctx);
+    if (!when) return null;
+    clauses.push(`casts ${ctx.abilityNameFrom?.(e.chaseAbilityId, name) ?? ctx.abilityName(e.chaseAbilityId)} ${when}`);
+  }
   clauses.push("removed if user hasn't Master Mode");
   return { name, effects: clauses.join(', '), defaultDuration: '-' };
 }
@@ -670,7 +701,22 @@ function describeAwakeMode(params, ctx) {
 
 const titleCaseKey = key => key.toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode, describeAwakeMode];
+// Use counters for a follow-up: "Keeps track of the number of uses of Kindred Guidance:
+// Cloud (0~2), removed after reaching 2", named "Kindred Guidance: Cloud Uses".
+function describeDoneCount(params, ctx) {
+  const names = params.effects.map(e => effectName(e, ctx));
+  if (names.join() !== 'COUNT_ABILITY_DONE,IS_DONE_WHEN_SPECIFIC_ABILITY_DONE') return null;
+  const [count, done] = params.effects;
+  const id = count.abilityCondition?.abilityId;
+  const max = done.abilityDoneCountCondition?.greaterEqual;
+  if (id == null || id !== done.abilityCondition?.abilityId || max == null) return null;
+  const durations = describeDurations(params.durations, ctx, params.effects);
+  if (!durations || durations.suffixes.length) return null;
+  const ability = ctx.abilityName(id);
+  return { name: `${ability} Uses`, effects: `Keeps track of the number of uses of ${ability} (0~${max}), removed after reaching ${max}`, defaultDuration: durations.duration };
+}
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode, describeAwakeMode, describeDoneCount];
 
 // ─── Stat changes ────────────────────────────────────────────────────────────
 // The sheet's stat names, and its stat lists: equal values grouped in the order they
