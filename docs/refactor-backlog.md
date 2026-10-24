@@ -15,7 +15,7 @@ The plan comes from two reviews of the code, one on architecture and one on doma
 - **Tests:** every story ends with an automated command, listed under *Test*. All commands run from the project root in PowerShell.
 - **Golden files:** these are saved reference output under `test/fixtures/golden/`. A story that is only meant to move code must leave them byte-identical. A story that is meant to change output updates them in the same commit, and the commit message says which rule changed.
 - **Drift bugs:** where `docs/decisions.md` already says what is correct, the code is fixed to match. Where it is silent, the question goes to the owner (see *Open questions*). The answer is then recorded in `docs/decisions.md`.
-- **Releases:** `main` stays deployable. A fix for a battle.js repack goes on `main` first and is then merged into the feature branch. The owner decides when the feature branch goes to `main` and deploys with `cap production deploy`. Suggested release points are marked below.
+- **Releases:** the feature branch is merged to `main` only once every story is done and the owner has tested it, so `main` stays as it is until then. A fix for a battle.js repack goes on `main` first and is then merged into the feature branch. The owner deploys with `cap production deploy`.
 
 ## Stories
 
@@ -67,7 +67,6 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - Each fix is its own commit with its golden diff.
 - **Test:** `node --test "test/js/*.test.mjs"; python -I -m unittest discover -s test/python`
 - **Status:** done (`task/settled-drift-fixes`). The Counter fix is covered by the counter-enabled Ace variant. The stacking wording and XSB tier still need an Extra soul break capture to be covered by golden files.
-- **Release point:** worth merging to `main` after this story.
 
 ### 7. Keep data across deploys
 As the owner, I want production data to survive a deploy, so that the tools never come up empty once they read from the cache.
@@ -92,7 +91,6 @@ As the maintainer, I want unused code gone and the importers covered by tests, s
 - One shared `get_with_redirects` in `lib/http_fetch.rb`.
 - Minitest for `BattleJsImporter.unpack`, the base-62 `word_to_index`, and `SheetsImporter` CSV parsing.
 - **Test:** `bin/rails test; node --test "test/js/*.test.mjs"`
-- **Release point.**
 - **Status:** done (`task/remove-dead-code`).
 
 ### 10. Move the Status Decoder script into a module
@@ -124,7 +122,6 @@ As the maintainer, I want decoders chosen by status-key family and function-body
 - The assignment scan finds its pattern instead of hard-coding `O[m.`, `c[s.` and `h[o.`.
 - The copied name and condition parsing in the seven decoders uses the core helpers.
 - **Test:** `node --test "test/js/*.test.mjs"`, which includes `repack.test.mjs`. That test renames minified identifiers in the snapshot and checks that the goldens still pass.
-- **Release point.**
 
 ### 15. Fix the drift bugs the owner decides
 As the owner, I want the four preview builders to agree on shared columns, using the rules I choose.
