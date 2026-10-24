@@ -25,6 +25,10 @@
     .ap-root button:disabled { background: #444; color: #888; cursor: default; }
     .ap-root button:not(:disabled):hover { background: #005fa3; }
     #parse-error { color: #f44747; margin-top: 6px; font-size: 12px; }
+    #find-ability { background: #1e2a3a; border: 1px solid #2d4a6a; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+    #find-ability a, .missing-ability-link { color: #4fc1ff; }
+    .missing-abilities { color: #aaa; font-size: 12px; }
+    .jump-target { outline: 2px solid #4fc1ff; }
 
     /* Results */
     #results { }
@@ -112,6 +116,8 @@
     <span class="load-detail" id="li-game-detail">waiting…</span>
   </div>
 </div>
+
+<div id="find-ability" hidden></div>
 
 <div id="input-area">
   <textarea id="json-input" placeholder="Paste FFRK battle JSON here…"></textarea>

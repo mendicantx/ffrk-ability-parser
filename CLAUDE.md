@@ -164,6 +164,7 @@ node test/browser/smoke.mjs http://localhost:3000
 - **Describing a status** (`createStatusDecoder().decodeStatus(key)`) tries, in order: a helper decoder chosen by the fingerprint of the battle.js helper that assigns the status; the status's game config (`status_text.describeStatus`: mode families first, then one clause per effect, all or nothing); the values spelled out in an older coded name (`describeStatusFromKey`). A status is described only when every effect is understood.
 - **Game data** comes from executing battle.js (`battle_runtime.js`) with stub `define`/`require`, an `FF` namespace proxy and underscore. Both pages start it after battle.js loads; parsing doesn't wait for it, and the parser re-renders the last parse when it arrives. The test harness runs it once per test process.
 - **The Ability Parser** names statuses from the Status tab and falls back to the decoder engine. Statuses without a Status-tab row are underlined in the previews and listed in a "Not on the Status tab" section, each with its paste-ready row and the existing status it goes after (the tab is kept in ascending ID order and rows are added one at a time).
+- **`<ability missing from Other Tab>` is a link.** The decoder records the IDs it shows as the placeholder (`missingAbilities` on `decodeStatus`'s result). The Status Decoder links the placeholder to `/ability_parser?ability=<id>&status=<id>`. There the parser asks for the JSON of the soul break that grants the status and points at the ability's Other-tab row. In the parser's "Not on the Status tab" list, the link jumps to that row when the paste has it. Soul Drive modes have no ID to link: the game doesn't say which ability they cast.
 - Second Soul Breaks rows under the same ID — a Tactical soul break's "(Weapon Skill)" and a Dual Awoken soul break's "(Dual Shift)" — come from `SECOND_ROWS` in `ability_parser.js`, with `-ws` / `-ds` on-page ids.
 - The dashboard formats battle.js in the browser using js-beautify (CDN) on first expand of the `<details>` element.
 
@@ -209,5 +210,4 @@ The live list is in `docs/refactor-backlog.md`. In short:
 - **Owner:** the GitHub Actions deploy is built; it needs the one-time key and secrets setup in the backlog ("Release: deploy from GitHub Actions") before its first run.
 - **Waiting on JSON:** Lasswell's AASB (八垓抜刀 軌ら星, 23500020), Enna Kros's ASB (轟・Aの力, 23280023), Tama's SASB (99プラザの日常, 23290014).
 - **Open question:** the 34 Tactical rows that say "[ATB_10%]" (backlog).
-- **Requested feature:** a link from `<ability missing from Other Tab>` to a page that parses that item.
 - **Decoder:** about 230 statuses missing from the Status tab still don't decode — mostly one-offs, debug entries and damage trackers whose names only the localization has.

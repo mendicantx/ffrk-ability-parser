@@ -4,6 +4,7 @@
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { createStatusDecoder, collectSourceDefs } from 'ffrk/status_decoder';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
+import { findAbilityUrl, linkMissingAbilities } from 'ffrk/status_context';
 
 // ─── Decoder (ffrk/status_decoder) ───────────────────────────────────────────
 const decoder = createStatusDecoder();
@@ -238,7 +239,11 @@ function renderResult(result) {
   html += `<table class="sheet-row-table">`;
   html += `<tr><th>ID</th><td class="col-id">${result.id}</td></tr>`;
   html += `<tr><th>Common Name</th><td class="col-name">${escHtml(displayName)}</td></tr>`;
-  html += `<tr><th>Effects</th><td class="col-effects">${escHtml(displayEffects)}</td></tr>`;
+  // A generated placeholder links to finding the ability in the Ability Parser.
+  const effectsHtml = fromSheet(sheetRow?.effects) ? escHtml(displayEffects)
+    : linkMissingAbilities(escHtml(displayEffects), result.missingAbilities,
+                           id => `href="${findAbilityUrl(id, result.id)}" target="_blank" rel="noopener"`);
+  html += `<tr><th>Effects</th><td class="col-effects">${effectsHtml}</td></tr>`;
   html += `<tr><th>Default Duration</th><td class="col-duration">${escHtml(displayDuration)}</td></tr>`;
   html += `<tr><th>MND Modifier</th><td class="col-dash">${result.mndModifier}</td></tr>`;
   html += `<tr><th>Exclusive Status</th><td class="col-dash">${result.exclusiveStatus}</td></tr>`;

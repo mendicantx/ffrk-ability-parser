@@ -220,7 +220,8 @@ export function runBattleJsInVm(battleJs, underscoreJs) {
 
 // gameData: false keeps battle.js from running (the decoder then has no game data),
 // e.g. for a simulated repack whose renamed battle.js can't be executed.
-export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = true } = {}) {
+// search: the page URL's query string, e.g. '?ability=1&status=2'.
+export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = true, search = '' } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
 
@@ -231,7 +232,7 @@ export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = t
     fetch: makeFetch(battleJs),
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    location: { reload() {} },
+    location: { reload() {}, search },
     requestAnimationFrame: fn => setTimeout(fn, 0),
     runBattleJsInline: gameData ? runBattleJsInVm : () => new Promise(() => {}),
   });

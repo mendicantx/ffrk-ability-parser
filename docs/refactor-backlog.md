@@ -267,7 +267,10 @@ The fine-grained token the GitHub CLI uses has no Secrets permission (by design)
 
 ## Requested features (owner, 2026-10-23, for later)
 
-1. **Jump from a placeholder to fixing it.** Where the decoder writes `<ability missing from Other Tab>`, show a popup or a link that opens a new tab directly on that item, ready to parse and add to the sheet. Open question: the missing item is an ability (a follow-up), and the Ability Parser needs its JSON to describe it. The link could open the parser pre-filled with what's known (ability ID, the status it belongs to, character), asking for the paste.
+1. **Jump from a placeholder to fixing it.** Done. The placeholder is a link wherever the ability's ID is known.
+   - In the Status Decoder, it opens the Ability Parser in a new tab (`?ability=<id>&status=<id>`). The parser asks for the JSON of the soul break that grants the status, then points at the ability's Other-tab row, or says the ability isn't in that paste.
+   - In the parser's "Not on the Status tab" list, it jumps to that row when the paste has it.
+   - Soul Drive modes (79 statuses) stay plain text: the game doesn't name the ability they cast.
 2. **Reload just the statuses.** Done: both tools have a **Reload Status & Other tabs** button that re-fetches only those two sheets (at most once a minute) and re-parses or reloads the page. A full Refresh data still re-fetches everything, at most once per 5 minutes.
 
 ## Owner answers (2026-10-23)
