@@ -12,9 +12,26 @@ export const KNOWN_ABILITY_NAMES = {
 
 // Abilities not yet on the Other tab get a visible placeholder to fill in.
 export const MISSING_ABILITY = '<ability missing from Other Tab>';
+const MISSING_ABILITY_HTML = '&lt;ability missing from Other Tab&gt;';
+
+// The Ability Parser opened on finding a missing ability: it asks for the JSON of the
+// soul break that grants the status, then shows the ability's Other-tab row.
+export const findAbilityUrl = (abilityId, statusId) => `/ability_parser?ability=${abilityId}&status=${statusId}`;
+
+// In HTML-escaped status text, makes the placeholder a link to adding the ability to the
+// Other tab. linkAttrs(abilityId) gives the link's attributes (href, target). With several missing abilities, which
+// placeholder is which isn't known, so each ID gets its own link after the text instead.
+export function linkMissingAbilities(html, abilityIds, linkAttrs) {
+  if (!abilityIds?.length || !html.includes(MISSING_ABILITY_HTML)) return html;
+  const link = (id, text) =>
+    `<a class="missing-ability-link" ${linkAttrs(id)} title="Ability ${id} isn't on the Other tab: find it in the Ability Parser">${text}</a>`;
+  if (abilityIds.length === 1) return html.split(MISSING_ABILITY_HTML).join(link(abilityIds[0], MISSING_ABILITY_HTML));
+  return `${html}<br><span class="missing-abilities">Missing from the Other tab: ${abilityIds.map(id => link(id, id)).join(', ')}</span>`;
+}
 
 // { conf, statusParams } from the runtime; sheets: { status, other, characters } rows.
-// Returns { describe(statusId) → { name, effects, defaultDuration } or null, abilityName(id) }.
+// Returns { describe(statusId) → { name, effects, defaultDuration, missingAbilities? } or null,
+// abilityName(id) }. missingAbilities lists the IDs shown as MISSING_ABILITY.
 export function statusDescriber({ conf, statusParams }, sheets) {
   const statusById = {};
   for (const [key, id] of Object.entries(conf.STATUS_AILMENTS_TYPE ?? {})) statusById[id] = key;
@@ -53,12 +70,15 @@ export function statusDescriber({ conf, statusParams }, sheets) {
   const describe = statusId => {
     const params = statusParams[statusId];
     if (!params) return null;
-    return describeStatus(params, {
+    // Abilities shown as the placeholder, so the tools can link to adding them.
+    const missing = new Set();
+    const missingAbility = id => { if (id != null) missing.add(id); return MISSING_ABILITY; };
+    const result = describeStatus(params, {
       conf,
       element:         key => elementName(key),
       category:        key => schoolName(key),
       statusName:      id => sheetNames[id] || (statusById[id] ? titleCase(statusById[id]) : null),
-      abilityName:     id => abilityName(id) ?? MISSING_ABILITY,
+      abilityName:     id => abilityName(id) ?? missingAbility(id),
       abilityEffects:  id => otherEffects[id] ?? null,
       abilityNameFrom: (id, source) => nameByIdAndSource[`${id}|${source}`] ?? null,
       abilitySources:  id => sourcesById[id] ?? [],
@@ -70,6 +90,8 @@ export function statusDescriber({ conf, statusParams }, sheets) {
       followUps:       source => namesBySource[source] ?? [],
       followUpEffects: source => effectsBySource[source] ?? [],
     });
+    return result && missing.size && `${result.name} ${result.effects}`.includes(MISSING_ABILITY)
+      ? { ...result, missingAbilities: [...missing] } : result;
   };
   return { describe, abilityName };
 }

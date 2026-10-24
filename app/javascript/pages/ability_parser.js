@@ -6,6 +6,7 @@ import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
 import { createStatusDecoder } from 'ffrk/status_decoder';
+import { findAbilityUrl, linkMissingAbilities } from 'ffrk/status_context';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -154,7 +155,9 @@ function describeFromGameData(id) {
       statusDecoderReady = true;
     }
     const d = statusDecoder.decodeStatus(key);
-    return d?.decoded ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '' } : null;
+    return d?.decoded
+      ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '', missingAbilities: d.missingAbilities ?? [] }
+      : null;
   } catch (e) {
     DB.decoderError = e.message;
     return null;
@@ -1814,6 +1817,10 @@ function lookupExtraAbility(abilityId) {
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function row(label, value, cls) {
   if (value === null || value === undefined || value === '' || value === false) return '';
   return `<tr><th>${label}</th><td class="${cls ?? ''}">${value}</td></tr>`;
@@ -2401,7 +2408,7 @@ function renderParsedInfoSection(p) {
       const label = s.target ? `${s.target}` : 'default target';
       const dur = s.duration ? ` · ${s.duration}` : '';
       const effText = statusEffectsText(s);
-      const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
+      const effects = effText ? `<br><span style="color:#888;font-size:11px;">${escHtml(effText)}</span>` : '';
       const idLabel = s.id != null ? ` <span style="color:#888;font-size:11px;">(${s.id})</span>` : '';
       html += `<tr><th>Status (${label}${dur})</th><td>${statusTag(s)}${idLabel}${effects}</td></tr>`;
       if (s.fromBundle) html += row('  (from bundle)', DB.statusBundles[s.fromBundle] ?? s.fromBundle, 'val-str');
@@ -2429,7 +2436,7 @@ function renderParsedInfoSection(p) {
       if (sa.statuses.length) {
         for (const s of sa.statuses) {
           const effText = statusEffectsText(s);
-          const effects = effText ? `<br><span style="color:#888;font-size:11px;">${effText}</span>` : '';
+          const effects = effText ? `<br><span style="color:#888;font-size:11px;">${escHtml(effText)}</span>` : '';
           const idLabel = s.id != null ? ` <span style="color:#888;font-size:11px;">(${s.id})</span>` : '';
           html += `<tr><th>Status</th><td>${statusTag(s)}${idLabel}${effects}</td></tr>`;
         }
@@ -2755,6 +2762,18 @@ function statusInsertAfter(id) {
   return after === null ? null : { id: after, name: DB.statusMap[after]?.commonName ?? '' };
 }
 
+// Where a missing ability's link goes: its Other-tab row when this paste has one, or else
+// a new Ability Parser tab that asks for the soul break granting the status.
+function missingAbilityLink(abilityId, statusId) {
+  return otherRowOnPage(abilityId)
+    ? `href="#${otherRowDomId(abilityId)}" data-jump-to="${otherRowDomId(abilityId)}"`
+    : `href="${findAbilityUrl(abilityId, statusId)}" target="_blank" rel="noopener"`;
+}
+
+// The Other-tab row preview of a follow-up (renderFollowUpSheetPreview), if it's on the page.
+const otherRowDomId = abilityId => `fup-tsv-${abilityId}`;
+const otherRowOnPage = abilityId => document.getElementById('results').innerHTML.includes(`id="${otherRowDomId(abilityId)}"`);
+
 function renderMissingStatuses(statuses) {
   const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const tsv = row => row.map(v => String(v).replace(/[\t\n\r]/g, ' ')).join('\t');
@@ -2773,8 +2792,10 @@ function renderMissingStatuses(statuses) {
     const place = id in DB.statusMap ? 'its row is there but blank: fill it in'
       : after ? `${after.id}${after.name ? ` <span class="insert-after-name">${esc(after.name)}</span>` : ''}` : 'the top of the tab';
     const cell = v => (v === '' ? `<td class="sbp-empty">—</td>` : `<td>${esc(v)}</td>`);
+    const effectsCell = effects === '' ? cell(effects)
+      : `<td>${linkMissingAbilities(esc(effects), status.described?.missingAbilities, abilityId => missingAbilityLink(abilityId, id))}</td>`;
     html += `<tr><td class="insert-after">${place}</td>`;
-    html += `${cell(id)}${cell(name)}${cell(effects)}${cell(duration)}${cell(coded)}${cell(notes)}`;
+    html += `${cell(id)}${cell(name)}${effectsCell}${cell(duration)}${cell(coded)}${cell(notes)}`;
     html += `<td><button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-${id}">Copy row</button>`;
     html += `<textarea class="status-tsv-area" id="status-tsv-${id}" rows="1" readonly hidden>${esc(tsv(row))}</textarea></td></tr>`;
   }
@@ -2811,8 +2832,55 @@ function markMissingStatuses(html, statuses) {
   });
 }
 
-// Copy buttons in the missing-statuses section.
+// Opens the preview holding an element (e.g. a follow-up's Other-tab row) and scrolls to it.
+function jumpTo(domId) {
+  const el = document.getElementById(domId);
+  const details = el?.closest?.('details');
+  if (details) details.open = true;
+  el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el?.classList?.add('jump-target');
+  setTimeout(() => el?.classList?.remove('jump-target'), 2000);
+}
+
+// ─── Finding a missing ability ───────────────────────────────────────────────
+// The Status Decoder and the "Not on the Status tab" list link an ability missing from
+// the Other tab here as ?ability=<id>&status=<id>. The ability's JSON comes with the soul
+// break that grants the status, so the page asks for that paste, then points at the
+// ability's Other-tab row.
+const findAbility = (() => {
+  const q = new URLSearchParams(globalThis.location?.search ?? '');
+  const ability = q.get('ability'), status = q.get('status');
+  return /^\d+$/.test(ability ?? '') ? { ability, status: /^\d+$/.test(status ?? '') ? status : null } : null;
+})();
+
+function renderFindAbility() {
+  const el = document.getElementById('find-ability');
+  if (!findAbility) return;
+  const { ability, status } = findAbility;
+  const coded = status && DB.statusAilments?.[status];
+  const statusLabel = status ? `status ${status}${coded ? ` (${escHtml(coded)})` : ''}` : 'its status';
+  let html = `Looking for ability <b>${ability}</b>, which ${statusLabel} casts. It isn't on the Other tab yet. `;
+  if (DB.lastInput == null) {
+    html += `Paste the JSON of the soul break that grants ${statusLabel} and press Parse; its abilities include this one.`;
+  } else if (otherRowOnPage(ability)) {
+    html += `It's in this paste: <a href="#${otherRowDomId(ability)}" data-jump-to="${otherRowDomId(ability)}">go to its Other-tab row</a>.`;
+  } else if (new RegExp(`"ability_id"\\s*:\\s*"?${ability}\\b`).test(DB.lastInput)) {
+    html += `It's in this paste, but the parser doesn't make an Other-tab row for it: see its card below.`;
+  } else {
+    html += `It isn't in this paste. Paste the soul break that grants ${statusLabel}.`;
+  }
+  el.innerHTML = html;
+  el.hidden = false;
+}
+
+// Copy buttons in the missing-statuses section, and links to a row on this page.
+document.getElementById('find-ability').addEventListener('click', e => {
+  const link = e.target.closest?.('[data-jump-to]');
+  if (link) { e.preventDefault(); jumpTo(link.dataset.jumpTo); }
+});
 document.getElementById('results').addEventListener('click', e => {
+  const link = e.target.closest?.('[data-jump-to]');
+  if (link) { e.preventDefault(); jumpTo(link.dataset.jumpTo); return; }
   const btn = e.target.closest?.('.status-copy-btn');
   if (!btn) return;
   const area = document.getElementById(btn.dataset.copyTarget);
@@ -2895,6 +2963,10 @@ function processBattleJson(jsonText) {
     resultsEl.innerHTML = markMissingStatuses(resultsEl.innerHTML, missing) + renderMissingStatuses(missing);
   }
   resultsEl.innerHTML = renderParseWarnings() + resultsEl.innerHTML;
+  if (findAbility) {
+    renderFindAbility();
+    if (otherRowOnPage(findAbility.ability)) jumpTo(otherRowDomId(findAbility.ability));
+  }
 
   // Auto-translate all JP names that were rendered
   resultsEl.querySelectorAll('[data-translate-jp]').forEach(cell => {
@@ -2937,6 +3009,7 @@ document.getElementById('reload-statuses-btn').addEventListener('click', () => r
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 loadBattleJs();
 loadSheets();
+renderFindAbility();
 
 // Exposed for the Node tests (test/js); the page itself doesn't import anything from here.
 export { DB, processBattleJson, parseAbility, SOUL_STRIKE_TIER };

@@ -12,7 +12,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { realmName, schoolName, elementName, titleCase, canonicalCharacterName as sharedCharacterName } from 'ffrk/names';
-import { statusDescriber, KNOWN_ABILITY_NAMES } from 'ffrk/status_context';
+import { statusDescriber, KNOWN_ABILITY_NAMES, MISSING_ABILITY } from 'ffrk/status_context';
 import { describeStatusFromKey } from 'ffrk/status_text';
 
 // ─── Source code extraction ───────────────────────────────────────────────────
@@ -318,7 +318,9 @@ export function createStatusDecoder() {
   function chaseAbilityName(statusKey) {
     const id = DB.abilityIdOf['CHASE_ABILITY_FOR_' + statusKey];
     if (id == null) return null;
-    return abilityDisplayName(id) ?? '<ability missing from Other Tab>';
+    if (abilityDisplayName(id) != null) return abilityDisplayName(id);
+    missingAbilityIds.add(id);
+    return MISSING_ABILITY;
   }
 
   // ─── nt decoder ──────────────────────────────────────────────────────────────
@@ -1077,7 +1079,9 @@ export function createStatusDecoder() {
   function describeFromGameData(statusId) {
     if (!DB.game || !DB.sheetRows) return null;
     DB.game.describer ??= statusDescriber(DB.game, DB.sheetRows);
-    return DB.game.describer.describe(statusId);
+    const described = DB.game.describer.describe(statusId);
+    for (const id of described?.missingAbilities ?? []) missingAbilityIds.add(id);
+    return described;
   }
 
   // ─── Decoder registry ────────────────────────────────────────────────────────
@@ -1117,7 +1121,21 @@ export function createStatusDecoder() {
     return DB.helperBodies[key];
   }
 
+  // Abilities a decoder showed as MISSING_ABILITY while decoding the current status.
+  let missingAbilityIds = new Set();
+
+  // decodeStatusResult, plus missingAbilities: the IDs of abilities shown as
+  // MISSING_ABILITY, so the tools can link to adding them to the Other tab.
   function decodeStatus(statusKey) {
+    missingAbilityIds = new Set();
+    const result = decodeStatusResult(statusKey);
+    if (missingAbilityIds.size && `${result.commonName} ${result.effects}`.includes(MISSING_ABILITY)) {
+      result.missingAbilities = [...missingAbilityIds];
+    }
+    return result;
+  }
+
+  function decodeStatusResult(statusKey) {
     const id = DB.statusAilmentsForward[statusKey];
     if (id == null) return { error: `Status key not found in battle.js: ${statusKey}` };
 
