@@ -228,6 +228,7 @@ When the element depends on a condition, such as the character's attach element,
 - **Realms (series):** the Soul Breaks sheet's Realm column values: `Core`, `I`–`XVI`, `FFT`, `Type-0`, `KH`, `Beyond`. Effects text uses the same names ("if the character's Realm is VII", "VII characters"). Both tools use `realmName()` in `app/javascript/ffrk/names.js`.
 - **Element label:** `NE`.
 - **Characters:** the Characters sheet is the master list. The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
+- **School "Special":** battle.js names no ability category 18 (Spirit Attacks such as "Spirit Attack: Rain", and Crystal Force abilities). The sheet calls them "Special" (104 Spirit Attack rows in the Other tab), so the parser does too.
 - **Tier column:** use the Soul Breaks sheet's Tier when the soul break already has a row. Otherwise derive it from the soul strike category, using the sheet's own labels (Glint, Glint+, CSB, LBG, LBGS, ADSB, …).
 
 ### Decoder wording follows the sheet
@@ -264,7 +265,8 @@ The Effects text follows the sheet's majority wording:
 Effects text is one sentence in the sheet's most common style:
 - Clauses are joined with ", ", and a following verb is lower-case ("…capped at 19999, grants [X] to the user").
 - No final period.
-- Statuses are listed as "[A], [B] and [C]".
+- Statuses are listed as "[A], [B] and [C]", in follow-ups too.
+- An attach element chosen by the entry attack: "grants [Attach Fire 2 with Stacking]/[Attach Earth 2 with Stacking] if entry damage was Fire/Earth" (42 rows, vs 22 for "based on").
 - "to the user".
 - Caps have no thousands separator ("19999").
 
