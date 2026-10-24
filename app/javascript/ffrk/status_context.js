@@ -10,6 +10,14 @@ export const KNOWN_ABILITY_NAMES = {
   31547024: '200% ATB 1',
 };
 
+// Names used instead of the Other tab's, where the tab's name is still partly Japanese
+// but the Status tab refers to the ability by an English name (owner decision): the
+// Tactical ATB follow-ups are "[ATB_10%]" / "[ATB_20%]" in 34 Status-tab rows.
+export const ABILITY_NAME_CORRECTIONS = {
+  31545795: 'ATB_10%',
+  31545796: 'ATB_20%',
+};
+
 // Abilities not yet on the Other tab get a visible placeholder to fill in.
 export const MISSING_ABILITY = '<ability missing from Other Tab>';
 
@@ -48,7 +56,7 @@ export function statusDescriber({ conf, statusParams }, sheets) {
     if (name) characterNames[name.toLowerCase()] = name;
   }
 
-  const abilityName = id => (id == null ? null : otherNames[id] ?? KNOWN_ABILITY_NAMES[id] ?? null);
+  const abilityName = id => (id == null ? null : ABILITY_NAME_CORRECTIONS[id] ?? otherNames[id] ?? KNOWN_ABILITY_NAMES[id] ?? null);
 
   const describe = statusId => {
     const params = statusParams[statusId];

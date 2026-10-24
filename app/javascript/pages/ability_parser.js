@@ -6,6 +6,7 @@ import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
 import { createStatusDecoder } from 'ffrk/status_decoder';
+import { ABILITY_NAME_CORRECTIONS } from 'ffrk/status_context';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -219,7 +220,7 @@ async function loadSheets() {
     DB.otherMap = otherRows;
     for (const r of otherRows) {
       const id = parseInt(r['ID']);
-      if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
+      if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = ABILITY_NAME_CORRECTIONS[id] ?? r['Name'];
     }
 
     // Characters map: ID → row
