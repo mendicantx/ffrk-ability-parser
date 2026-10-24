@@ -182,17 +182,25 @@ A battle capture holds every soul break for every party member, so one or two ca
 ## Describing statuses from game data (in progress)
 
 Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
-- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 417 of 1259.
-- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1296 names and 1258 effects.
+- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 732 of 1259.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1772 names and 1394 effects.
 
-Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, and single-ability follow-ups (including Chain Force limits).
+Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, and Zenith Mode.
+
+**Zenith Mode** (`ULTIMATE_BUDDY_MODE_*`): 291 of 311 decode. Of the 284 with sheet rows, 268 names and 126 effects match the sheet exactly. The rest differ because:
+- 55 Spirit Attacks aren't on the Other tab yet, so they show `<ability missing from Other Tab>`.
+- The sheet has a second, newer style: the chase clause comes before cast speed, and the text adds "Hero Abilities have zero hone cost" (64 of 307 rows, almost all status IDs 55000 and up). battle.js has no per-status effect for this. Hero Abilities swapped in by a Zenith are Kiwami panels, and `AbilityPanel.isNoConsumption()` is always true for those. That's the base [Zenith Mode]'s "certain Hero Abilities don't consume uses", so the per-character text follows the majority style and leaves it out. **Open question for the owner:** should the decoder add the clause anyway?
+- Minority wordings and typos in the sheet ("Fire infusion" without brackets, "Water and Wind", a stray comma before "(max 1)").
+
+Zenith statuses still undecoded (20): healers (`INCREASE_EXECUTED_HEAL`, "WHT actions restore 20% more HP"), chases triggered by breaking a Damage Reduction Barrier, timed damage boosts, Gogo's per-element chases, and one-offs for Tidus (Water), Thancred, Squall (Ice), Arden, Genesis, Rapha and Aerith.
 
 Next, largest first among the statuses the sheet is missing:
-- Master Mode (about 230).
-- Single follow-ups with extra fields (about 110).
-- Dual Awoken modes (about 90).
-- Soul Drive (about 40).
+- Dual Awoken modes.
+- Chase modes.
 - Awoken modes.
+- Accel modes.
+- Soul Drive.
+- Single follow-ups with extra fields.
 
 These are multi-effect modes, which need per-family composition rules. The parser's Tactical mode-row summary will come from the same work.
 

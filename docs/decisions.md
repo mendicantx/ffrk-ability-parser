@@ -280,6 +280,14 @@ The Status sheet's Learning Mode rows use several wordings, so the decoder uses 
 
 About 20 older sheet rows use the decoder's previous wording and now differ. `test/js/decoder.sheet-match.test.mjs` tracks how many names and effects match the sheet; the counts may only go up.
 
+### Zenith Mode wording (decoder)
+`Zenith Mode: <Character>` statuses (`ULTIMATE_BUDDY_MODE_*`) use the sheet's most common order (176 of 307 rows): Infusion, cast speed, extra triggers, Spirit Attack, maximum HP, Astra, "removed if the character hasn't [Zenith Mode]". For example: "Increases [Fire/Earth Infusion] damage bonus by 20%, cast speed x1.10 for PHY attacks, Fire or Earth abilities trigger 1 additional time, casts Spirit Attack: Rain after using three Fire or Earth abilities (max 1), maximum HP +1500, grants [Astra] after taking the next action, removed if the character hasn't [Zenith Mode]".
+- **Name:** the Spirit Attack's Other-tab Source ("Zenith Mode: Ace (Fire)"). Without one, it's built from the coded name, with a trailing roman numeral kept ("Zenith Mode: Rinoa II").
+- **Elements:** in element order ("Fire/Ice/Holy", "Fire, Ice or Holy"), the sheet's majority (22 rows vs 13 in game-config order).
+- **Cast speed:** `physicalDamageAbilities` is "PHY attacks"; `magicDamageAbilities` is "BLK, WHT, BLU, SUM or NAT attacks that deal magical damage". With no condition it's just "cast speed x1.10".
+- **Chases:** "(max N)" only when the chase has a limit; "after another ally uses …" when allies' abilities trigger it.
+- **"Hero Abilities have zero hone cost"** is left out (64 of 307 rows have it). See the backlog for the open question.
+
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
 
