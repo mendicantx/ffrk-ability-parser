@@ -286,7 +286,7 @@ About 20 older sheet rows use the decoder's previous wording and now differ. `te
 - **Elements:** in element order ("Fire/Ice/Holy", "Fire, Ice or Holy"), the sheet's majority (22 rows vs 13 in game-config order).
 - **Cast speed:** `physicalDamageAbilities` is "PHY attacks"; `magicDamageAbilities` is "BLK, WHT, BLU, SUM or NAT attacks that deal magical damage". With no condition it's just "cast speed x1.10".
 - **Chases:** "(max N)" only when the chase has a limit; "after another ally uses …" when allies' abilities trigger it.
-- **"Hero Abilities have zero hone cost"** is on every generated Zenith, just before "maximum HP" (owner decision, 2026-10-23). It isn't a per-status effect: the Hero Abilities a Zenith swaps in are Kiwami panels, and battle.js's `AbilityPanel.isNoConsumption()` is always true for those. Only 64 of 307 sheet rows (mostly the newer Zeniths) have the line, so most older rows no longer match the generated text exactly.
+- **"Hero Abilities have zero hone cost"** is on every generated Zenith, just before "maximum HP" (owner decision, 2026-10-23). It isn't a per-status effect: the Hero Abilities a Zenith swaps in are Kiwami panels, and battle.js's `AbilityPanel.isNoConsumption()` is always true for those. Only 64 of 307 sheet rows (mostly the newer Zeniths) have the line, so `decoder.sheet-match.test.mjs` counts a row as matching if the sheet has the decoder's text with or without that line.
 
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.

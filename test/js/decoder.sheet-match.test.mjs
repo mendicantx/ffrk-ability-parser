@@ -10,9 +10,17 @@ import { loadPage, snapshot } from './harness.mjs';
 // Matches per family as of the last improvement.
 const FLOORS = {
   LEARNING_MODE:       { names: 53, effects: 39 },
-  ULTIMATE_BUDDY_MODE: { names: 268, effects: 11 },  // effects: the owner wants the "zero hone cost" line, which older sheet rows lack
-  all:                 { names: 1772, effects: 1279 },
+  ULTIMATE_BUDDY_MODE: { names: 268, effects: 137 },
+  all:                 { names: 1772, effects: 1405 },
 };
+
+// Clauses the decoder always writes but many sheet rows leave out. A row matches if
+// the sheet has the decoder's text with them or without them (matching only: the
+// decoder still outputs them). "Hero Abilities have zero hone cost" is on every Zenith
+// Mode (owner decision) and on 64 of 307 sheet rows.
+const OPTIONAL_CLAUSES = [/, Hero Abilities have zero hone cost(?=,|$)/g];
+const withoutOptional = text => OPTIONAL_CLAUSES.reduce((s, re) => s.replace(re, ''), String(text ?? ''));
+const effectsMatch = (decoded, sheet) => decoded === sheet || withoutOptional(decoded) === sheet;
 
 const familyOf = key => Object.keys(FLOORS).find(f => f !== 'all' && key.startsWith(f)) ?? null;
 
@@ -28,7 +36,7 @@ test('decoded names and effects match the Status sheet at least as often as befo
     for (const f of ['all', familyOf(d.codedName)].filter(Boolean)) {
       tally[f].rows++;
       if (d.commonName === row['Common Name']) tally[f].names++;
-      if (d.effects === row['Effects']) tally[f].effects++;
+      if (effectsMatch(d.effects, row['Effects'])) tally[f].effects++;
     }
   }
   for (const [f, c] of Object.entries(tally)) {
