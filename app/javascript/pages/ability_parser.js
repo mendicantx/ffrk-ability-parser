@@ -49,6 +49,8 @@ const DB = {
   game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   lastInput:          null, // the last text parsed, shown again when game data arrives
   missingStatuses:    new Map(), // id → { id, codedName, described } seen in this parse without a Status-tab row
+  unknownActions:     new Set(), // action ids seen in this parse that the Action Args sheet doesn't list
+  decoderError:       null,      // why the Status Decoder engine couldn't start, if it couldn't
 };
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -141,15 +143,22 @@ let statusDecoderReady = false;
 // { name, effects, defaultDuration } for a status from the decoder, or null.
 function describeFromGameData(id) {
   const key = DB.statusAilments[id];
-  if (!key || !rawBattleJs || !DB.sheetRows) return null;
-  if (!statusDecoderReady) {
-    statusDecoder.ingestBattleJs(rawBattleJs);
-    statusDecoder.ingestSheets(DB.sheetRows);
-    statusDecoder.buildStatusAssignments();
-    statusDecoderReady = true;
+  if (!key || !rawBattleJs || !DB.sheetRows || DB.decoderError) return null;
+  // If the engine can't start (e.g. a battle.js update moved what it scans), parsing
+  // carries on with coded names and the results say why, instead of failing outright.
+  try {
+    if (!statusDecoderReady) {
+      statusDecoder.ingestBattleJs(rawBattleJs);
+      statusDecoder.ingestSheets(DB.sheetRows);
+      statusDecoder.buildStatusAssignments();
+      statusDecoderReady = true;
+    }
+    const d = statusDecoder.decodeStatus(key);
+    return d?.decoded ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '' } : null;
+  } catch (e) {
+    DB.decoderError = e.message;
+    return null;
   }
-  const d = statusDecoder.decodeStatus(key);
-  return d?.decoded ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '' } : null;
 }
 
 async function loadGameData() {
@@ -178,6 +187,7 @@ async function loadSheets() {
     const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
     DB.sheetRows = data;
     statusDecoderReady = false;
+    DB.decoderError = null;
 
     // Start from empty maps so a reload never keeps rows removed from the sheet.
     DB.statusMap = {};
@@ -440,6 +450,15 @@ function parseDenaArg(str) {
   return result;
 }
 
+// Sub-action arg keys the parser reads elsewhere or deliberately leaves out of the sheet
+// text. Any other key is listed under "Unrecognised Args" on the ability's card.
+const IGNORED_SUB_ACTION_KEYS = new Set([
+  'minFactor',                    // minimum damage factor; the sheet shows the main factor only
+  'exponentialFactor',            // alternate damage curve; not shown in the sheet
+  'processOrder',                 // which sub-action a HIT_ACTOR target refers to (read from target_arg)
+  'shouldIgnoreReflectionSingle', // single-target reflect bypass; the sheet doesn't show it
+]);
+
 // ─── Core ability parser ─────────────────────────────────────────────────────
 function parseAbility(ability, allAbilities, parsedSet) {
   if (parsedSet.has(ability.ability_id)) return null;
@@ -447,6 +466,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
 
   const opts = ability.options ?? {};
   const formula = getActionFormula(ability.action_id);
+  // An action the Action Args sheet doesn't list: none of its args can be read, so the
+  // rows may be missing effects. Reported at the top of the results.
+  if (!formula) DB.unknownActions.add(String(ability.action_id));
 
   const result = {
     abilityId:    ability.ability_id,
@@ -831,6 +853,9 @@ function parseAbility(ability, allAbilities, parsedSet) {
               sub.levelIncrease = { key: v.key, by: Number(v.increaseLevel) };
             }
             break;
+          default:
+            // A key the parser doesn't read: show it, so a new mechanic isn't dropped silently.
+            if (!IGNORED_SUB_ACTION_KEYS.has(k)) result.unknownArgs.push({ type: `sub-action ${k}`, value: typeof v === 'object' ? JSON.stringify(v) : String(v) });
         }
       }
 
@@ -2757,6 +2782,19 @@ function renderMissingStatuses(statuses) {
   return html;
 }
 
+// Problems that make the rows below incomplete, shown above them so they can't be missed.
+function renderParseWarnings() {
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const warnings = [];
+  for (const id of DB.unknownActions) {
+    warnings.push(`Action ${esc(id)} isn't in the Action Args sheet, so its arguments weren't read and these rows may be missing effects. Add it to the sheet, then Refresh data.`);
+  }
+  if (DB.decoderError) {
+    warnings.push(`The Status Decoder couldn't start (${esc(DB.decoderError)}), so statuses missing from the Status tab show their coded names.`);
+  }
+  return warnings.length ? `<div class="parse-warnings">${warnings.map(w => `<div class="parse-warning">⚠ ${w}</div>`).join('')}</div>` : '';
+}
+
 // ─── Main parse entry point ───────────────────────────────────────────────────
 
 // Underlines "[Name]" in the previews' table cells for statuses without a Status-tab
@@ -2786,6 +2824,7 @@ document.getElementById('results').addEventListener('click', e => {
 function processBattleJson(jsonText) {
   DB.lastInput = jsonText;
   DB.missingStatuses = new Map();
+  DB.unknownActions = new Set();
   let json;
   try {
     json = JSON.parse(jsonText);
@@ -2855,6 +2894,7 @@ function processBattleJson(jsonText) {
     const missing = [...DB.missingStatuses.values()];
     resultsEl.innerHTML = markMissingStatuses(resultsEl.innerHTML, missing) + renderMissingStatuses(missing);
   }
+  resultsEl.innerHTML = renderParseWarnings() + resultsEl.innerHTML;
 
   // Auto-translate all JP names that were rendered
   resultsEl.querySelectorAll('[data-translate-jp]').forEach(cell => {
