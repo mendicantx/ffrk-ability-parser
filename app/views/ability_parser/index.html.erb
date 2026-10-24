@@ -1708,7 +1708,10 @@ function generateEffectsText(parsed) {
   const attachStrsSeen = new Set();
   for (const sa of [...parsed.subActions, ...(exec !== parsed ? exec.subActions : [])]) {
     if (sa.type === 'ATTACH_ELEMENT_BY_ATTACK_ELEMENT' || sa.type === '18') {
-      const stackStr = sa.props.maxLevel != null ? ' with Secondary Stacking' : '';
+      // maxLv 5 → Secondary Stacking, 3 → Stacking (docs/decisions.md "increaseLv + maxLv").
+      const stackStr = sa.props.maxLevel === 5 ? ' with Secondary Stacking'
+                     : sa.props.maxLevel === 3 ? ' with Stacking'
+                     : '';
       const elemTags = sa.elements.filter(e => e && e !== 'NE' && !ebmAttachElems.has(e)).map(e => `[Attach ${e}${stackStr}]`);
       if (elemTags.length) {
         const key = elemTags.join('/');
