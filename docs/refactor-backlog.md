@@ -268,7 +268,7 @@ The fine-grained token the GitHub CLI uses has no Secrets permission (by design)
 ## Requested features (owner, 2026-10-23, for later)
 
 1. **Jump from a placeholder to fixing it.** Where the decoder writes `<ability missing from Other Tab>`, show a popup or a link that opens a new tab directly on that item, ready to parse and add to the sheet. Open question: the missing item is an ability (a follow-up), and the Ability Parser needs its JSON to describe it. The link could open the parser pre-filled with what's known (ability ID, the status it belongs to, character), asking for the paste.
-2. **Reload just the statuses.** After filling in the sheet, reload only the Status (and Other) sheet data so the decoder picks up the new names, without a full refresh of everything (today's Refresh data re-fetches all sheets and battle.js, at most once per 5 minutes).
+2. **Reload just the statuses.** Done: both tools have a **Reload Status & Other tabs** button that re-fetches only those two sheets (at most once a minute) and re-parses or reloads the page. A full Refresh data still re-fetches everything, at most once per 5 minutes.
 
 ## Owner answers (2026-10-23)
 

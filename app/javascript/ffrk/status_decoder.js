@@ -114,6 +114,8 @@ export function createStatusDecoder() {
   // Sheet rows ({ status, other, extra, characters }) → the lookups the decoders read.
   function ingestSheets(data) {
     DB.sheetRows = data;
+    // Game-data descriptions use names from the sheets, so a reload starts them afresh.
+    if (DB.game) delete DB.game.describer;
     DB.statusMap = {};
     for (const r of (data.status || [])) {
       const id = parseInt(r['ID']);

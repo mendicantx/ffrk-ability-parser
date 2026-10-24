@@ -75,4 +75,35 @@ class DataControllerTest < ActionDispatch::IntegrationTest
     assert_equal 0, calls
     assert_match "Try again", JSON.parse(response.body)["error"]
   end
+
+  test "reloading the Status and Other sheets runs only those, even during the full refresh cooldown" do
+    reloaded = nil
+    full = 0
+    with_data_store(sheets: SHEETS, last_refreshed_at: 1.minute.ago, sheets_refreshed_at: 1.hour.ago) do
+      stub_singleton(DataLoader, :refresh_sheets, ->(names) { reloaded = names }) do
+        stub_singleton(DataLoader, :refresh_all, -> { full += 1 }) { post "/data/refresh", params: { sheets: "status,other" } }
+      end
+    end
+    assert_response :success
+    assert_equal %i[status other], reloaded
+    assert_equal 0, full
+  end
+
+  test "reloading sheets is refused within its own cooldown" do
+    calls = 0
+    with_data_store(sheets: SHEETS, sheets_refreshed_at: 10.seconds.ago) do
+      stub_singleton(DataLoader, :refresh_sheets, ->(_names) { calls += 1 }) { post "/data/refresh", params: { sheets: "status" } }
+    end
+    assert_response :too_many_requests
+    assert_equal 0, calls
+  end
+
+  test "only the Status and Other sheets can be reloaded on their own" do
+    calls = 0
+    with_data_store(sheets: SHEETS) do
+      stub_singleton(DataLoader, :refresh_sheets, ->(_names) { calls += 1 }) { post "/data/refresh", params: { sheets: "status,soul_breaks" } }
+    end
+    assert_response :bad_request
+    assert_equal 0, calls
+  end
 end

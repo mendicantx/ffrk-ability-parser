@@ -2915,13 +2915,14 @@ document.getElementById('parse-btn').addEventListener('click', () => {
 });
 
 
-document.getElementById('reload-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('reload-btn');
+// "Refresh data & re-parse" re-fetches everything; "Reload Status & Other tabs" only those
+// two sheets (after rows have been added to them), keeping battle.js and the game data.
+async function refreshAndReparse(btn, sheets) {
   const errEl = document.getElementById('parse-error');
   btn.disabled = true;
   errEl.textContent = '';
-  const refreshError = await refreshServerData();
-  await Promise.all([loadBattleJs(), loadSheets()]);
+  const refreshError = await refreshServerData(sheets);
+  await (sheets ? loadSheets() : Promise.all([loadBattleJs(), loadSheets()]));
   btn.disabled = false;
   if (refreshError) errEl.textContent = `Refresh skipped: ${refreshError} (using cached data)`;
   const json = document.getElementById('json-input').value.trim();
@@ -2929,7 +2930,9 @@ document.getElementById('reload-btn').addEventListener('click', async () => {
     try { processBattleJson(json); }
     catch(e) { errEl.textContent = `Parse error: ${e.message}`; }
   }
-});
+}
+document.getElementById('reload-btn').addEventListener('click', () => refreshAndReparse(document.getElementById('reload-btn')));
+document.getElementById('reload-statuses-btn').addEventListener('click', () => refreshAndReparse(document.getElementById('reload-statuses-btn'), ['status', 'other']));
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 loadBattleJs();
