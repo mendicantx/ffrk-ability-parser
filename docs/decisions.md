@@ -214,7 +214,7 @@ A non-elemental hit is listed as `NE` alongside the real elements (for example `
 When the element depends on a condition, such as the character's attach element, the alternatives are joined with ` or `. Example: Kiros's Buster chase is `Ice, NE or Dark, NE`.
 
 ### Hybrid formula
-`Hybrid` in the Formula column means the attack deals two damage types (for example physical and magical). It does not mean "Type is NAT": a NAT ability can be Hybrid or not. Hybrid rows show both multipliers in the effects, such as "(8.00 or 26.50 each)", and `-` in the Multiplier column.
+`Hybrid` in the Formula column means the attack deals two damage types (for example physical and magical). It does not mean "Type is NAT": a NAT ability can be Hybrid or not. The Type column is the ability's class (NAT for INBORN abilities). Formula comes from the attacks' sub-action types: PHYSICAL_ATTACK is Physical; BLACK_MAGIC, WHITE_MAGIC, SUMMON and NINJUTSU attacks are Magical; both kinds together, or an INBORN attack, is Hybrid. For example, Firion's "North Star: Rose Requiem" is NAT / Physical. Hybrid rows show both multipliers in the effects, such as "(8.00 or 26.50 each)", and `-` in the Multiplier column.
 
 ### Naming
 - **Realms (series):** the Soul Breaks sheet's Realm column values: `Core`, `I`–`XVI`, `FFT`, `Type-0`, `KH`, `Beyond`. Effects text uses the same names ("if the character's Realm is VII", "VII characters"). Both tools use `realmName()` in `app/javascript/ffrk/names.js`.
@@ -228,7 +228,7 @@ Where the Status Decoder generates a name or effects text for a status family th
 ### Target and Auto Target
 - **Target:** the first attack's target. With no attack, the widest target among the sub-actions; otherwise the ability's own range.
 - **Auto Target:** repeats the Target ("All enemies", "Self", "All allies") unless the game picks a specific target: "Lowest HP% enemy" (lowercase, the sheet's majority), "Random enemy", and so on.
-- **Other-tab follow-ups:** Auto Target always repeats the Target.
+- **Other-tab follow-ups:** the same rule. A single-target follow-up is "Lowest HP% enemy" (902 rows in the Other tab), and the SB column is "0" (1189 rows vs 389 for "-").
 
 All four previews take these columns, plus Type, Formula, Multiplier, Element and Counter, from `combatColumns()` in `ability_parser.js`. Where the sheet is ambiguous, the most common form in the sheet wins.
 
@@ -236,6 +236,9 @@ All four previews take these columns, plus Type, Formula, Multiplier, Element an
 A Buster has two Soul Breaks rows:
 - **Break Glint**, under the Buster's own ID. It describes the first use, and its Points is the first use's cost from `buster_shingi_abilities[0]` (0).
 - **Break Arte**, under the repeat ability's ID (`arg2`).
+
+### Master soul breaks
+A Master (MASB) soul break's Soul Breaks row lists its statuses by name ("Grants [Master Mode], [Master Mode: Firion], …"). Each status is described in its own Status-tab row, which is the style the owner prefers. Its `arg2` (`masterFinishAbilityId`, the follow-up cast when Master Mode ends, "North Star: …") goes on the Other tab with Source "Master Mode: <character>". The Action Args sheet has no arg names for action 239, so `ACTION_ARG_SUPPLEMENTS` fills them in. Supplements fill blanks in a sheet row and never override it.
 
 ### Tactical soul breaks
 A Tactical (TASB) soul break has two Soul Breaks rows with the same ID (166 of 280 TASB IDs in the sheet):
