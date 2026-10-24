@@ -183,6 +183,7 @@ function makeFetch(battleJsOverride) {
 const PAGES = {
   ability_parser: {
     ready: `['battlejs','sheets'].every(k => /\\b(ok|err)\\b/.test(document.getElementById('li-' + k + '-icon').className))`,
+    gameReady: 'DB.game !== null',
   },
   status_decoder: { ready: 'parseReady', gameReady: 'DB.game !== null' },
 };
@@ -202,12 +203,19 @@ let pageInstance = 0;
 // Boots a page against the snapshot and resolves once its data has loaded.
 // Load one page at a time: the globals belong to the most recently loaded page.
 // Runs battle.js in a fresh vm context, standing in for the browser's Web Worker
-// (app/javascript/ffrk/battle_runtime.js calls this when Worker is undefined).
-export async function runBattleJsInVm(battleJs, underscoreJs) {
-  const { runBattleJs } = await import('ffrk/battle_runtime');
-  const context = vm.createContext({ console });
-  const scope = vm.runInContext('globalThis', context);
-  return runBattleJs(battleJs, underscoreJs, scope, code => vm.runInContext(code, context));
+// (app/javascript/ffrk/battle_runtime.js calls this when Worker is undefined). Each
+// battle.js text runs once per test process; pages only read the result.
+const vmRuns = new Map();
+export function runBattleJsInVm(battleJs, underscoreJs) {
+  if (!vmRuns.has(battleJs)) {
+    vmRuns.set(battleJs, (async () => {
+      const { runBattleJs } = await import('ffrk/battle_runtime');
+      const context = vm.createContext({ console });
+      const scope = vm.runInContext('globalThis', context);
+      return runBattleJs(battleJs, underscoreJs, scope, code => vm.runInContext(code, context));
+    })());
+  }
+  return vmRuns.get(battleJs);
 }
 
 // gameData: false keeps battle.js from running (the decoder then has no game data),

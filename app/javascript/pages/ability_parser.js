@@ -4,6 +4,8 @@
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName, schoolName } from 'ffrk/names';
+import { startBattleRuntime } from 'ffrk/battle_runtime';
+import { statusDescriber } from 'ffrk/status_context';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -43,6 +45,9 @@ const DB = {
   heroAbilitiesMap:   {},   // id (number) → hero ability row
   heroAbilityNameMap: {},   // id (number) → Name string
   extraMap:           {},   // id (number) → Extra sheet row
+  sheetRows:          null, // the sheets as loaded, for ffrk/status_context
+  game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
+  lastInput:          null, // the last text parsed, shown again when game data arrives
 };
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -117,10 +122,36 @@ async function loadBattleJs() {
 
     const totalConsts = Object.values(maps).reduce((s, m) => s + Object.keys(m).length, 0);
     setLoadState('battlejs', 'ok', `${totalConsts} constants, ${Object.keys(DB.bundleContents).length} bundles`);
+    loadGameData();
   } catch(e) {
     setLoadState('battlejs', 'err', e.message);
   }
   checkAllLoaded();
+}
+
+// ─── Game data: battle.js run in a Web Worker ──────────────────────────────────
+// Names and describes statuses the Status sheet doesn't have yet, the way the Status
+// Decoder does (ffrk/status_context). Parsing doesn't wait for it: when it arrives,
+// the last parse is shown again with the new names.
+async function loadGameData() {
+  setLoadState('game', 'loading', 'running battle.js…');
+  try {
+    const { conf, statusParams, errors } = await startBattleRuntime(rawBattleJs);
+    DB.game = { conf, statusParams };
+    setLoadState('game', errors.length ? 'err' : 'ok', `${Object.keys(statusParams).length} status configs`);
+    if (DB.lastInput != null) {
+      try { processBattleJson(DB.lastInput); } catch { /* the error was shown when it was first parsed */ }
+    }
+  } catch (e) {
+    setLoadState('game', 'err', e.message);
+  }
+}
+
+// { name, effects, defaultDuration } for a status from the game data, or null.
+function describeFromGameData(id) {
+  if (!DB.game || !DB.sheetRows) return null;
+  DB.game.describer ??= statusDescriber(DB.game, DB.sheetRows);
+  return DB.game.describer.describe(id);
 }
 
 // ─── Load Sheet data from server ─────────────────────────────────────────────
@@ -132,6 +163,7 @@ async function loadSheets() {
     if (raw.error) throw new Error(raw.error);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
+    DB.sheetRows = data;
 
     // Start from empty maps so a reload never keeps rows removed from the sheet.
     DB.statusMap = {};
@@ -244,15 +276,18 @@ function getActionFormula(actionId) {
   return merged;
 }
 
+// A status's names and text: the Status sheet's row, or else the decoder's description
+// from the game data (docs/decisions.md "Status names in the Ability Parser").
 function lookupStatus(id) {
   const codedName = DB.statusAilments[id];
   const sheetInfo = DB.statusMap[id];
+  const described = sheetInfo?.commonName ? null : describeFromGameData(id);
   return {
     id,
     codedName: codedName ?? `STATUS_${id}`,
-    commonName: sheetInfo?.commonName ?? null,
-    effects:    sheetInfo?.effects    ?? null,
-    duration:   sheetInfo?.duration   ?? null,
+    commonName: sheetInfo?.commonName ?? described?.name ?? null,
+    effects:    sheetInfo?.effects    ?? described?.effects ?? null,
+    duration:   sheetInfo?.duration   ?? described?.defaultDuration ?? null,
   };
 }
 
@@ -2580,6 +2615,7 @@ function parseMixedFormat(text) {
 
 // ─── Main parse entry point ───────────────────────────────────────────────────
 function processBattleJson(jsonText) {
+  DB.lastInput = jsonText;
   let json;
   try {
     json = JSON.parse(jsonText);

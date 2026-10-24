@@ -140,6 +140,12 @@ try {
     const rows = await ap.evaluate(`document.querySelectorAll('.sbp-tsv-area').length`);
     const err = await ap.evaluate(text('parse-error'));
     check(`parser renders ${file}`, rows > 0 && !err, err || `${rows} sheet rows`);
+    // Statuses missing from the sheet are named from the game data once battle.js has run.
+    if (file === 'trey-dasb.txt') {
+      await ap.waitFor(`/configs|err/.test(document.getElementById('li-game-icon').className + ${text('li-game-detail')})`, 'battle.js to run in its Worker');
+      const named = await ap.evaluate(`document.getElementById('results').textContent.includes('Dual Awoken Sharpshooter Mode II (Trey v2)')`);
+      check('parser names a status from game data', named);
+    }
     check(`parser page has no script errors (${file})`, ap.errors.length === 0, ap.errors.join(' | '));
     ap.close();
   }
