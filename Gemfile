@@ -41,6 +41,11 @@ group :development, :test do
   gem "debug"
 end
 
+group :test do
+  # Rails 7.0's test runner is not compatible with minitest 6.
+  gem "minitest", "~> 5.25"
+end
+
 group :development do
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"

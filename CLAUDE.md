@@ -29,8 +29,10 @@ Configure via environment variables (copy `.env.example` to `.env`):
 | `CHARACTERS_SHEET_URL` | Characters tab | 1771023676 |
 | `STATUS_SHEET_URL` | Status tab | 1899148923 |
 | `OTHER_SHEET_URL` | Other tab | 2001933731 |
+| `HERO_ABILITIES_SHEET_URL` | Hero Abilities tab | 329671300 |
+| `EXTRA_SHEET_URL` | Extra tab | 1700445928 |
 
-To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb` and set the corresponding env var.
+To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env`. `GOOGLE_SHEETS` is the only sheet list: the loader and both controllers read it through `DataLoader.sheet_urls`.
 
 ### Action Args sheet (separate spreadsheet)
 
@@ -74,6 +76,9 @@ rake data:battle_js
 
 # Check what's currently in memory
 rake data:status
+
+# Run the Ruby tests
+bin/rails test
 ```
 
 ## Architecture notes
