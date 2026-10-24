@@ -36,6 +36,7 @@ const DB = {
   statusMap:     {},   // id (number) → { commonName, effects, duration }
   actionMap:     [],   // array of row objects {action_id, className, arg1..arg30}
   soulBreaksMap:      {},   // id (number) → soul break row
+  soulBreakWeaponSkillMap: {}, // id (number) → a Tactical soul break's "(Weapon Skill)" row
   charactersMap:      {},   // id (number) → character row { Name, Realm, ... }
   otherMap:           [],   // array of other rows
   otherNameMap:       {},   // other ability id → name
@@ -154,9 +155,14 @@ async function loadSheets() {
     DB.actionMap = actionRows;
 
     // Soul breaks map: ID → row
+    // A Tactical soul break has two rows with the same ID: the mode and its
+    // "(Weapon Skill)" row (docs/decisions.md "Tactical soul breaks").
+    DB.soulBreakWeaponSkillMap = {};
     for (const r of sbRows) {
       const id = parseInt(r['ID']);
-      if (!isNaN(id)) DB.soulBreaksMap[id] = r;
+      if (isNaN(id)) continue;
+      if (/\(Weapon Skill\)\s*$/.test(r['Name'] ?? '')) DB.soulBreakWeaponSkillMap[id] = r;
+      else DB.soulBreaksMap[id] = r;
     }
 
     // Other sheet: keep as array and build id → name lookup
@@ -276,6 +282,13 @@ function chaseSourceName(abilityId) {
   return DB.statusMap[statusId]?.commonName || '';
 }
 
+// Other-tab name for a Tactical Awoken Mode's TP MAX follow-up, as the sheet names
+// them: "TPMAX<Character>" (e.g. "TPMAXGarland").
+function tpMaxName(source) {
+  const m = /^Tactical Awoken Mode: (.+)$/.exec(source ?? '');
+  return m ? `TPMAX${m[1]}` : '';
+}
+
 // SB Ver: the sheet's value when the soul break has a row; otherwise the tier plus the
 // next version number for that character (e.g. "Buster2" after "Buster1").
 function soulBreakVersion(sbRow, character, tier) {
@@ -383,7 +396,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
     category:     DB.abilityCategories[ability.category_id] ?? null,
     castTime:          opts.cast_time ? (opts.cast_time / 1000).toFixed(2) : null,
     sbCharge:          opts.ss_point ? Number(opts.ss_point) : 0,
-    sbCost:            busterFirstUseCost(opts) ?? (Number(opts.consume_point) || null),
+    sbCost:            busterFirstUseCost(opts) ?? (opts.consume_point != null && opts.consume_point !== '' ? Number(opts.consume_point) : null),
     soulStrikeCategory:Number(opts.soul_strike_category_id) || null,
     nameJp:            opts.alias_name || opts.disp_name || null,
     counterable:       Number(opts.counter_enable) !== 0 ? 'Yes' : 'No',
@@ -1846,21 +1859,13 @@ function renderSheetPreview({ title, idPrefix, id, columns }) {
 }
 
 // ─── SB sheet column preview ──────────────────────────────────────────────────
-function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '') {
-  // ── Local helpers ──
-
-
-
-
-
-
-
-
-
-
-  // ── Derivations ──
+// sheetAs: { id, name, sbVer } when the row is listed under another ID and name — a
+// Tactical soul break's weapon skill is "<soul break> (Weapon Skill)" under the soul
+// break's ID. Its on-page ids get a "-ws" suffix so the two rows stay distinct.
+function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, actorRealm = '', sheetAs = null) {
   const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
-  const id                     = parsed.abilityId;
+  const id                     = sheetAs?.id ?? parsed.abilityId;
+  const domId                  = sheetAs ? `${id}-ws` : id;
   const imgFormula             = `=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",${id},"/",${id},"_256.png"),4,64,64)`;
 
   // ── Per-column value/src for all columns we know how to derive ──
@@ -1870,6 +1875,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     if (sheetName) {
       return { val: sheetName, rawVal: sheetName, src: true };
     }
+    if (sheetAs?.name) return { val: sheetAs.name };
     const jpText = parsed.nameJp || parsed.name || '';
     const safe   = jpText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const jpAttr = jpText.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -1877,7 +1883,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
       val:    `<span class="sbp-name-val">${safe}</span><span class="sbp-translating">⟳</span>`,
       rawVal: jpText,
       src:    false,
-      tdId:   `sbp-name-${id}`,
+      tdId:   `sbp-name-${domId}`,
       tdExtra: `data-translate-jp="${jpAttr}"`,
     };
   })();
@@ -1899,7 +1905,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
     'Name':           nameEntry,
     'Tier':           { val: tier,                                                                                        src: !!sb?.['Tier'] },
-    'SB Ver':         { val: soulBreakVersion(sb, sb?.['Character'] || actorName, tier),                                  src: !!sb?.['SB Ver'] },
+    'SB Ver':         { val: sb?.['SB Ver'] || sheetAs?.sbVer || soulBreakVersion(sb, sb?.['Character'] || actorName, tier), src: !!sb?.['SB Ver'] },
     'Type':           { val: type,                                                                                        src: false },
     'Target':         { val: target,                                                                                      src: false },
     'Formula':        { val: formula,                                                                                     src: false },
@@ -1921,7 +1927,7 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
 
   const COLUMN_ORDER = ['Realm', 'Character', 'Img', 'Name', 'Tier', 'SB Ver', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'Points', 'Mastery Bonus', 'Honing Effects', 'Relic', 'Name (JP)', 'ID', 'Anima', 'GL', '✓'];
   return renderSheetPreview({
-    title: 'Soul Break tab columns', idPrefix: 'sbp', id,
+    title: 'Soul Break tab columns', idPrefix: 'sbp', id: domId,
     columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: String(sb?.[col] ?? ''), src: !!sb?.[col] }) }),
   });
 }
@@ -2074,7 +2080,7 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },
     'Source':      { val: otherRow?.['Source'] || source || chaseSourceName(id), src: !!otherRow?.['Source'] },
-    'Name':        { val: otherRow?.['Name']   || parsed.name,                    src: !!otherRow?.['Name']   },
+    'Name':        { val: otherRow?.['Name']   || tpMaxName(source) || parsed.name, src: !!otherRow?.['Name'] },
     'Type':        { val: type               },
     'Target':      { val: target             },
     'Formula':     { val: formula            },
@@ -2262,10 +2268,17 @@ function renderAbility(parsed, depth, ctx) {
   const busterShingiParent = relations.busterParent[parseInt(parsed.abilityId)];
   const isAbilityCrash = relations.extraCrushSource[parseInt(parsed.abilityId)] !== undefined;
   if (depth === 0 && !isAbilityCrash && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
-    const wsParent = relations.weaponSkillParent[parseInt(parsed.abilityId)] ?? busterShingiParent;
+    const weaponSkillOf = relations.weaponSkillParent[parseInt(parsed.abilityId)];
+    const wsParent = weaponSkillOf ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
     const sbActorRealm = wsParent?.realm     || actorRealm;
-    html += renderSBSheetPreview(parsed, sb, sbActorName, genText, sheetElement, sbActorRealm);
+    const sheetAs = weaponSkillOf?.parentId ? {
+      id:    weaponSkillOf.parentId,
+      name:  `${weaponSkillOf.parentName} (Weapon Skill)`,
+      sbVer: weaponSkillOf.sbVer,
+      row:   DB.soulBreakWeaponSkillMap[weaponSkillOf.parentId] ?? null,
+    } : null;
+    html += renderSBSheetPreview(parsed, sheetAs ? sheetAs.row : sb, sbActorName, genText, sheetElement, sbActorRealm, sheetAs);
   }
 
   // Crystal Commands sheet column preview — for Crystal Force abilities
@@ -2370,8 +2383,13 @@ function recordRelations(parsed, ability, ctx) {
     }
     if (sub._label === 'weaponSkillAbilityId') {
       relations.weaponSkillParent[sub.abilityId] = {
-        character: sbRow?.['Character'] || actorName,
-        realm:     sbRow?.['Realm']     || actorRealm,
+        character:  sbRow?.['Character'] || actorName,
+        realm:      sbRow?.['Realm']     || actorRealm,
+        // A Tactical soul break's weapon skill is listed under the soul break's own ID
+        // as "<name> (Weapon Skill)", with the soul break's version.
+        parentId:   parsed.abilityId,
+        parentName: sbRow?.['Name'] || parsed.name,
+        sbVer:      soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'TASB'),
       };
     }
     if (sub._label === 'defaultAbilityId' || sub._label === 'repeatSkillAbilityId') {

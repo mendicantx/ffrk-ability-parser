@@ -16,7 +16,7 @@ import { loadPage, snapshot, FIXTURES } from './harness.mjs';
 const TABS = { sbp: 'soul_breaks', ekp: 'extra', fup: 'other' };
 
 // Matching generated cells, as of the last improvement.
-const FLOOR_TOTAL = 109;
+const FLOOR_TOTAL = 155;
 
 const decode = s => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
@@ -25,7 +25,7 @@ const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 // Each preview: its id, the TSV fields, and the column names with a flag for sheet-sourced cells.
 export function previews(html) {
   const out = [];
-  const re = /<textarea class="sbp-tsv-area" id="([a-z]+)-tsv-(\d+)"[^>]*>([\s\S]*?)<\/textarea>[\s\S]*?<table class="sb-preview-table">([\s\S]*?)<\/table>/g;
+  const re = /<textarea class="sbp-tsv-area" id="([a-z]+)-tsv-(\d+(?:-ws)?)"[^>]*>([\s\S]*?)<\/textarea>[\s\S]*?<table class="sb-preview-table">([\s\S]*?)<\/table>/g;
   for (const [, prefix, id, tsv, table] of html.matchAll(re)) {
     const cols = [...table.matchAll(/<td class="sbp-col">([\s\S]*?)<\/td>\s*<td([^>]*)>/g)]
       .map(m => ({ name: decode(m[1]).trim(), fromSheet: /sbp-sheet/.test(m[2]) }));
@@ -36,7 +36,11 @@ export function previews(html) {
 
 test('generated sheet-preview cells match the sheet at least as often as before', async t => {
   const sheets = snapshot().sheets;
-  const byId = Object.fromEntries(Object.entries(TABS).map(([p, tab]) => [p, new Map(sheets[tab].map(r => [String(r.ID), r]))]));
+  // A Tactical soul break's "(Weapon Skill)" row shares the soul break's ID; the
+  // preview marks it with a "-ws" suffix.
+  const isWeaponSkillRow = r => /\(Weapon Skill\)\s*$/.test(r.Name ?? '');
+  const byId = Object.fromEntries(Object.entries(TABS).map(([p, tab]) => [p, new Map(sheets[tab].filter(r => !isWeaponSkillRow(r)).map(r => [String(r.ID), r]))]));
+  for (const r of sheets.soul_breaks.filter(isWeaponSkillRow)) byId.sbp.set(`${r.ID}-ws`, r);
   const files = fs.readdirSync(path.join(FIXTURES, 'battles')).filter(f => /\.(json|txt)$/.test(f)).sort();
 
   const perColumn = {};
@@ -50,7 +54,7 @@ test('generated sheet-preview cells match the sheet at least as often as before'
       assert.equal(p.fields.length, p.cols.length, `${file} ${p.prefix}-${p.id}: TSV has ${p.fields.length} fields, table ${p.cols.length} columns`);
       p.cols.forEach((col, i) => {
         // Skip copied cells, the image formula, and sheet cells nobody has filled in yet.
-        if (col.fromSheet || col.name === 'Img' || ['', '?', '-'].includes(norm(row[col.name])) && norm(row[col.name]) !== norm(p.fields[i])) return;
+        if (col.fromSheet || col.name === 'Img' || !(col.name in row) || ['', '?', '-'].includes(norm(row[col.name])) && norm(row[col.name]) !== norm(p.fields[i])) return;
         const ok = norm(p.fields[i]) === norm(row[col.name]);
         const c = (perColumn[`${p.prefix} ${col.name}`] ??= { matched: 0, total: 0, misses: [] });
         c.total++; total++;
