@@ -209,11 +209,10 @@ These are multi-effect modes, which need per-family composition rules. The parse
 
 ## Known bug to fix
 
-### Keep Japanese text when importing the sheets
-`SheetsImporter.parse_csv` (`lib/importers/sheets_importer.rb`) re-encodes the downloaded CSV from "binary", which deletes every non-ASCII character. Every Japanese value in the cached sheets is cut down to ASCII fragments (Name (JP) "覚醒チャージAショット" becomes "A"). The battle.js unpacker had the same bug and was fixed the same way.
-- **Fix:** treat the body as UTF-8 and drop only invalid bytes: `raw.dup.force_encoding('UTF-8').scrub('')`.
-- **Then:** run `rake data:refresh` and `rake data:snapshot`, and review the golden diffs (the Name (JP) cells will change).
-- **Test:** a minitest that `parse_csv` keeps "極星革命の象徴・のばら" from a byte string. Run `bin/rails test`.
+### Keep Japanese text when importing the sheets (done)
+`SheetsImporter.parse_csv` (`lib/importers/sheets_importer.rb`) used to re-encode the downloaded CSV from "binary", which deleted every non-ASCII character (Name (JP) "覚醒チャージAショット" became "A"). It now reads the body as UTF-8, drops only invalid bytes and a leading byte-order mark, and has tests for both. The cache and the test snapshot were refreshed: the parser now matches the Name (JP) column (274 of 306 cells).
+
+**Question for the owner:** the Other tab names Garland-style Tactical ATB follow-ups 31545795 and 31545796 "ATB短縮_10%" and "ATB短縮_20%", but the Status tab refers to them as "[ATB_10%]" and "[ATB_20%]" (34 rows). The old import stripped the Japanese, so they used to agree. Renaming the two Other-tab rows to "ATB_10%" / "ATB_20%" would bring 30 Tactical Awoken Mode descriptions back into line with the sheet (the decoder sheet-match floor dropped from 1651 to 1621 effects for this alone).
 
 ## Release: deploy from GitHub Actions (when the feature branch is ready to ship)
 

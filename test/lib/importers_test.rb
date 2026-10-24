@@ -45,6 +45,16 @@ class SheetsImporterTest < ActiveSupport::TestCase
     rows = SheetsImporter.parse_csv("ID,Name\n1,Caf\xE9\n".b)
     assert_equal "Caf", rows.first["Name"]
   end
+
+  test "parse_csv keeps Japanese text from the downloaded bytes" do
+    rows = SheetsImporter.parse_csv("ID,Name (JP)\n20270044,極星革命の象徴・のばら\n".b)
+    assert_equal "極星革命の象徴・のばら", rows.first["Name (JP)"]
+  end
+
+  test "parse_csv drops a leading byte-order mark" do
+    rows = SheetsImporter.parse_csv("﻿ID,Name\n1,Haste\n".b)
+    assert_equal({ "ID" => "1", "Name" => "Haste" }, rows.first)
+  end
 end
 
 class HttpFetchTest < ActiveSupport::TestCase
