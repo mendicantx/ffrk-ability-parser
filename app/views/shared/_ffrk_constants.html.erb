@@ -10,12 +10,12 @@
 window.FFRK = window.FFRK || {};
 
 // Maps internal camelCase-extracted character names to their correct EN display names.
+// The Characters sheet is the master list; the decoder also matches it case-insensitively.
 // Keys are produced by: strip "learningMode" prefix → strip element/mode suffix →
 // split CamelCase → join with spaces → apply minor-word lowercasing.
 window.FFRK.CHAR_CORRECTIONS = {
   // JP romanisations that differ from EN localisation
   'Roza':        'Rosa',
-  'Fusoya':      'FuSoYa',
   'Buts':        'Bartz',
   'Mash':        'Sabin',
   'Tina':        'Terra',
@@ -30,6 +30,9 @@ window.FFRK.CHAR_CORRECTIONS = {
   'Serafi':      'Serafie',
   'Sheruku':     'Chelinka',
   'Cayenne':     'Cyan',
+  'Richard':     'Ricard',
+  'Urara':       'Elarra',
+  'Gilbert':     'Edward',
   // Internal names that collapse multi-word names to one token
   'Drmog':       'Dr. Mog',
   'Dr Mog':      'Dr. Mog',

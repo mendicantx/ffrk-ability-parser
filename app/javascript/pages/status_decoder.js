@@ -28,6 +28,9 @@ const DB = {
   statusMap:             {},   // id → { commonName, effects, duration, codedName }
   otherNameMap:          {},   // other ability id → name
   extraByCharacter:      {},   // character name → [ability Name strings] from Extra sheet
+  charRealm:             {},   // character name → realm (Characters sheet)
+  characterNames:        {},   // lower-case name → Characters sheet name
+  learningModeCounts:    null, // camelCase name part → number of Learning Mode statuses (lazy)
 };
 
 // ─── Load state helpers ──────────────────────────────────────────────────────
@@ -111,7 +114,7 @@ async function loadBattleJs() {
 async function loadSheets() {
   setLoadState('sheets', 'loading', 'fetching…');
   try {
-    const resp = await fetch('/data/sheets?names=status,other,extra');
+    const resp = await fetch('/data/sheets?names=status,other,extra,characters');
     const raw = await resp.json();
     if (raw.error) throw new Error(raw.error);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -130,6 +133,16 @@ async function loadSheets() {
     for (const r of (data.other || [])) {
       const id = parseInt(r['ID']);
       if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
+    }
+
+    // Characters sheet: name → realm (e.g. 'VII'), for series qualifiers in names
+    DB.charRealm = {};
+    DB.characterNames = {};
+    for (const r of (data.characters || [])) {
+      const name = (r['Name'] || '').trim();
+      if (!name) continue;
+      DB.characterNames[name.toLowerCase()] = name;
+      if (r['Realm']) DB.charRealm[name] = r['Realm'].trim();
     }
 
     // Extra sheet: build character → [ability names] lookup for extraRepeat descriptions
@@ -225,6 +238,7 @@ function callArgs(text, argsStart) {
 
 function buildStatusAssignments() {
   DB.helperBodies = {};
+  DB.learningModeCounts = null;
 
   // Scans one define() block for status assignments and adds them to DB.statusAssignments.
   function scanBlock(moduleName) {
@@ -259,6 +273,15 @@ function buildStatusAssignments() {
       DB.statusAssignments[m[1]] = { funcName: m[2], argsText, defineModule: EBM_MODULE, block: '' };
     }
   }
+}
+
+// ─── Character names ─────────────────────────────────────────────────────────
+// Turns a name derived from a coded status key into the Characters sheet's name
+// (docs/decisions.md "Naming"): known JP-romanisation corrections first, then a
+// case-insensitive match against the sheet (e.g. FuSoYa → Fusoya).
+function canonicalCharacterName(name) {
+  const corrected = window.FFRK?.CHAR_CORRECTIONS?.[name] ?? name;
+  return DB.characterNames[corrected.toLowerCase()] ?? corrected;
 }
 
 // ─── Argument splitting ───────────────────────────────────────────────────────
@@ -471,7 +494,7 @@ function decodeCbmP(statusKey, statusId, argsText) {
     const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
     return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
   }).join(' ');
-  const charName = (window.FFRK?.CHAR_CORRECTIONS?.[charRaw]) ?? charRaw;
+  const charName = canonicalCharacterName(charRaw);
 
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
@@ -555,7 +578,7 @@ function decodeCbmD(statusKey, statusId, argsText) {
     const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
     return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
   }).join(' ');
-  const charName = (window.FFRK?.CHAR_CORRECTIONS?.[charRaw]) ?? charRaw;
+  const charName = canonicalCharacterName(charRaw);
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(e => elementDisplayName(e)).join('/')})`
     : '';
@@ -639,7 +662,7 @@ function tamCharInfo(statusKey) {
     const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
     return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
   }).join(' ');
-  const charName = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  const charName = canonicalCharacterName(charRaw);
   return { charName, keyElemKeys };
 }
 
@@ -764,7 +787,20 @@ function decodeTamD(statusKey, statusId, argsText) {
 
 // ─── Or decoder ───────────────────────────────────────────────────────────────
 // Or("learningModeXxx", condition?) → character-specific Learning Mode status
-function decodeOr(statusKey, statusId, argsText) {
+// Number of Learning Mode statuses for one character, keyed by the camelCase name
+// part of their "learningMode…" argument with the variant suffix removed.
+function learningModeCount(namePart) {
+  if (!DB.learningModeCounts) {
+    DB.learningModeCounts = {};
+    for (const a of Object.values(DB.statusAssignments)) {
+      const m = a.argsText.match(/^"learningMode([A-Za-z]+?)(Bansho|Bansyo|Koki|Tenmei)?"/);
+      if (m) DB.learningModeCounts[m[1]] = (DB.learningModeCounts[m[1]] ?? 0) + 1;
+    }
+  }
+  return DB.learningModeCounts[namePart] ?? 0;
+}
+
+function decodeOr(statusKey, statusId, argsText, _block, helperBody = '') {
   const args = splitTopLevelArgs(argsText);
   if (args.length < 1) return null;
 
@@ -785,7 +821,7 @@ function decodeOr(statusKey, statusId, argsText) {
   let charName = words.map((w, i) => (i > 0 && MINOR.has(w.toLowerCase())) ? w.toLowerCase() : w).join(' ');
 
   // Apply corrections from shared constant (see shared/_ffrk_constants.html.erb)
-  charName = (window.FFRK?.CHAR_CORRECTIONS?.[charName]) ?? charName;
+  charName = canonicalCharacterName(charName);
 
   // Qualifier from abilityCondition (element or category) — KOKI statuses have no condition arg
   // so qualifier will be null and they are treated as blanket (all-damage) buffs
@@ -806,8 +842,12 @@ function decodeOr(statusKey, statusId, argsText) {
     qualifier = names.join(', ');
   }
 
-  const qualStr  = qualifier ? ` (${qualifier})` : '';
-  const commonName = `Learning Mode: ${charName}${qualStr}`;
+  // Name, as in the Status sheet: the conditional variant gets its qualifier ("(Wind)")
+  // when the character has more than one Learning Mode; otherwise the plain name
+  // (docs/decisions.md "Decoder wording follows the sheet").
+  const baseName = `Learning Mode: ${charName}`;
+  const hasVariants = learningModeCount(nameMatch[1].replace(/(Bansho|Bansyo|Koki|Tenmei)$/, '')) > 1;
+  const commonName = qualifier && hasVariants ? `${baseName} (${qualifier})` : baseName;
 
   // Damage map — try to parse a custom one from the condition arg, else use Or() defaults.
   // Default: level 0→+5%, 1→+10%, 2→+15%, 3→+20%, 4→+25%, 5→+30%
@@ -819,17 +859,21 @@ function decodeOr(statusKey, statusId, argsText) {
     { level: 4, sizeName: 'SMALL_125' },
     { level: 5, sizeName: 'MEDIUM' },
   ];
-  const mapMatches = [...condText.matchAll(/greaterEqual\s*:\s*(\d+)[^}]*?DAMAGE_FACTOR\.([A-Z_0-9]+)/g)];
-  const damageMap = mapMatches.length > 0
-    ? mapMatches.map(m => ({ level: parseInt(m[1]), sizeName: m[2] })).sort((a, b) => a.level - b.level)
-    : OR_DEFAULT_MAP;
+  // {numberCondition:{greaterEqual:N},damageFactor:…DAMAGE_FACTOR.SIZE} entries, from the
+  // args if they pass a table, else from the helper's own default, else OR_DEFAULT_MAP.
+  const tableOf = text => [...text.matchAll(/greaterEqual\s*:\s*(\d+)\s*\}\s*,\s*damageFactor\s*:[^,}\]]*?DAMAGE_FACTOR\.([A-Z_0-9]+)/g)]
+    .map(m => ({ level: parseInt(m[1]), sizeName: m[2] })).sort((a, b) => a.level - b.level);
+  const argsTable = tableOf(argsText);
+  const helperTable = tableOf(helperBody);
+  const damageMap = argsTable.length ? argsTable : helperTable.length ? helperTable : OR_DEFAULT_MAP;
   const pcts   = damageMap.map(e => { const v = DB.damageFactor[e.sizeName]; return v != null ? (v - 100) : '?'; });
   const levels = damageMap.map(e => e.level);
 
   const damageClause = qualifier
-    ? `increases damage dealt by ${qualifier} Abilities by ${pcts.join('/')}%`
+    ? `${qualifier} attacks deal ${pcts.join('/')}% more damage`
     : `increases damage dealt by ${pcts.join('/')}%`;
-  const effects = `Keeps track of ${commonName} level, ${damageClause} at ${commonName} level ${levels.join('/')}.`;
+  const levelRange = `(${Math.min(...levels)}~${Math.max(...levels)})`;
+  const effects = `Keeps track of ${baseName} level ${levelRange}, ${damageClause} at ${baseName} level ${levels.join('/')}`;
 
   return {
     id: statusId,
@@ -904,7 +948,7 @@ function decodeBusterP(statusKey, statusId, argsText) {
     const w = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
     return (i > 0 && MINOR_WORDS.has(w.toLowerCase())) ? w.toLowerCase() : w;
   }).join(' ');
-  const charName = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  const charName = canonicalCharacterName(charRaw);
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(k => elementDisplayName(k)).join('/')})`
     : '';
@@ -966,7 +1010,7 @@ function decodeEbmP(statusKey, statusId, argsText) {
     const word = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
     return (i > 0 && MINOR_WORDS.has(word.toLowerCase())) ? word.toLowerCase() : word;
   }).join(' ');
-  const charName      = window.FFRK?.CHAR_CORRECTIONS?.[charRaw] ?? charRaw;
+  const charName      = canonicalCharacterName(charRaw);
   const elemQualifier = keyElemKeys.length > 0
     ? ` (${keyElemKeys.map(k => elementDisplayName(k)).join('/')})`
     : '';
@@ -1138,7 +1182,7 @@ function decodeStatus(statusKey) {
   const body = helperBody(assignment);
   for (const d of STATUS_DECODERS) {
     if (d.module !== defineModule || !d.fingerprint.test(body)) continue;
-    decoded = d.decode(statusKey, id, argsText, block);
+    decoded = d.decode(statusKey, id, argsText, block, body);
     if (decoded) break;
   }
 
