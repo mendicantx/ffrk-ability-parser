@@ -243,10 +243,10 @@ The fine-grained token the GitHub CLI uses has no Secrets permission (by design)
    cd E:\workspaces\ffrk-ability-parser
    Get-Content "$env:USERPROFILE\.ssh\gha_deploy.pub" | ssh jason@mendicant.com "cat >> ~/.ssh/authorized_keys"
    ```
-3. **Record the server's host keys and check them** (the ed25519 fingerprint from the first command must equal the one from the second, which reads it on the server itself):
+3. **Record the server's host keys and check them.** Use Git's `ssh-keyscan`: the one built into Windows can't negotiate the server's preferred key exchange ("unsupported KEX method sntrup761x25519-sha512") and writes an empty file. The ed25519 fingerprint from the second command must equal the one from the third, which reads it on the server itself (done 2026-10-24: `SHA256:kJMAJJot9CE60rfihFJ+EOuROxH1O/qYSjDfhRs3cQg`):
    ```powershell
    cd E:\workspaces\ffrk-ability-parser
-   ssh-keyscan mendicant.com 2>$null | Out-File -Encoding ascii "$env:USERPROFILE\.ssh\gha_known_hosts"
+   & "C:\Program Files\Git\usr\bin\ssh-keyscan.exe" mendicant.com 2>$null | Out-File -Encoding ascii "$env:USERPROFILE\.ssh\gha_known_hosts"
    ssh-keygen -lf "$env:USERPROFILE\.ssh\gha_known_hosts"
    ssh jason@mendicant.com "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
    ```
