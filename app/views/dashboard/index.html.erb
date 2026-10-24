@@ -9,28 +9,9 @@
 <div id="battlejs-area"></div>
 </div>
 
-<script>
-// ── Constant map extraction (same logic as ability_parser) ───────────────────
-function extractConstantMap(js, name) {
-  const marker = name + ':{';
-  const merged = {};
-  let searchFrom = 0;
-  while (true) {
-    const idx = js.indexOf(marker, searchFrom);
-    if (idx === -1) break;
-    let depth = 0, start = idx + name.length + 1, i = start;
-    for (; i < js.length; i++) {
-      if (js[i] === '{') depth++;
-      else if (js[i] === '}') { depth--; if (depth === 0) break; }
-    }
-    const block = js.slice(start + 1, i);
-    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-      merged[m[1]] = parseInt(m[2]);
-    }
-    searchFrom = idx + 1;
-  }
-  return merged;
-}
+<script type="module">
+import { extractConstantMap } from 'ffrk/battle_js';
+import { splitSheetsResponse } from 'ffrk/server_data';
 
 // ── Render sheet tabs ────────────────────────────────────────────────────────
 function renderSheets(sheetData) {
@@ -149,8 +130,7 @@ function renderBattleJs(jsText) {
         <span class="badge bg-secondary fw-normal ms-1">${jsText.length.toLocaleString()} chars</span>
       </summary>
       <p class="text-secondary fst-italic mt-2" style="font-size:13px">
-        Raw JS available in the browser console on the
-        <a href="/ability_parser">Ability Parser</a> page via <code>rawBattleJs</code>.
+        Raw JS is served at <a href="/data/battle_js">/data/battle_js</a>.
       </p>
     </details>`;
 }
@@ -160,13 +140,13 @@ function renderBattleJs(jsText) {
   const msgEl = document.getElementById('load-msg');
   try {
     const [sheetResp, jsResp] = await Promise.all([
-      fetch('/ability_parser/sheet_data'),
-      fetch('/ability_parser/battle_js'),
+      fetch('/data/sheets'),
+      fetch('/data/battle_js'),
     ]);
     if (!sheetResp.ok) throw new Error(`sheet_data HTTP ${sheetResp.status}`);
     if (!jsResp.ok)    throw new Error(`battle_js HTTP ${jsResp.status}`);
 
-    const sheetData = await sheetResp.json();
+    const { sheets: sheetData } = splitSheetsResponse(await sheetResp.json());
     const jsText    = await jsResp.text();
 
     renderSheets(sheetData);

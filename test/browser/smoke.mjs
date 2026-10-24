@@ -117,6 +117,15 @@ try {
   check('decoder page has no script errors', sd.errors.length === 0, sd.errors.join(' | '));
   sd.close();
 
+  // ── Dashboard ──
+  const db = await openPage(`${BASE}/`);
+  await db.waitFor(`!!document.getElementById('load-msg') && !/Loading/.test(${text('load-msg')})`, 'dashboard data to load');
+  const msg = await db.evaluate(text('load-msg'));
+  check('dashboard loads sheets and battle.js', /rows across \d+ sheets/.test(msg), msg);
+  check('dashboard lists only real sheets', !(await db.evaluate(`document.getElementById('sheets-area').innerHTML.includes('Last Refreshed At')`)));
+  check('dashboard has no script errors', db.errors.length === 0, db.errors.join(' | '));
+  db.close();
+
   // ── Ability Parser ──
   const battles = path.join(ROOT, 'test/fixtures/battles');
   for (const file of fs.readdirSync(battles).filter(f => /\.(json|txt)$/.test(f)).sort()) {

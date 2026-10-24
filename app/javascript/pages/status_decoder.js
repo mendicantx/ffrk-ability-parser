@@ -1,6 +1,9 @@
 // Status Decoder page script, loaded as an ES module by
 // app/views/status_decoder/index.html.erb via javascript_import_module_tag.
 
+import { extractConstantMap, invert } from 'ffrk/battle_js';
+import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
+
 // ─── DB ──────────────────────────────────────────────────────────────────────
 const DB = {
   // battle.js forward maps: name → id
@@ -62,36 +65,6 @@ function enableSearch() {
   document.getElementById('status-input').focus();
 }
 
-// ─── battle.js helpers ───────────────────────────────────────────────────────
-function extractConstantMap(js, name) {
-  // Merge ALL occurrences — STATUS_AILMENTS_TYPE is spread across 13
-  // sub-module blocks, each covering a different slice of status IDs.
-  const marker = name + ':{';
-  const merged = {};
-  let searchFrom = 0;
-  while (true) {
-    const idx = js.indexOf(marker, searchFrom);
-    if (idx === -1) break;
-    let depth = 0, start = idx + name.length + 1, i = start;
-    for (; i < js.length; i++) {
-      if (js[i] === '{') depth++;
-      else if (js[i] === '}') { depth--; if (depth === 0) break; }
-    }
-    const block = js.slice(start + 1, i);
-    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-      merged[m[1]] = parseInt(m[2]);
-    }
-    searchFrom = idx + 1;
-  }
-  return merged;
-}
-
-function invert(map) {
-  const inv = {};
-  for (const [k, v] of Object.entries(map)) inv[v] = k;
-  return inv;
-}
-
 // ─── battle.js stored raw ────────────────────────────────────────────────────
 let _rawBattleJs = '';
 
@@ -138,9 +111,10 @@ async function loadSheets() {
   setLoadState('sheets', 'loading', 'fetching…');
   try {
     const resp = await fetch('/data/sheets?names=status,other,extra');
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    const raw = await resp.json();
+    if (raw.error) throw new Error(raw.error);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
 
     for (const r of (data.status || [])) {
       const id = parseInt(r['ID']);
@@ -168,7 +142,7 @@ async function loadSheets() {
       }
     }
 
-    const refreshed = data.last_refreshed_at ? ` · refreshed ${new Date(data.last_refreshed_at).toLocaleString()}` : '';
+    const refreshed = lastRefreshedAt ? ` · refreshed ${new Date(lastRefreshedAt).toLocaleString()}` : '';
     setLoadState('sheets', 'ok', `${Object.keys(DB.statusMap).length} status rows${refreshed}`);
     sheetsReady = true;
   } catch(e) {
@@ -1537,17 +1511,14 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   const detail = document.getElementById('refresh-detail');
   btn.disabled = true;
   detail.textContent = 'refreshing on the server…';
-  const token = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
-  try {
-    const resp = await fetch('/data/refresh', { method: 'POST', headers: { 'X-CSRF-Token': token } });
-    if (resp.ok) { location.reload(); return; }
-    const body = await resp.json().catch(() => ({}));
-    detail.textContent = body.error ?? `HTTP ${resp.status}`;
-  } catch (e) {
-    detail.textContent = e.message;
-  }
+  const error = await refreshServerData();
+  if (!error) { location.reload(); return; }
+  detail.textContent = error;
   btn.disabled = false;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 Promise.all([loadBattleJs(), loadSheets()]);
+
+// Exposed for the Node tests (test/js); the page itself doesn't import anything from here.
+export { DB, decodeStatus, parseReady };
