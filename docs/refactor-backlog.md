@@ -171,7 +171,7 @@ A battle capture holds every soul break for every party member, so one or two ca
 
 ## Findings from the captures
 
-- **Ability Crash gets a Soul Break row.** In the Seymour XSB, Ability Crash (22540040) renders a Soul Break preview with character "Unknown" as well as its Other-tab follow-up row. decisions.md routes Ability Crash to the Other tab and the Soul Breaks sheet has no row for it, so the Soul Break row should be suppressed. To fix in story 18 (Extra soul break hooks).
+- **Ability Crash gets a Soul Break row.** In the Seymour XSB, Ability Crash (22540040) renders a Soul Break preview with character "Unknown" as well as its Other-tab follow-up row. decisions.md routes Ability Crash to the Other tab and the Soul Breaks sheet has no row for it. Fixed in `task/ability-crash-row`: Ability Crash now gets only its Other-tab row.
 - **Statuses missing from the Status sheet show coded names.** `EXTRA_BUDDY_MODE_SEYMOUR` (56777) and `CUSTOM_PARAM_MULTI_ATK_15_MATK_15_DEF_25_MDEF_25_MND_15_LARGE` (6116) aren't in the sheet, so the effects text shows the raw key. The decoder can describe the Extra Mode status; a shared `describeStatus` (sheet first, decoder fallback) in story 13 fixes this.
 
 - **Learning Mode wording differs from the sheet.** The newly decoded Learning Mode statuses use the decoder's wording ("Keeps track of Learning Mode: Aerith (Wind) level, increases damage dealt by Wind Abilities by 5/10/…%"), while the sheet says "(0~5)" and "Wind attacks deal …% more damage", and names the no-element variants with a series ("Learning Mode: Aerith (VII)"). Names match the sheet for 40 of 68, effects for 16 of 68.
