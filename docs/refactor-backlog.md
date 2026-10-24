@@ -140,6 +140,7 @@ As the maintainer, I want one `deriveCombatColumns` and a column schema per shee
 ### 17. One relations map and a render context
 As the maintainer, I want one `relations` map and `renderAbility(parsed, depth, ctx)`, so that the seven lookup maps and eleven positional arguments go away.
 - **Test:** `node --test "test/js/*.test.mjs"`. Goldens byte-identical.
+- **Status:** done (`task/relations-context`), ahead of stories 15 and 16 because it needs no owner input. The seven maps became named fields of one `relations` object built by `recordRelations()`; `markSuppressedSubAbilities()` holds the card-suppression rule. Buster and Tactical Awoken branches have no capture yet, so they're covered only by the rename being mechanical.
 
 ### 18. Soul break type registry
 As the maintainer, I want each soul break type described in one place, so that a new type is data rather than new branches.
