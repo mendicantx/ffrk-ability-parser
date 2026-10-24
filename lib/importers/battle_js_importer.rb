@@ -8,8 +8,9 @@ require_relative '../http_fetch'
 #   # => "define(\"event/challenge/battle/EventLogic\", ...)"
 module BattleJsImporter
   def self.fetch(url)
-    body = HttpFetch.get(url)
-    unpack(body).encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')
+    # The body is UTF-8 (it contains Japanese text); Net::HTTP returns it as bytes.
+    body = HttpFetch.get(url).dup.force_encoding('UTF-8').scrub('')
+    unpack(body)
   end
 
   # Extracts all STATUS_AILMENTS_TYPE entries from unpacked battle.js.
@@ -42,12 +43,28 @@ module BattleJsImporter
 
     raise "Source does not appear to be p,a,c,k,e,r packed" unless match
 
-    payload  = match[1]
+    # Both are single-quoted JS string literals, so undo their escapes first,
+    # exactly as a JS engine does before the packer function runs.
+    payload  = unescape_js_string(match[1])
     base     = match[2].to_i
     _count   = match[3].to_i
-    keywords = match[4].split('|')
+    keywords = unescape_js_string(match[4]).split('|')
 
     decode_payload(payload, base, keywords)
+  end
+
+  JS_ESCAPES = { 'n' => "\n", 'r' => "\r", 't' => "\t", 'b' => "\b", 'f' => "\f", 'v' => "\v", '0' => "\0" }.freeze
+
+  # Interprets the escape sequences in the contents of a JS string literal:
+  # \n \t …, \xHH, \uHHHH, line continuations, and \<char> → <char> (\\ \' \").
+  def self.unescape_js_string(text)
+    text.gsub(/\\(u\h{4}|x\h{2}|\r\n|[\s\S])/) do
+      seq = Regexp.last_match(1)
+      if seq.length > 1 && seq.start_with?('u', 'x') then seq[1..].to_i(16).chr(Encoding::UTF_8)
+      elsif ["\n", "\r\n", "\r"].include?(seq) then ''
+      else JS_ESCAPES.fetch(seq, seq)
+      end
+    end
   end
 
   private
@@ -58,7 +75,9 @@ module BattleJsImporter
     # The payload uses base-N encoded indices as word placeholders.
     # Replace each placeholder with the keyword at that index, or leave it
     # as-is if the keyword slot is empty (meaning the original word is used).
-    payload.gsub(/\b([0-9a-zA-Z]+)\b/) do |word|
+    # Word boundaries are ASCII-only, as in JS (Ruby's \b would also treat
+    # Japanese characters as word characters).
+    payload.gsub(/(?<![0-9A-Za-z_])[0-9A-Za-z]+(?![0-9A-Za-z_])/) do |word|
       index = word_to_index(word, base)
       replacement = keywords[index]
       (replacement.nil? || replacement.empty?) ? word : replacement

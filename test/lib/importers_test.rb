@@ -83,3 +83,30 @@ class HttpFetchTest < ActiveSupport::TestCase
     end
   end
 end
+
+class BattleJsUnpackFidelityTest < ActiveSupport::TestCase
+  # Builds a minimal packer expression: payload words 0..n map to the keyword list.
+  def packed(payload, keywords)
+    "eval(function(p,a,c,k,e,r){return p}('#{payload}',62,#{keywords.size},'#{keywords.join('|')}'.split('|'),0,{}))"
+  end
+
+  BS = 92.chr # one backslash, spelled out to keep the escaping readable
+
+  test "unescapes the payload like a JS string literal" do
+    # Packed literal: 0(\'a\\b\',\"x\")\n
+    payload = "0(#{BS}'a#{BS}#{BS}b#{BS}',#{BS}\"x#{BS}\")#{BS}n"
+    assert_equal "say('a#{BS}b',\"x\")\n", BattleJsImporter.unpack(packed(payload, %w[say]))
+  end
+
+  test "keeps Japanese text and decodes unicode escapes" do
+    # Packed literal: 0:"毒ス"
+    payload = "0:\"毒#{BS}u30b9\""
+    assert_equal 'name:"毒ス"', BattleJsImporter.unpack(packed(payload, %w[name]))
+  end
+
+  test "word boundaries are ASCII-only, as in JS" do
+    # In JS, 0 next to a Japanese character is still a separate word and gets replaced.
+    js = BattleJsImporter.unpack(packed(%q{"毒0"+a_0}, %w[poison]))
+    assert_equal '"毒poison"+a_0', js
+  end
+end

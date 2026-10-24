@@ -1,11 +1,11 @@
 # Test data snapshot
 
-A frozen, gzipped copy of `data/` used by the tests. Taken 2026-10-24T00:50:57Z.
+A frozen, gzipped copy of `data/` used by the tests. Taken 2026-10-24T02:10:38Z.
 Regenerate with `rake data:refresh` then `rake data:snapshot`, and review the golden-file diffs.
 
 | File | SHA-256 (uncompressed) |
 |---|---|
-| `battle_js.txt` | `5dbb6d8ca8d4612bc7b5a104b08cfa38cee24c4154f9142dbabdf76ed686d357` |
+| `battle_js.txt` | `0c934f8faa06bd208e27128db284c1992bee1d9923ea6e4b29cf53e4cd33142d` |
 | `sheets/action_args.json` | `918fc5ae1f8bd5193628a658cb3ffd622f0cc73fe51b2257e794a89dd38fd40d` |
 | `sheets/characters.json` | `e7d853c345c9402401d8e1cdc661f02ca0767a2f6eb4904c72519548e73ed73b` |
 | `sheets/extra.json` | `7b6ba6c3f214d82452f394c4109fc4cc7a20fa319990d69e95ebf026c7555c33` |
