@@ -964,10 +964,19 @@ function generateEffectsText(parsed) {
     const pc = partyConditionParts(condArgStr);
     if (!pc) return null;
     const below = pc.count <= 1 ? '0' : `0-${pc.count - 1}`;
-    return `if there are ${below}/${pc.count}+ ${pc.names.join('/')} allies in the party`;
+    return `if there are ${below}/${pc.count}+ ${pc.allies}`;
   }
-  // { count, names } of a partyCondition ("at least count of names"), or null.
+  // { count, names, allies } of a partyCondition ("at least count of names"), or null.
+  // allies is the counted phrase: "Shooter allies in the party", or "allies with Attach
+  // Dark" when allies are counted by their Infusion (as the sheet writes "2+ allies with
+  // Attach Earth").
   function partyConditionParts(condArgStr) {
+    const parts = partyConditionNames(condArgStr);
+    if (!parts) return null;
+    const allies = parts.attach ? `allies with Attach ${parts.names.join(' or ')}` : `${parts.names.join('/')} allies in the party`;
+    return { ...parts, allies };
+  }
+  function partyConditionNames(condArgStr) {
     if (!condArgStr || !condArgStr.includes('partyCondition')) return null;
     const countM = condArgStr.match(/greaterEqual\s*:\s*(\d+)/);
     if (!countM) return null;
@@ -983,6 +992,11 @@ function generateEffectsText(parsed) {
     const serM = condArgStr.match(/anyBuddySeriesId\s*:\s*\[([^\]]+)\]/);
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
+    }
+    const attachM = !names.length && condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+    if (attachM) {
+      const elements = (attachM[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)]).filter(Boolean).map(fmtElement);
+      return elements.length ? { count, names: elements, attach: true } : null;
     }
     return names.length ? { count, names } : null;
   }
@@ -1039,10 +1053,10 @@ function generateEffectsText(parsed) {
 
   // Collect statuses from an ability's sub-actions, tagged with their target.
   // HIT_ACTOR_OF_SPECIFIC_SUB_ACTION (5001): resolves to the target of the referenced sub-action.
-  function subActionStatuses(ab) {
+  function subActionStatuses(ab, skip = new Set()) {
     const out = [];
     for (const sa of ab.subActions) {
-      if (sa.isStateLevelIncrement) continue;
+      if (sa.isStateLevelIncrement || skip.has(sa)) continue;
       let target = sa.target;
       if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
         const m = sa.targetArgRaw.match(/processOrder\s*:\s*(\d+)/);
@@ -1350,6 +1364,32 @@ function generateEffectsText(parsed) {
     return null;
   }
 
+  // A status block on a party condition, or null: "[X] to the user/[X] to all allies if
+  // there are 0-2/3+ Job allies in the party" — ELSE first (fewer allies), IF second —
+  // or every tier when there are ELSE IF branches.
+  function partyConditionClause(condStat) {
+    if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
+    if (condStat.elifs.length) return partyTiers(condStat);
+    const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+    const parts = [];
+    if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
+    if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
+    return parts.length ? `${parts.join('/')} ${parsePartyConditionLabel(condStat.conditionArg)}` : null;
+  }
+
+  // Sub-actions inside IF/ELSE blocks (and the block markers themselves).
+  function subActionsInBlocks(sas) {
+    const inside = new Set();
+    let depth = 0;
+    for (const sa of sas) {
+      const raw = sa.controlTypeRaw ?? 0;
+      if (raw === 1) depth++;
+      if (depth > 0) inside.add(sa);
+      if (raw === 4) depth--;
+    }
+    return inside;
+  }
+
   // IF / ELSE IF / ELSE on party counts → "[A] to the user/[B], [C] to the user if there
   // are 0-2/3/4+ Shooter allies in the party", fewest allies first (as in the sheet's
   // "0-3/4/5 VII allies"). Null when the branches count different kinds of ally.
@@ -1358,7 +1398,7 @@ function generateEffectsText(parsed) {
       { pc: partyConditionParts(condStat.conditionArg), statuses: condStat.ifStatuses, target: condStat.ifTarget },
       ...condStat.elifs.map(e => ({ pc: partyConditionParts(e.conditionArg), statuses: e.statuses, target: e.target })),
     ];
-    const who = b => b.pc?.names.join('/');
+    const who = b => b.pc?.allies;
     if (branches.some(b => !b.pc || who(b) !== who(branches[0]))) return null;
     branches.sort((a, b) => a.pc.count - b.pc.count);
     const tiers = [
@@ -1371,7 +1411,7 @@ function generateEffectsText(parsed) {
       return next - 1 === t.from ? `${t.from}` : `${t.from}-${next - 1}`;
     });
     const parts = tiers.map(t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ') + targetLabel(t.target));
-    return `${parts.join('/')} if there are ${labels.join('/')} ${who(branches[0])} allies in the party`;
+    return `${parts.join('/')} if there are ${labels.join('/')} ${who(branches[0])}`;
   }
 
   const nestedCondAtk = findNestedConditionalAtk(exec.subActions);
@@ -1507,9 +1547,13 @@ function generateEffectsText(parsed) {
         _partyCondition: null,
       }));
     });
+    // A party-condition IF/ELSE in the wrapped ability is one conditional clause, not a
+    // list of everything in both branches.
+    const wrappedCond = findConditionalStatus(wrapped.subActions);
+    const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond) : null;
     const activationStatuses = [
       ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
-      ...subActionStatuses(wrapped),
+      ...subActionStatuses(wrapped, wrappedPartyClause ? subActionsInBlocks(wrapped.subActions) : undefined),
       ...attachLvStatuses,
     ].filter(s => !isLevelTracker(s));
     const seenIds = new Set();
@@ -1559,6 +1603,7 @@ function generateEffectsText(parsed) {
         if (allyParts.length)  segs.push(`Grants ${allyParts.join('/')}${condSuffix}`);
       }
     }
+    if (wrappedPartyClause) segs.push(`Grants ${wrappedPartyClause}`);
   } else {
     // Direct ability (exec = parsed): depth-aware collection with conditional status support.
     // Collect unconditional statuses at depth 0, grouped by target.
@@ -1591,21 +1636,10 @@ function generateEffectsText(parsed) {
       const statLabel      = parseStatComparisonLabel(condStat.conditionArg)
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
-      const pcLabel        = parsePartyConditionLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const tiers = pcLabel && condStat.elifs.length ? partyTiers(condStat) : null;
-      if (tiers) {
-        clauses.push(tiers);
-      } else if (pcLabel) {
-        // Party condition: "Grants [X] to user/[X] to all allies if there are 0-2/3+ Job allies in the party"
-        // ELSE branch listed first (fewer allies = lower threshold), IF branch second (more allies).
-        const elseStr   = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-        const ifLabel   = targetLabel(condStat.ifTarget);
-        const elseLabel = targetLabel(condStat.elseTarget);
-        const parts = [];
-        if (elseStr) parts.push(`${elseStr}${elseLabel}`);
-        if (ifStr)   parts.push(`${ifStr}${ifLabel}`);
-        if (parts.length) clauses.push(parts.join('/') + ` ${pcLabel}`);
+      const partyClause = partyConditionClause(condStat);
+      if (partyClause) {
+        clauses.push(partyClause);
       } else if (condStat.hasElse) {
         const tLabel  = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const elseStr = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
@@ -2146,7 +2180,7 @@ function renderCFSheetPreview(parsed, cfParent, genEffects) {
     'Character':   { val: cfParent?.character || '' },
     'Source':      { val: cfParent?.sbName    || '' },
     'SB Ver':      { val: cfParent?.sbVer || 'CASB'  },
-    'Name':        { val: 'Crystal Force I'         },
+    'Name':        { val: `Crystal Force ${cfParent?.number ?? 'I'}` },
     'Type':        { val: type                      },
     'Target':      { val: target                    },
     'Formula':     { val: formula                   },
@@ -2503,9 +2537,12 @@ function recordRelations(parsed, ability, ctx) {
   // Record parent SB info for any Crystal Force sub-abilities
   const sbRow = lookupSoulBreak(parsed.abilityId);
   if (sbRow) {
+    // Crystal Force I is arg2 and II is arg3, in arg order.
+    const crystalForces = parsed.subAbilities.filter(sub => sub._label === 'crystalForceAbilityId');
     for (const sub of parsed.subAbilities) {
       if (sub._label === 'crystalForceAbilityId') {
         relations.cfParent[sub.abilityId] = {
+          number:    crystalForces.indexOf(sub) === 1 ? 'II' : 'I',
           character: sbRow['Character'] || actorName,
           sbName:    sbRow['Name']      || '',
           sbVer:     soulBreakVersion(sbRow, sbRow['Character'] || actorName, sbRow['Tier'] || 'CASB'),

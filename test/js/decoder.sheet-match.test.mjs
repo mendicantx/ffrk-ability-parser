@@ -13,7 +13,7 @@ const FLOORS = {
   ULTIMATE_BUDDY_MODE: { names: 270, effects: 137 },
   LIMIT_BREAK_SOUL_DRIVE: { names: 154, effects: 101 },
   DUAL_AWAKE_MODE:     { names: 295, effects: 145 },
-  all:                 { names: 2633, effects: 2062 },  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%
+  all:                 { names: 2636, effects: 2065 },  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%
 };
 
 // Clauses the decoder always writes but many sheet rows leave out. A row matches if
