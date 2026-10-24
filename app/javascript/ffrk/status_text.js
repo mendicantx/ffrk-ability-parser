@@ -48,14 +48,17 @@ const COUNT_WORDS = { 1: 'a', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'si
 const EFFECTS = {
   // Follow-ups that cast one ability: "Casts Retsu after using two Wind abilities".
   REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
-    const known = new Set(['key', 'type', 'chaseType', 'abilityCondition', 'abilityUseCountCondition', 'chaseAbilityId']);
+    const known = new Set(['key', 'type', 'chaseType', 'abilityCondition', 'abilityUseCountCondition', 'chaseAbilityId', 'chaseAbilityDoneCountForIsDone']);
     if (e.chaseAbilityId == null || Object.keys(e).some(k => !known.has(k))) return null;
     const uses = e.abilityUseCountCondition?.multiple ?? 1;
     if (Object.keys(e.abilityUseCountCondition ?? {}).some(k => k !== 'multiple') || !COUNT_WORDS[uses]) return null;
     const name = ctx.abilityName(e.chaseAbilityId);
     const subject = conditionSubject(e.abilityCondition, ctx, 'or');
     if (!name || !subject) return null;
-    return `Casts ${name} after using ${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}`;
+    const limit = e.chaseAbilityDoneCountForIsDone;
+    if (limit != null && !COUNT_WORDS[limit]) return null;
+    const removed = limit != null ? `, removed after triggering ${limit === 1 ? 'once' : `${COUNT_WORDS[limit]} times`}` : '';
+    return `Casts ${name} after using ${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}${removed}`;
   },
   INCREASE_ELEMENT_ATK: (e, ctx) => {
     const subject = conditionSubject({ elementId: e.elementId }, ctx);
@@ -92,20 +95,27 @@ const EFFECTS = {
       const name = ctx.abilityName(cond.abilityId);
       return name ? `Increases the damage cap by ${amount} for ${name}` : null;
     }
-    return null;
+    const elements = [].concat(cond.elementId ?? cond.anyElementIds ?? []);
+    if (elements.length === 9) return `Increases the damage/healing cap for all elemental attacks by ${amount}`;
+    const subject = conditionSubject(cond, ctx, 'or');
+    return subject ? `Increases the damage/healing cap for ${subject} attacks by ${amount}` : null;
   },
   INCREASE_EXECUTED_DAMAGE: (e, ctx) => {
-    if (e.damageFactor == null) return null;
+    const factor = e.damageFactor ?? e.maximumDamageFactor;
+    if (factor == null) return null;
     const cond = e.abilityCondition ?? {};
     if (cond.hasWeakness && Object.keys(cond).every(k => k === 'hasWeakness' || k === 'hasDamage')) {
-      return `Increases damage dealt by ${percent(e.damageFactor)}% when exploiting elemental weaknesses`;
+      return `Increases damage dealt by ${percent(factor)}% when exploiting elemental weaknesses`;
     }
     if (cond.isAbility) {
       const subject = conditionSubject(cond, ctx, 'or');
-      return subject ? `${subject} abilities deal ${percent(e.damageFactor)}% more damage` : null;
+      return subject ? `${subject} abilities deal ${percent(factor)}% more damage` : null;
     }
     return null;
   },
+  // "Ignores 50% of the target's DEF and RES"
+  DEF_AND_MDEF_PENETRATION: e => (e.abilityCondition || e.penetrationFactorMapType == null
+    ? null : `Ignores ${e.penetrationFactorMapType}% of the target's DEF and RES`),
 };
 
 // ─── Names ───────────────────────────────────────────────────────────────────
@@ -148,7 +158,7 @@ const NAMES = {
   },
   INCREASE_EXECUTED_DAMAGE: (e, ctx, t) => {
     const cond = e.abilityCondition ?? {};
-    const pct = e.damageFactor - 100;
+    const pct = (e.damageFactor ?? e.maximumDamageFactor) - 100;
     const when = t.suffix || t.timeSuffix;
     if (cond.hasWeakness) return `Weakness +${pct}% Boost${when}`;
     const elements = elementNames(cond, ctx);
@@ -156,7 +166,15 @@ const NAMES = {
     const categories = categoryNames(cond, ctx);
     return categories.length ? `${categories.join(', ')} +${pct}% Boost${when}` : null;
   },
-  INCREASE_DAMAGE_THRESHOLD_LV: (e, ctx, t) => (e.abilityCondition ? null : `Damage Cap +${e.damageThresholdLv * 10000}${t.suffix}`),
+  INCREASE_DAMAGE_THRESHOLD_LV: (e, ctx, t) => {
+    const amount = e.damageThresholdLv * 10000;
+    if (!e.abilityCondition) return `Damage Cap +${amount}${t.suffix}`;
+    const elements = elementNames(e.abilityCondition, ctx);
+    if (!elements.length) return null;
+    return `${elements.length === ALL_ELEMENTS ? 'Prismatic' : elements.join(', ')} Damage Cap +${amount}${t.suffix}`;
+  },
+  DEF_AND_MDEF_PENETRATION: (e, ctx, t) => (e.abilityCondition ? null
+    : `DEF and RES ${e.penetrationFactorMapType}% Piercing${t.suffix || t.timeSuffix}`),
 };
 
 function statusNameFor(params, ctx) {
@@ -182,6 +200,8 @@ function describeDurations(durations, ctx) {
       const name = ctx.statusName(d.saId);
       if (!name) return null;
       suffixes.push({ removedUnless: name });
+    } else if (type === 'UNSET_WHEN_SPECIFIC_EFFECT_IS_DONE') {
+      // Ends when an effect finishes (e.g. after N follow-ups) — the effect's own text says so.
     } else return null;
   }
   return { duration, suffixes };
@@ -207,10 +227,11 @@ export function describeStatus(params, ctx) {
   }
   // Tied to another status: cast speed reads "… while in X", everything else
   // ", removed if the character hasn't [X]" (the sheet's majority wordings).
+  const allCaps = params.effects.every(e => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type) === 'INCREASE_DAMAGE_THRESHOLD_LV');
   const allCast = params.effects.every(e => nameOf(ctx.conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE, e.type) === 'INCREASE_CAST_TIME_FACTOR');
   for (const { removedUnless } of durations.suffixes) {
     if (allCast) clauses[clauses.length - 1] = clauses[clauses.length - 1].replace(/%NOUN%\w+$/, '') + ` while in ${removedUnless}`;
-    else clauses.push(`removed if the character hasn't [${removedUnless}]`);
+    else clauses.push(`removed if the ${allCaps ? 'user' : 'character'} hasn't [${removedUnless}]`);
   }
   for (let i = 0; i < clauses.length; i++) clauses[i] = clauses[i].replace('%NOUN%', ' ');
   // Follow-ups on the same trigger merge: "Casts A and B after using a Support ability".
