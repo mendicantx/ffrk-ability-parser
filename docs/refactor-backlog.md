@@ -220,52 +220,50 @@ These are multi-effect modes, which need per-family composition rules.
 
 **Open question for the owner (waiting on a definitive answer; no change until then):** 34 Tactical Awoken Mode rows say "…triggers [ATB_10%] after using Wind abilities…". In the game data each casts follow-up 31545795 ("ATB短縮_10%"), which grants [111% ATB 1] (status 55765). "ATB_10%" looks like the follow-up's name with the Japanese stripped, inside the sheet's own text. About 52 similar rows, such as 55763 "Lightning 125% ATB Quick Cycle (Tactical)", name the granted status instead: "Grants [125% ATB 1] after using a Lightning ability". Options: reword the 34 rows to "grants [111% ATB 1] after using …" (and have the decoder write that wording), or name the follow-up as "[ATB短縮_10%]".
 
-## Release: deploy from GitHub Actions (when the feature branch is ready to ship)
+## Release: deploy from GitHub Actions
 
-### What the current config shows
-- **Repo fetch:** `repo_url` is SSH (`git@github.com:mendicantx/ffrk-ability-parser.git`), and `ssh_options` has `forward_agent: true`. So the server clones with whatever key the deploying machine's agent holds.
-- **Repo visibility:** the repo is public.
-- **Ruby on the server:** nothing hard-codes a Ruby version or PATH. `capistrano-asdf` uploads a wrapper that sources `~/.asdf/asdf.sh` (present in asdf v0.14.1) and runs commands through `asdf exec`. asdf reads the release's `.tool-versions` (`ruby 4.0.9`), which takes precedence over `~/.tool-versions`, so the server must have 4.0.9 installed, which it does.
-- **Gems on the server:** `capistrano/bundler` installs `without development:test`, so the server doesn't need the Capistrano gems.
-- **Stage:** `production` (`config/deploy/production.rb`, server `mendicant.com`, user `jason`).
-- **Capistrano gems:** in the Gemfile's `:development` group. `ruby/setup-ruby` with `bundler-cache: true` installs every group unless `BUNDLE_WITHOUT` is set, so the runner gets them. The workflow must not set `BUNDLE_WITHOUT`/`BUNDLE_DEPLOYMENT` to exclude development.
+### Built (`task/github-actions-deploy`)
+- **`.github/workflows/deploy.yml`:** runs `bundle exec cap production deploy` after the **Tests** workflow passes for a push to `main`, or when started by hand (Actions → Deploy → Run workflow). A `deploy-production` concurrency group makes a second deploy wait. Steps: checkout of the tested commit, `ruby/setup-ruby` reading `.ruby-version` (4.0.9 builds are available) with `bundler-cache`, `webfactory/ssh-agent@v0.9.0` with `DEPLOY_SSH_KEY`, then `DEPLOY_KNOWN_HOSTS` appended to `known_hosts` (host key checking stays on).
+- **Repo fetch (owner decision, 2026-10-24: HTTPS):** `repo_url` is `https://github.com/mendicantx/ffrk-ability-parser.git`. The repo is public, so the server clones with no key and GitHub needs no deploy key. Capistrano's mirror on the server switches itself (`git remote set-url origin …`, seen in a dry run). If the repo ever goes private, switch back to SSH and add a read-only deploy key.
+- **Agent forwarding is off** (`forward_agent: false`): nothing on the server needs the deployer's key any more, so the server can't use it either.
+- **SSH reachability (owner, 2026-10-24):** port 22 on mendicant.com is open, so GitHub-hosted runners can log in.
+- Local deploys work as before: `bundle exec cap production deploy` with your key in the Windows OpenSSH agent.
+- **Cost:** GitHub-hosted runners are free for public repos.
 
-### Story: add `.github/workflows/deploy.yml`
-As the owner, I want a push to `main` to deploy automatically, so that I don't have to run `cap production deploy` by hand.
-- Trigger on push to `main`, plus `workflow_dispatch`. Run on `ubuntu-latest`, with a `concurrency` group (for example `deploy-production`, `cancel-in-progress: false`) so two deploys never overlap.
-- Steps:
-  1. `actions/checkout@v4`.
-  2. `ruby/setup-ruby@v1` with `bundler-cache: true`, reading `.ruby-version`.
-  3. `webfactory/ssh-agent@v0.9.0` with `ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}`.
-  4. Append `${{ secrets.DEPLOY_KNOWN_HOSTS }}` to `~/.ssh/known_hosts`. Host key checking stays on.
-  5. `bundle exec cap production deploy`.
-- Only deploy when the tests pass: run after the existing `Tests` workflow succeeds on `main` (`workflow_run`), or make the test job a `needs:` of the deploy job.
-- Watch out for the Ruby version: `.ruby-version` is `4.0.9`, released 2026-10-23. If `ruby/setup-ruby` doesn't have a 4.0.9 build yet, the job fails at setup. The test workflow uses `ruby-version: "4.0"` for this reason; the deploy job can do the same until 4.0.9 is available.
-- Local deploys keep working unchanged, since nothing in the Capistrano config changes.
-- **Test:** a `workflow_dispatch` run deploys, `current/REVISION` on the server matches the pushed commit, and a second dispatch while one is running waits.
+### Owner setup (once)
+The fine-grained token the GitHub CLI uses has no Secrets permission (by design), so the secrets are added in the browser. Commands are for PowerShell.
 
-### Story: decide how the server fetches the repo
-Agent forwarding means the server clones from GitHub over SSH with the runner's deploy key, so GitHub must accept that key. Even for a public repo, SSH clones need a registered key.
-- **Option A (no config change):** add `gha_deploy.pub` to the repo as a read-only Deploy Key.
-- **Option B:** since the repo is public, switch `repo_url` to `https://github.com/mendicantx/ffrk-ability-parser.git`. Then no GitHub key is needed for the clone, `forward_agent` becomes unnecessary, and local deploys work too. Recommended unless the repo might go private.
+1. **Make a key pair for Actions** (outside the repo). Press Enter twice when asked for a passphrase, so it has none:
+   ```powershell
+   cd E:\workspaces\ffrk-ability-parser
+   ssh-keygen -t ed25519 -C "github-actions-deploy" -f "$env:USERPROFILE\.ssh\gha_deploy"
+   ```
+2. **Let it log in as jason:**
+   ```powershell
+   cd E:\workspaces\ffrk-ability-parser
+   Get-Content "$env:USERPROFILE\.ssh\gha_deploy.pub" | ssh jason@mendicant.com "cat >> ~/.ssh/authorized_keys"
+   ```
+3. **Record the server's host keys and check them** (the ed25519 fingerprint from the first command must equal the one from the second, which reads it on the server itself):
+   ```powershell
+   cd E:\workspaces\ffrk-ability-parser
+   ssh-keyscan mendicant.com 2>$null | Out-File -Encoding ascii "$env:USERPROFILE\.ssh\gha_known_hosts"
+   ssh-keygen -lf "$env:USERPROFILE\.ssh\gha_known_hosts"
+   ssh jason@mendicant.com "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
+   ```
+4. **Add the two secrets** at GitHub → the repo → Settings → Secrets and variables → Actions → New repository secret. Each command copies one value to the clipboard to paste:
+   ```powershell
+   Get-Content "$env:USERPROFILE\.ssh\gha_deploy" -Raw | Set-Clipboard        # → DEPLOY_SSH_KEY
+   Get-Content "$env:USERPROFILE\.ssh\gha_known_hosts" -Raw | Set-Clipboard   # → DEPLOY_KNOWN_HOSTS
+   ```
+5. **Delete the local private key** once the secret is saved:
+   ```powershell
+   Remove-Item "$env:USERPROFILE\.ssh\gha_deploy"
+   ```
+6. **Shared files:** `.env` is a Capistrano linked file and already exists in `shared/` on the server, so nothing changes.
 
-### Manual steps for the owner
-1. **Generate the key pair:** `ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./gha_deploy -N ""`.
-2. **Let it log in:** append `gha_deploy.pub` to `/home/jason/.ssh/authorized_keys` on the droplet.
-3. **Let the server pull the repo:** with Option A, add `gha_deploy.pub` as a read-only Deploy Key on this repo. With Option B, skip this step.
-4. **Get the host key:** `ssh-keyscan mendicant.com`. Check the ed25519 fingerprint against `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the droplet.
-5. **Add repo secrets:**
-   - `DEPLOY_SSH_KEY`: the private key contents.
-   - `DEPLOY_KNOWN_HOSTS`: the keyscan output.
-
-   Then delete the local private key.
-6. **Check the firewall:** the DigitalOcean cloud firewall and ufw must allow SSH (22) from GitHub-hosted runners, whose IPs vary widely. If SSH is limited to a home IP, the alternatives are:
-   - a self-hosted runner on the droplet, which deploys to itself with no inbound SSH;
-   - a Tailscale step (`tailscale/github-action`) with the droplet on the tailnet.
-7. **Shared files:** `.env` is a Capistrano linked file. It already exists in `shared/` on the server, so nothing changes.
-
-### Cost
-GitHub-hosted runners are free for public repos (this repo is public).
+### Test
+- GitHub only offers **Run workflow** for workflows on the default branch, so the first run happens when this reaches `main`: either with the feature branch, or ahead of it on its own (it changes no app code, so deploying it redeploys what's live now).
+- A run deploys; `cat /data/www/ffrk-ability-parser/current/REVISION` on the server matches the pushed commit; a second **Run workflow** while one is running waits for it.
 
 ## Requested features (owner, 2026-10-23, for later)
 
