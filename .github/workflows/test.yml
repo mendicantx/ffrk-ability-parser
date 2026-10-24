@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, "feature/**", "task/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          # Latest 4.0.x; .tool-versions pins the exact version for asdf.
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ruby tests
+        run: bin/rails test
+
+      - name: JavaScript tests
+        run: node --test "test/js/*.test.mjs"
+
+      - name: Python tests
+        run: python -I -m unittest discover -s test/python

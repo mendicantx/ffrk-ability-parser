@@ -57,6 +57,8 @@ Used by the ability translator to know what each arg in an ability's JSON option
 | `app/controllers/data_controller.rb` | Serves the cache to both tools: `/data/sheets`, `/data/battle_js`, `/data/status`, and the rate-limited `POST /data/refresh` |
 | `lib/data_loader.rb` | `DataLoader.refresh_all` fetches every source into `data/`; defines the `GOOGLE_SHEETS` registry |
 | `lib/importers/sheets_importer.rb` | Fetches and parses Google Sheets CSV |
+| `lib/http_fetch.rb` | `HttpFetch.get`: GET with redirect following, used by both importers |
+| `.github/workflows/test.yml` | CI: Ruby, JavaScript and Python tests on every push |
 | `lib/importers/battle_js_importer.rb` | Fetches battle.js, unpacks p,a,c,k,e,r JS (supports base 62), returns raw JS string |
 | `lib/tasks/data.rake` | `rake data:refresh`, `rake data:battle_js`, `rake data:status`, `rake data:snapshot` |
 | `test/js/harness.mjs` | Runs both pages' scripts unchanged in a Node `vm` with a fake DOM and a fetch that serves the snapshot; golden-file helpers |
@@ -112,7 +114,7 @@ To refresh daily, add a cron entry for the deploy user on the server:
   `/ability_parser/battle_js` and `/status_decoder/sheet_data` URLs are aliases.
 - Sheet data is stored in a hash keyed by symbol: `DataStore.instance.sheets` → `{ soul_breaks: [...], ... }`.
   Access a single sheet with `DataStore.instance.sheet(:soul_breaks)`.
-- `SheetsImporter` follows HTTP redirects (Google Sheets redirects before serving CSV).
+- `HttpFetch` follows HTTP redirects (Google Sheets redirects before serving CSV).
 - `BattleJsImporter` unpacks p,a,c,k,e,r JS using a custom base-62 decoder (Ruby's `String#to_i` only supports up to base 36).
   Returns the unpacked JS as a plain string — content is AMD `define()` module code, not JSON.
 - `DataLoader` is the only code that fetches from the network (rake tasks and `POST /data/refresh`).
