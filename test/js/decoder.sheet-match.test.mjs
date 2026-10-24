@@ -10,8 +10,9 @@ import { loadPage, snapshot } from './harness.mjs';
 // Matches per family as of the last improvement.
 const FLOORS = {
   LEARNING_MODE:       { names: 53, effects: 39 },
-  ULTIMATE_BUDDY_MODE: { names: 268, effects: 137 },
-  all:                 { names: 1772, effects: 1405 },
+  ULTIMATE_BUDDY_MODE: { names: 270, effects: 137 },
+  LIMIT_BREAK_SOUL_DRIVE: { names: 153, effects: 0 },
+  all:                 { names: 1939, effects: 1405 },
 };
 
 // Clauses the decoder always writes but many sheet rows leave out. A row matches if

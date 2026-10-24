@@ -227,7 +227,7 @@ When the element depends on a condition, such as the character's attach element,
 ### Naming
 - **Realms (series):** the Soul Breaks sheet's Realm column values: `Core`, `I`–`XVI`, `FFT`, `Type-0`, `KH`, `Beyond`. Effects text uses the same names ("if the character's Realm is VII", "VII characters"). Both tools use `realmName()` in `app/javascript/ffrk/names.js`.
 - **Element label:** `NE`.
-- **Characters:** the Characters sheet is the master list. The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
+- **Characters:** the Characters sheet is the master list. The decoder corrects JP romanisations in `CHAR_CORRECTIONS` (`app/views/shared/_ffrk_constants.html.erb`): for example `SHERUKU` is Shelke, `ARDEN` is Ardyn, `ORLANDU` is Orlandeau and `CID_HIGHWIND` is Cid (VII). The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
 - **School "Special":** battle.js names no ability category 18 (Spirit Attacks such as "Spirit Attack: Rain", and Crystal Force abilities). The sheet calls them "Special" (104 Spirit Attack rows in the Other tab), so the parser does too.
 - **Tier column:** use the Soul Breaks sheet's Tier when the soul break already has a row. Otherwise derive it from the soul strike category, using the sheet's own labels (Glint, Glint+, CSB, LBG, LBGS, ADSB, …).
 
@@ -300,6 +300,13 @@ About 20 older sheet rows use the decoder's previous wording and now differ. `te
 - **Cast speed:** `physicalDamageAbilities` is "PHY attacks"; `magicDamageAbilities` is "BLK, WHT, BLU, SUM or NAT attacks that deal magical damage". With no condition it's just "cast speed x1.10".
 - **Chases:** "(max N)" only when the chase has a limit; "after another ally uses …" when allies' abilities trigger it.
 - **"Hero Abilities have zero hone cost"** is on every generated Zenith, just before "maximum HP" (owner decision, 2026-10-23). It isn't a per-status effect: the Hero Abilities a Zenith swaps in are Kiwami panels, and battle.js's `AbilityPanel.isNoConsumption()` is always true for those. Only 64 of 307 sheet rows (mostly the newer Zeniths) have the line, so `decoder.sheet-match.test.mjs` counts a row as matching if the sheet has the decoder's text with or without that line.
+
+### Soul Drive Mode wording (decoder)
+`Soul Drive Mode: <Character>` statuses (`LIMIT_BREAK_SOUL_DRIVE_*`) use the wording every one of the 160 sheet rows shares: "Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks, Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]". The cap and damage clauses appear only when the status has them.
+
+What the Soul Break use grants isn't part of the status. The base [Soul Drive Mode] casts the soul break's own follow-up (its arg2), and battle.js doesn't link it to the character's mode. The decoder takes it from the Other-tab row listed under the mode (Source "Soul Drive Mode: <Character>"); without one it writes the usual placeholder: "casts <ability missing from Other Tab> after using a Soul Break".
+
+Names keep an element suffix (15 of 18 sheet rows) and drop the `KOKI` word from the coded name.
 
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
