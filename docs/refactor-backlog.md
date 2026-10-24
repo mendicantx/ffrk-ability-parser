@@ -12,7 +12,8 @@ The plan comes from two reviews of the code, one on architecture and one on doma
 ## How we work
 
 - **Branches:** `feature/parser-decoder-refactor` off `main`, with one `task/<short-name>` branch per story. Each task branch is merged into the feature branch with `--no-ff` once its tests pass.
-- **Tests:** every story ends with an automated command, listed under *Test*. All commands run from the project root in PowerShell.
+- **Tests:** every story ends with an automated command, listed under *Test*. All commands run from the project root, in Git Bash or PowerShell (for golden updates, `UPDATE_GOLDEN=1 …` in bash, `$env:UPDATE_GOLDEN='1'; …` in PowerShell). Claude runs them and keeps going between tasks; the owner tests the feature branch at the end. CLAUDE.md has the full testing routine.
+- **Owner direction:** the owner also steers the work as it goes (new soul breaks, questions, decisions). Their latest decision wins over older notes, and each one is recorded in `docs/decisions.md`.
 - **Golden files:** these are saved reference output under `test/fixtures/golden/`. A story that is only meant to move code must leave them byte-identical. A story that is meant to change output updates them in the same commit, and the commit message says which rule changed.
 - **Drift bugs:** where `docs/decisions.md` already says what is correct, the code is fixed to match. Where it is silent, the question goes to the owner (see *Open questions*). The answer is then recorded in `docs/decisions.md`.
 - **Releases:** the feature branch is merged to `main` only once every story is done and the owner has tested it, so `main` stays as it is until then. A fix for a battle.js repack goes on `main` first and is then merged into the feature branch. The owner deploys with `cap production deploy`.
@@ -55,7 +56,7 @@ As the maintainer, I want saved battle captures with the sheet rows the parser p
 - The test also derives the other two input shapes, a bare soul break and the mixed `{sb}\nabilities:[...]` format, from each capture.
 - A unit test checks the tier table against every Tier value in the Soul Breaks sheet and every `SOUL_STRIKE_CATEGORY` in battle.js, with no capture needed.
 - **Test:** `node --test test/js/parser.golden.test.mjs`
-- **Inputs:** see *Battle captures needed*.
+- **Inputs:** see *Soul break fixtures*.
 - **Status:** done (`task/parser-golden`).
 
 ### 6. Fix the drift bugs decisions.md already settles
@@ -163,13 +164,13 @@ As the maintainer, I want one status inference engine, so that Python and JavaSc
 - **Test:** `node scripts/infer_statuses.mjs --diff` reports zero unaccepted differences.
 - **Status:** dropped. The owner scoped the refactor to the two tools.
 
-## Battle captures needed
+## Soul break fixtures
 
-A battle capture holds every soul break for every party member, so one or two captures can cover everything. One 2023 capture already exists (`E:\workspaces\FFRK-js\bossai\battle_init.js`, Ace) and is used first. Still needed, in the order stories need them:
+The owner pastes single soul breaks (not whole battles), looked up by Name (JP). Each becomes a fixture in `test/fixtures/battles/` (see its README). Received so far: Ace CASB (2023 capture), Seymour XSB and CASB2, Warrior of Light Buster, Garland TASB, Firion MASB, Rain ZSB and Soul Drive, Trey DASB.
 
-1. **For story 6:** received. Ace's CASB (2023 capture) and Seymour's XSB (pasted by the owner).
-2. **For story 16:** a Buster soul break, a Tactical Awoken soul break (TASB), a healing soul break and a hybrid (NAT) attack.
-3. **For story 18:** a soul break with an IF/ELSE block or party condition (often a Dual Awakening soul break or ADSB), a Synchro soul break, a Chain soul break, and anything with a cut-in ability.
+Still wanted:
+1. **Requested, not yet received:** Lasswell AASB (八垓抜刀 軌ら星, 23500020), Enna Kros ASB (轟・Aの力, 23280023), Tama SASB (99プラザの日常, 23290014).
+2. **Not yet covered:** a healing soul break, a Synchro soul break, a Chain soul break, and a cut-in ability.
 
 ## Findings from the captures
 
@@ -283,9 +284,9 @@ Recorded in `docs/decisions.md` under "Sheet conventions":
 - Keep the translate call.
 - Soul break JSON will come as pasted soul breaks, not whole battles.
 
-Still open, to settle with examples once the Buster and Tactical captures arrive:
-- **Target rules:** the four preview builders pick the Target column differently.
-- **Follow-up elements:** merge across all hits, with "or" for conditional elements, as Kiros's Buster chase does.
+Settled since, with the Buster and Tactical captures (see `docs/decisions.md`):
+- **Target rules:** one rule for every preview ("Target and Auto Target").
+- **Follow-up elements:** merged across all hits, with "or" for conditional elements ("Elements that depend on a condition are joined with \"or\"").
 
 ## Cross-cutting items
 
