@@ -15,8 +15,11 @@ module SheetsImporter
 
   private
 
+  # The body arrives as bytes: read it as UTF-8 (keeping Japanese text such as the
+  # Name (JP) column), drop only invalid bytes, and drop a leading byte-order mark so
+  # the first header stays "ID".
   def self.parse_csv(raw)
-    raw = raw.encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')
+    raw = raw.dup.force_encoding('UTF-8').scrub('').delete_prefix("﻿")
     rows = CSV.parse(raw, headers: true)
     rows.map(&:to_h)
   end
