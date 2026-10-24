@@ -188,7 +188,18 @@ Where the Status sheet words the same thing more than one way, the wording that 
 - **Tied to another status (other effects):** ", removed if the character hasn't [X]".
 - **Category names:** follow the sheet (SHOOTER is "Sharpshooter").
 
-Elements are listed in game order (Fire, Ice, … Poison). `decoder.sheet-match.test.mjs` tracks the result: effects matches went from 329 to 1047 of 1486 decoded statuses with sheet rows.
+Elements are listed in game order (Fire, Ice, … Poison).
+
+**Names** for single-effect statuses follow the sheet's patterns:
+- "Buff Fire 20% (5s)" / "Debuff …", "Resist …" / "Imperil …".
+- "Dualcast / Triplecast / Quadracast / Pentacast Fire, Dark 1" ("Prismatic" for all nine elements).
+- "Water/Holy Ability Quick Cast 1" and "… Instant Cast …" (`castTimeFactor` 10000000 is instant).
+- "Fire, Holy Ability +15% Boost 3", "Summoning +15% Boost 1", "Weakness +9% Boost 1".
+- "Damage Cap +20000 1".
+
+The trailing number is the turn count, "(15s)" a timed duration, and "(Tactical)" a status tied to Tactical Awoken Mode.
+
+`decoder.sheet-match.test.mjs` tracks the result. For the 1486 decoded statuses with sheet rows, names matching went from 481 to 1226 and effects from 329 to 1049.
 
 ---
 

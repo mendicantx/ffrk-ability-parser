@@ -1164,6 +1164,7 @@ function describeFromGameData(statusId) {
     category:    key => categoryDisplayName(key),
     statusName:  id => DB.statusMap[id]?.commonName || (DB.statusById[id] ? titleCase(DB.statusById[id]) : null),
     abilityName: id => abilityDisplayName(id),
+    statusKey:   id => DB.statusById[id] ?? null,
   });
 }
 
@@ -1212,7 +1213,7 @@ function decodeStatus(statusKey) {
   if (!assignment && describeFromGameData(id)) {
     const described = describeFromGameData(id);
     return {
-      id, codedName: statusKey, commonName: null,
+      id, codedName: statusKey, commonName: described.name,
       effects: described.effects, defaultDuration: described.defaultDuration,
       mndModifier: '-', exclusiveStatus: '-', notes: '',
       funcName: 'game data', decoded: true, _statusKey: statusKey,
@@ -1267,7 +1268,7 @@ function decodeStatus(statusKey) {
     return {
       id,
       codedName:       statusKey,
-      commonName:      null,
+      commonName:      described.name,
       effects:         described.effects,
       defaultDuration: described.defaultDuration,
       mndModifier:     '-',
