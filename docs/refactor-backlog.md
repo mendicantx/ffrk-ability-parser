@@ -24,13 +24,14 @@ As the maintainer, I want one list of sheets, so that the loader, the controller
 - `DataLoader::GOOGLE_SHEETS` includes `extra` and `hero_abilities`. `AbilityParserController::SHEET_VARS` is deleted and both controllers read the registry.
 - `.env.example` and CLAUDE.md list every sheet.
 - **Test:** `bin/rails test`
-
+- **Status:** done (`task/one-sheet-registry`).
 
 ### 2. Freeze a test data snapshot
 As the maintainer, I want a frozen copy of battle.js and the sheet data in the repo, so that tests give the same answer every time and need no network.
 - `rake data:snapshot` copies `data/` into `test/fixtures/snapshot/`, gzipped, with `SNAPSHOT.md` recording the date and each file's SHA-256.
 - Running it again when `data/` has not changed leaves the files untouched.
 - **Test:** `rake data:snapshot; git status --short test/fixtures` shows no changes on the second run.
+- **Status:** done (`task/test-data-snapshot`).
 
 ### 3. Test harness that runs today's inline scripts
 As the maintainer, I want `node --test` to run the existing `<script>` blocks from both views in a sandbox, so that today's behaviour is locked in before any code moves.
@@ -38,6 +39,7 @@ As the maintainer, I want `node --test` to run the existing `<script>` blocks fr
 - Its fake `fetch` serves the snapshot for `/ability_parser/battle_js`, `/ability_parser/sheet_data` and `/status_decoder/sheet_data`, and stubs the translate call.
 - No npm dependencies (Node 24's built-in test runner).
 - **Test:** `node --test "test/js/*.test.mjs"` passes a smoke test that decodes a known status key.
+- **Status:** done (`task/node-test-harness`).
 
 ### 4. Decoder golden output for every status key
 As the maintainer, I want today's `decodeStatus` output saved for every `STATUS_AILMENTS_TYPE` key, so that any change in decoding is caught.
@@ -45,6 +47,7 @@ As the maintainer, I want today's `decodeStatus` output saved for every `STATUS_
 - The test prints decoded and undecoded counts per family.
 - The current `inferred_statuses.csv` is also committed as a golden file, for story 19.
 - **Test:** `node --test test/js/decoder.golden.test.mjs`
+- **Status:** done (`task/decoder-golden`).
 
 ### 5. Parser golden output from real battle captures
 As the maintainer, I want saved battle captures with the sheet rows the parser produces today, so that I notice when any column changes.
@@ -53,6 +56,7 @@ As the maintainer, I want saved battle captures with the sheet rows the parser p
 - A unit test checks the tier table against every Tier value in the Soul Breaks sheet and every `SOUL_STRIKE_CATEGORY` in battle.js, with no capture needed.
 - **Test:** `node --test test/js/parser.golden.test.mjs`
 - **Inputs:** see *Battle captures needed*.
+- **Status:** done (`task/parser-golden`).
 
 ### 6. Fix the drift bugs decisions.md already settles
 As the owner, I want the known-wrong sheet columns fixed now, so that rows I paste into the sheet stop being wrong.
@@ -62,7 +66,7 @@ As the owner, I want the known-wrong sheet columns fixed now, so that rows I pas
 - **Python Roman numerals:** include X and XIII–XVI ("`_cap_word`").
 - Each fix is its own commit with its golden diff.
 - **Test:** `node --test "test/js/*.test.mjs"; python -I -m unittest discover -s test/python`
-- **Status:** done. The Counter fix is covered by the counter-enabled Ace variant. The stacking wording and XSB tier still need an Extra soul break capture to be covered by golden files.
+- **Status:** done (`task/settled-drift-fixes`). The Counter fix is covered by the counter-enabled Ace variant. The stacking wording and XSB tier still need an Extra soul break capture to be covered by golden files.
 - **Release point:** worth merging to `main` after this story.
 
 ### 7. Keep data across deploys
@@ -71,6 +75,7 @@ As the owner, I want production data to survive a deploy, so that the tools neve
 - A post-publish hook runs `rake data:refresh` when `data/metadata.json` is missing.
 - The daily refresh is documented as a cron line.
 - **Test:** `bundle exec cap production deploy:check --dry-run` lists `shared/data`. The owner checks the real deploy.
+- **Status:** done (`task/keep-data-across-deploys`).
 
 ### 8. Serve both tools from the cache
 As a user of the tools, I want pages to load from cached data, so that they open quickly instead of downloading and unpacking 6 MB of battle.js on every visit.
@@ -79,6 +84,7 @@ As a user of the tools, I want pages to load from cached data, so that they open
 - A **Refresh data** button triggers a server-side refresh, so a sheet edit still shows up on demand.
 - The reload button clears every `DB` map, fixing the stale `statusMap` after a reload.
 - **Test:** `bin/rails test test/controllers/api/data_controller_test.rb; node --test "test/js/*.test.mjs"`
+- **Status:** done (`task/serve-from-cache`).
 
 ### 9. Remove dead code and add Ruby unit tests
 As the maintainer, I want unused code gone and the importers covered by tests, so that what's left is what runs.
@@ -87,6 +93,7 @@ As the maintainer, I want unused code gone and the importers covered by tests, s
 - Minitest for `BattleJsImporter.unpack`, the base-62 `word_to_index`, and `SheetsImporter` CSV parsing.
 - **Test:** `bin/rails test; node --test "test/js/*.test.mjs"`
 - **Release point.**
+- **Status:** done (`task/remove-dead-code`).
 
 ### 10. Move the Status Decoder script into a module
 As the maintainer, I want the decoder's JavaScript in `app/javascript/pages/status_decoder.js`, so that the view only holds markup.
