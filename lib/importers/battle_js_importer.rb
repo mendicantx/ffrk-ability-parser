@@ -21,7 +21,9 @@ module BattleJsImporter
   def self.extract_status_ailments(js)
     ailments = {}
     js.scan(/STATUS_AILMENTS_TYPE:\{([^}]+)\}/) do |block|
-      block[0].scan(/([A-Z][A-Z0-9_]+):(\d+(?:e\d+)?)/) do |key, val|
+      # Keys can contain lower-case letters (CHASE_MODE_FOR_WE_Of_LAST_ILLUSION);
+      # values can be in exponent form (55e3 = 55000).
+      block[0].scan(/(?<![A-Za-z0-9_$])([A-Z][A-Za-z0-9_]*):(\d+(?:e\d+)?)/) do |key, val|
         ailments[key] = val.to_f.to_i
       end
     end

@@ -19,8 +19,11 @@ export function extractConstantMap(js, name) {
       else if (js[i] === '}') { depth--; if (depth === 0) break; }
     }
     const block = js.slice(start + 1, i);
-    for (const m of block.matchAll(/([A-Z][A-Z0-9_]*):(\d+)/g)) {
-      merged[m[1]] = parseInt(m[2]);
+    // The minifier writes round thousands in exponent form (55e3 = 55000), and a few
+    // keys have lower-case letters (CHASE_MODE_FOR_WE_Of_LAST_ILLUSION), so a key is
+    // any identifier starting with a capital, and a value is any JS number literal.
+    for (const m of block.matchAll(/(?<![A-Za-z0-9_$])([A-Z][A-Za-z0-9_]*):(\d+(?:\.\d+)?(?:e\d+)?)/g)) {
+      merged[m[1]] = Number(m[2]);
     }
     searchFrom = idx + 1;
   }

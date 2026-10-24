@@ -18,6 +18,32 @@ test('extractConstantMap skips nested braces and returns {} when missing', () =>
   assert.deepEqual(extractConstantMap('nothing here', 'ELEMENT_TYPE'), {});
 });
 
+test('extractConstantMap reads exponent numbers and keys with lower-case letters', () => {
+  const js = 'a={STATUS_AILMENTS_TYPE:{ACCEL_BUDDY_MODE_YSAYLE_ICE:55e3,CUSTOM_ATK:603,CHASE_MODE_FOR_WE_Of_LAST_ILLUSION:51121,TINY:1.5e3}}';
+  assert.deepEqual(extractConstantMap(js, 'STATUS_AILMENTS_TYPE'), {
+    ACCEL_BUDDY_MODE_YSAYLE_ICE: 55000, CUSTOM_ATK: 603, CHASE_MODE_FOR_WE_Of_LAST_ILLUSION: 51121, TINY: 1500,
+  });
+});
+
+test('the real battle.js status map has no exponent values read as small numbers', async () => {
+  const { snapshot } = await import('./harness.mjs');
+  const js = snapshot().battleJs;
+  const statuses = extractConstantMap(js, 'STATUS_AILMENTS_TYPE');
+  // Every status constant written as NNeM must come out as NN × 10^M. (Only the status
+  // blocks: the same key can appear with another value in an unrelated table.)
+  let checked = 0;
+  for (const [, block] of js.matchAll(/STATUS_AILMENTS_TYPE:\{([^}]+)\}/g)) {
+    for (const m of block.matchAll(/(?<![A-Za-z0-9_$])([A-Z][A-Za-z0-9_]*):(\d+)e(\d+)(?![\d.])/g)) {
+      assert.equal(statuses[m[1]], Number(m[2]) * 10 ** Number(m[3]), m[1]);
+      checked++;
+    }
+  }
+  assert.ok(checked > 10, `expected exponent-form statuses in the snapshot, found ${checked}`);
+  assert.equal(statuses.ACCEL_BUDDY_MODE_YSAYLE_ICE, 55000);
+  assert.ok('CHASE_MODE_FOR_WE_Of_LAST_ILLUSION' in statuses);
+  assert.ok(!('LAST_ILLUSION' in statuses), 'a mixed-case key must not be cut short');
+});
+
 test('invert swaps keys and values', () => {
   assert.deepEqual(invert({ FIRE: 100, ICE: 101 }), { 100: 'FIRE', 101: 'ICE' });
 });
