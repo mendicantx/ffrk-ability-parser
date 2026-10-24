@@ -771,6 +771,13 @@ function generateEffectsText(parsed) {
     'Eighteen','Nineteen','Twenty',
   ];
   function hitsWord(n) { return NUM_WORDS[n] ?? String(n); }
+  // Attack wording, as in the sheet (docs/decisions.md "Attack wording"): attacks on
+  // all enemies are "group" attacks, and "(x each)" is only used for more than one hit.
+  function attackNoun(sa, hits) {
+    const kind = sa?.target === 'OPPONENT_ALIVE_ALL' ? 'group' : 'single';
+    return hits === 1 ? `${kind} attack` : `${kind} attacks`;
+  }
+  function perHitText(hits, factors) { return ` (${factors}${hits === 1 ? '' : ' each'})`; }
 
   // Damage cap for an attack sub-action.
   // overflow (shouldEnableOverflow) → 99,999
@@ -892,7 +899,7 @@ function generateEffectsText(parsed) {
     const hits    = sa.props.hits ?? 1;
     const fac     = factorOverride ?? sa.props.multiplier;
     const elemStr = '';
-    const perHit  = fac ? ` (${fac.toFixed(2)} each)` : '';
+    const perHit  = fac ? perHitText(hits, fac.toFixed(2)) : '';
     const capVal  = sa.props.overflow ? 99999
                   : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
@@ -905,7 +912,7 @@ function generateEffectsText(parsed) {
     ].filter(Boolean);
     const flagStr    = flags.length ? `, ${flags.join(', ')}` : '';
     const piercingStr = sa.props.piercing ? 'piercing ' : '';
-    const atkWord    = hits === 1 ? 'single attack' : 'single attacks';
+    const atkWord    = attackNoun(sa, hits);
     return `${hitsWord(hits)} ${elemStr}${piercingStr}${atkWord}${perHit}${capStr}${flagStr}`;
   }
 
@@ -1240,11 +1247,11 @@ function generateEffectsText(parsed) {
     const baseCap  = atkCap(atkBase ?? mndBase);
     const boostCap = atkCap(atkBoost ?? mndBoost);
 
-    const atkWord   = hits === 1 ? 'single attack' : 'single attacks';
+    const atkWord   = attackNoun(atkBase ?? mndBase, hits);
     const perHitStr = (atkPerHitBoost != null && mndPerHitBoost != null)
-      ? ` (${atkPerHitBase.toFixed(2)}/${atkPerHitBoost.toFixed(2)} or ${mndPerHitBase.toFixed(2)}/${mndPerHitBoost.toFixed(2)} each)`
+      ? perHitText(hits, `${atkPerHitBase.toFixed(2)}/${atkPerHitBoost.toFixed(2)} or ${mndPerHitBase.toFixed(2)}/${mndPerHitBoost.toFixed(2)}`)
       : (atkPerHitBase != null && mndPerHitBase != null)
-        ? ` (${atkPerHitBase.toFixed(2)} or ${mndPerHitBase.toFixed(2)} each)`
+        ? perHitText(hits, `${atkPerHitBase.toFixed(2)} or ${mndPerHitBase.toFixed(2)}`)
         : '';
     const capStr    = boostCap !== baseCap ? ` capped at ${baseCap}/${boostCap}` : (baseCap !== 9999 ? ` capped at ${baseCap}` : '');
     const afterStr  = usageLabel ? ` after ${usageLabel.elseLabel}/${usageLabel.ifLabel} uses` : '';
@@ -1264,7 +1271,7 @@ function generateEffectsText(parsed) {
     const boostPerHit = boostSA ? resolvePerHit(boostSA, exec) : null;
     const baseCap   = atkCap(baseSA);
     const boostCap  = boostSA ? atkCap(boostSA) : null;
-    const atkWord   = hits === 1 ? 'single attack' : 'single attacks';
+    const atkWord   = attackNoun(baseSA, hits);
     // Detect element-conditional: all branches same factor, any element differences
     const elseIfAllSame = elseIfAtks.every(ei => {
       if (!ei.atk) return true;
@@ -1281,15 +1288,15 @@ function generateEffectsText(parsed) {
       const fmtEL      = sa => sa?.elements?.map(fmtElement).filter(Boolean).join('/') || 'NE';
       const allBranches = [ifAtk, ...elseIfAtks.map(e => e.atk), elseAtk].filter(Boolean);
       const elemStrs   = [...new Set(allBranches.map(fmtEL))];
-      const perHitStr  = basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
+      const perHitStr  = basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const allEnLabels = [enLabel.label,
         ...elseIfAtks.map(ei => parseEnElementLabel(ei.conditionArg)?.label).filter(Boolean)];
       const capStr = baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '';
       segs.push(`${hitsWord(hits)} ${elemStrs.join(' or ')} ${atkWord}${perHitStr}${capStr} based on ${allEnLabels.join(' or ')}${hpStr}`);
     } else {
       const perHitStr = boostPerHit != null && basePerHit != null
-        ? ` (${basePerHit.toFixed(2)} or ${boostPerHit.toFixed(2)} each)`
-        : basePerHit != null ? ` (${basePerHit.toFixed(2)} each)` : '';
+        ? perHitText(hits, `${basePerHit.toFixed(2)} or ${boostPerHit.toFixed(2)}`)
+        : basePerHit != null ? perHitText(hits, basePerHit.toFixed(2)) : '';
       const capStr    = boostCap != null && baseCap !== boostCap
         ? ` capped at ${baseCap.toLocaleString()}/${boostCap.toLocaleString()}`
         : (baseCap !== 9999 ? ` capped at ${baseCap.toLocaleString()}` : '');

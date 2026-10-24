@@ -7,3 +7,4 @@ Each `.json` file here is input to the Ability Parser, in any format the parser 
 | `ace-2023.json` | Real 2023 battle capture (from the FFRK-js repo) | Ace: Radiant Jackpot Shot (CASB) and its Crystal Force ability; `shouldIgnoreReflection` with `counter_enable: 0` |
 | `ace-2023-counter-enabled.json` | `ace-2023.json` with every `counter_enable` set to `"1"` | The Counter column honouring `shouldIgnoreReflection` when counter is otherwise enabled |
 | `seymour-xsb.txt` | Pasted by the owner (mixed `{sb}` + `abilities:[...]` format) | Seymour's XSB: Extra abilities (Anima's Pain, Cursed Requiem), Ability Crash, type-18 attach with `maxLv: 5`, XSB tier |
+| `wol-buster.txt` | Pasted by the owner (mixed format); `additional_animation_infos` and `choren_effects` removed, everything else as pasted | Warrior of Light's Buster (Break Glint / Break Arte), `buster_shingi_abilities`, the Destruction chase follow-up, IF/ELSE use-count branches |
