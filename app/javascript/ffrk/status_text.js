@@ -40,8 +40,23 @@ const percent = factor => factor - 100;
 // castTimeFactor at or above this is instant cast.
 const INSTANT_CAST = 10000000;
 
+// "after using a Fire ability" / "after using two Fire abilities" (the sheet writes "a"
+// before vowels too).
+const COUNT_WORDS = { 1: 'a', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight' };
+
 // One clause per effect type; each returns null when it can't phrase the effect.
 const EFFECTS = {
+  // Follow-ups that cast one ability: "Casts Retsu after using two Wind abilities".
+  REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE: (e, ctx) => {
+    const known = new Set(['key', 'type', 'chaseType', 'abilityCondition', 'abilityUseCountCondition', 'chaseAbilityId']);
+    if (e.chaseAbilityId == null || Object.keys(e).some(k => !known.has(k))) return null;
+    const uses = e.abilityUseCountCondition?.multiple ?? 1;
+    if (Object.keys(e.abilityUseCountCondition ?? {}).some(k => k !== 'multiple') || !COUNT_WORDS[uses]) return null;
+    const name = ctx.abilityName(e.chaseAbilityId);
+    const subject = conditionSubject(e.abilityCondition, ctx, 'or');
+    if (!name || !subject) return null;
+    return `Casts ${name} after using ${COUNT_WORDS[uses]} ${subject} ${uses === 1 ? 'ability' : 'abilities'}`;
+  },
   INCREASE_ELEMENT_ATK: (e, ctx) => {
     const subject = conditionSubject({ elementId: e.elementId }, ctx);
     if (!subject) return null;
@@ -198,5 +213,13 @@ export function describeStatus(params, ctx) {
     else clauses.push(`removed if the character hasn't [${removedUnless}]`);
   }
   for (let i = 0; i < clauses.length; i++) clauses[i] = clauses[i].replace('%NOUN%', ' ');
+  // Follow-ups on the same trigger merge: "Casts A and B after using a Support ability".
+  for (let i = clauses.length - 1; i > 0; i--) {
+    const a = /^Casts (.+?) (after using .+)$/.exec(clauses[i - 1]);
+    const b = /^Casts (.+?) (after using .+)$/.exec(clauses[i]);
+    if (a && b && a[2] === b[2]) clauses.splice(i - 1, 2, `Casts ${a[1]} and ${b[1]} ${a[2]}`);
+  }
+  // Later clauses continue the sentence: ", casts …".
+  for (let i = 1; i < clauses.length; i++) clauses[i] = clauses[i].replace(/^Casts /, 'casts ');
   return { name: statusNameFor(params, ctx), effects: clauses.join(', '), defaultDuration: durations.duration };
 }
