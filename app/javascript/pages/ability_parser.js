@@ -5,7 +5,7 @@ import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
 import { realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
-import { statusDescriber } from 'ffrk/status_context';
+import { createStatusDecoder } from 'ffrk/status_decoder';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -130,15 +130,34 @@ async function loadBattleJs() {
   checkAllLoaded();
 }
 
-// ─── Game data: battle.js run in a Web Worker ──────────────────────────────────
-// Names and describes statuses the Status sheet doesn't have yet, the way the Status
-// Decoder does (ffrk/status_context). Parsing doesn't wait for it: when it arrives,
-// the last parse is shown again with the new names.
+// ─── Status Decoder: names for statuses the Status tab doesn't have yet ──────────
+// The same engine as the Status Decoder page (ffrk/status_decoder): its helper decoders
+// work from battle.js's text, and its game-data descriptions need battle.js run in a
+// Web Worker. Parsing doesn't wait for the game data: when it arrives, the last parse is
+// shown again with the new names.
+const statusDecoder = createStatusDecoder();
+let statusDecoderReady = false;
+
+// { name, effects, defaultDuration } for a status from the decoder, or null.
+function describeFromGameData(id) {
+  const key = DB.statusAilments[id];
+  if (!key || !rawBattleJs || !DB.sheetRows) return null;
+  if (!statusDecoderReady) {
+    statusDecoder.ingestBattleJs(rawBattleJs);
+    statusDecoder.ingestSheets(DB.sheetRows);
+    statusDecoder.buildStatusAssignments();
+    statusDecoderReady = true;
+  }
+  const d = statusDecoder.decodeStatus(key);
+  return d?.decoded ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '' } : null;
+}
+
 async function loadGameData() {
   setLoadState('game', 'loading', 'running battle.js…');
   try {
     const { conf, statusParams, errors } = await startBattleRuntime(rawBattleJs);
     DB.game = { conf, statusParams };
+    statusDecoder.DB.game = DB.game;
     setLoadState('game', errors.length ? 'err' : 'ok', `${Object.keys(statusParams).length} status configs`);
     if (DB.lastInput != null) {
       try { processBattleJson(DB.lastInput); } catch { /* the error was shown when it was first parsed */ }
@@ -146,13 +165,6 @@ async function loadGameData() {
   } catch (e) {
     setLoadState('game', 'err', e.message);
   }
-}
-
-// { name, effects, defaultDuration } for a status from the game data, or null.
-function describeFromGameData(id) {
-  if (!DB.game || !DB.sheetRows) return null;
-  DB.game.describer ??= statusDescriber(DB.game, DB.sheetRows);
-  return DB.game.describer.describe(id);
 }
 
 // ─── Load Sheet data from server ─────────────────────────────────────────────
@@ -165,6 +177,7 @@ async function loadSheets() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
     DB.sheetRows = data;
+    statusDecoderReady = false;
 
     // Start from empty maps so a reload never keeps rows removed from the sheet.
     DB.statusMap = {};
