@@ -307,7 +307,7 @@ const ZENITH_CLAUSES = {
   // Highlights the ability panels in the UI only; the sheet doesn't mention it.
   NORMAL_PANEL_HIGHLIGHT: () => ['none', ''],
 };
-const ZENITH_ORDER = ['infusion', 'cast', 'instant', 'seq', 'chase', 'hp', 'astra'];
+const ZENITH_ORDER = ['infusion', 'cast', 'instant', 'seq', 'chase', 'hone', 'hp', 'astra'];
 
 // "casts Spirit Attack: Rain after using three Fire or Earth abilities (max 1)", or
 // "… after another ally uses a Lightning ability (max 4)" when allies' abilities count.
@@ -332,6 +332,9 @@ function describeZenithMode(params, ctx) {
     if (!clause) return null;
     if (clause[0] !== 'none') clauses.push(clause);
   }
+  // Hero Abilities a Zenith swaps in are Kiwami panels, which never use up charges
+  // (AbilityPanel.isNoConsumption in battle.js). The owner wants it on every Zenith.
+  clauses.push(['hone', 'Hero Abilities have zero hone cost']);
   const durations = describeDurations(params.durations, ctx);
   if (!durations) return null;
   const ordered = ZENITH_ORDER.flatMap(kind => clauses.filter(c => c[0] === kind).map(c => c[1]));

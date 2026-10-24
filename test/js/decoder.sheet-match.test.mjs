@@ -10,8 +10,8 @@ import { loadPage, snapshot } from './harness.mjs';
 // Matches per family as of the last improvement.
 const FLOORS = {
   LEARNING_MODE:       { names: 53, effects: 39 },
-  ULTIMATE_BUDDY_MODE: { names: 268, effects: 126 },
-  all:                 { names: 1772, effects: 1394 },
+  ULTIMATE_BUDDY_MODE: { names: 268, effects: 11 },  // effects: the owner wants the "zero hone cost" line, which older sheet rows lack
+  all:                 { names: 1772, effects: 1279 },
 };
 
 const familyOf = key => Object.keys(FLOORS).find(f => f !== 'all' && key.startsWith(f)) ?? null;
