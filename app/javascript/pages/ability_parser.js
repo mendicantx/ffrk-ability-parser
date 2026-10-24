@@ -221,12 +221,19 @@ const ACTION_ARG_SUPPLEMENTS = {
   },
   // 236 — CutinAbilityAction
   236: { arg1: 'wrappedAbilityId', arg2: 'cutinAbilityId' },
+  // 239 — MasterShingiAction: arg2 is the follow-up cast when Master Mode ends ("North Star: …")
+  239: { arg2: 'masterFinishAbilityId' },
 };
 
 function getActionFormula(actionId) {
   const fromSheet = DB.actionMap.find(r => String(r.action_id).replace('!','') === String(actionId));
-  if (fromSheet) return fromSheet;
-  return ACTION_ARG_SUPPLEMENTS[Number(actionId)] ?? null;
+  const supplement = ACTION_ARG_SUPPLEMENTS[Number(actionId)];
+  if (!fromSheet) return supplement ?? null;
+  if (!supplement) return fromSheet;
+  // The sheet row wins; the supplement only fills arg names the sheet leaves blank.
+  const merged = { ...fromSheet };
+  for (const [arg, name] of Object.entries(supplement)) if (!merged[arg]) merged[arg] = name;
+  return merged;
 }
 
 function lookupStatus(id) {
@@ -1813,12 +1820,28 @@ function counterColumn(parsed) {
   return parsed.counterable === 'Yes' && !subActions.some(sa => sa.props.ignoresReflection) ? 'Y' : 'N';
 }
 
+// What kind of damage the attacks deal, from their SUB_ACTION_TYPE.
+const PHYSICAL_ATTACKS = new Set(['PHYSICAL_ATTACK']);
+const MAGICAL_ATTACKS  = new Set(['BLACK_MAGIC_ATTACK', 'WHITE_MAGIC_ATTACK', 'SUMMON_ATTACK', 'NINJUTSU_ATTACK']);
+function damageFormula(parsed) {
+  const kinds = attackSubActions(parsed).map(sa => String(sa.type));
+  const physical = kinds.some(k => PHYSICAL_ATTACKS.has(k));
+  const magical  = kinds.some(k => MAGICAL_ATTACKS.has(k));
+  if ((physical && magical) || kinds.includes('INBORN')) return 'Hybrid';
+  return physical ? 'Physical' : magical ? 'Magical' : null;
+}
+
 function combatColumns(parsed) {
   const { type, formula } = typeAndFormula(parsed);
   const multiplier = multiplierColumn(parsed);
   const columns = { type, formula, multiplier, ...targetColumns(parsed), element: elementColumn(parsed), counter: counterColumn(parsed) };
-  // A NAT attack is a hybrid: Formula "Hybrid" and Multiplier "-" (docs/decisions.md "Hybrid formula").
-  if (type === 'NAT') Object.assign(columns, multiplier ? { formula: 'Hybrid', multiplier: '-' } : { formula: '', multiplier: '' });
+  // Type is the ability's class; Formula is the damage its attacks deal. Hybrid means
+  // two damage types and shows Multiplier "-" (docs/decisions.md "Hybrid formula").
+  if (type === 'NAT') {
+    const damage = multiplier ? damageFormula(parsed) : null;
+    Object.assign(columns, damage === 'Hybrid' ? { formula: 'Hybrid', multiplier: '-' }
+                         : damage ? { formula: damage } : { formula: '', multiplier: '' });
+  }
   return columns;
 }
 
@@ -2074,8 +2097,7 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
 
   const id = parsed.abilityId;
   const otherRow = lookupOtherAbility(id);
-  const { type, formula, multiplier, target, element, counter } = combatColumns(parsed);
-  const autoTarget = target; // Other-tab follow-ups: Auto Target always repeats Target
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
 
   const colValues = {
     'Source Type': { val: 'Follow-Up Status' },
@@ -2090,7 +2112,7 @@ function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
     'Effects':     { val: genEffects         },
     'Counter':     { val: counter            },
     'Auto Target': { val: autoTarget         },
-    'SB':          { val: '-'               },
+    'SB':          { val: '0'               },
     'School':      { val: schoolName(parsed.category) },
     'ID':          { val: String(id)        },
     'GL':          { val: ''               },
@@ -2267,7 +2289,8 @@ function renderAbility(parsed, depth, ctx) {
   // belongs only on the Other tab (docs/decisions.md "Ability Crush (arg2)").
   const busterShingiParent = relations.busterParent[parseInt(parsed.abilityId)];
   const isAbilityCrash = relations.extraCrushSource[parseInt(parsed.abilityId)] !== undefined;
-  if (depth === 0 && !isAbilityCrash && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
+  const masterFinishSource = relations.masterFinish[parseInt(parsed.abilityId)];
+  if (depth === 0 && !isAbilityCrash && masterFinishSource === undefined && (sb !== null || parsed.soulStrikeCategory !== null || busterShingiParent)) {
     const weaponSkillOf = relations.weaponSkillParent[parseInt(parsed.abilityId)];
     const wsParent = weaponSkillOf ?? busterShingiParent;
     const sbActorName  = wsParent?.character || actorName;
@@ -2310,6 +2333,11 @@ function renderAbility(parsed, depth, ctx) {
     html += renderExtraSheetPreview(parsed, ekParent, genText);
   }
 
+  // Other tab column preview — for a Master soul break's closing follow-up
+  if (masterFinishSource !== undefined) {
+    html += renderFollowUpSheetPreview(parsed, genText, masterFinishSource);
+  }
+
   // Other tab column preview — for EXTRA_ZETSUGI ability crush (arg2)
   const ekCrushSource = relations.extraCrushSource[parseInt(parsed.abilityId)];
   if (ekCrushSource !== undefined) {
@@ -2345,6 +2373,7 @@ function newRelations() {
     busterOtherSource: {}, // BUSTER_SHINGI chase/other sub-abilities → source label (chase mode status name)
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
     extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
+    masterFinish:      {}, // MASB masterFinishAbilityId → source label ("Master Mode: <character>")
   };
 }
 
@@ -2418,6 +2447,15 @@ function recordRelations(parsed, ability, ctx) {
         }
       }
     }
+  }
+
+  // Master soul break: the follow-up cast when Master Mode ends belongs on the Other tab,
+  // sourced from the "Master Mode: <character>" status the soul break grants.
+  const masterFinish = parsed.subAbilities.find(sub => sub._label === 'masterFinishAbilityId');
+  if (masterFinish) {
+    const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
+      .map(st => st.commonName ?? '').find(n => n.startsWith('Master Mode: ')) ?? '';
+    relations.masterFinish[masterFinish.abilityId] = modeName;
   }
 
   // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
