@@ -83,6 +83,8 @@ async function loadBattleJs() {
     DB.elementTypes        = invert(maps.ELEMENT_TYPE);
     DB.exerciseTypes       = invert(maps.EXERCISE_TYPE);
     DB.abilityCategories   = invert(maps.ABILITY_CATEGORY_ID);
+    // battle.js has no name for category 18 (Spirit Attacks and similar); the sheet calls it "Special".
+    DB.abilityCategories[18] ??= 'SPECIAL';
     DB.chainTypes          = invert(maps.COMBO_CONDITION_TYPE);
     DB.atkTypes            = invert(maps.ATK_TYPE);
     DB.targetRange         = invert(maps.TARGET_RANGE);
@@ -1482,7 +1484,7 @@ function generateEffectsText(parsed) {
     const condStat = findConditionalStatus(exec.subActions);
     const clauses = [];
     for (const [tLabel, statuses] of byTarget) {
-      if (statuses.length > 0) clauses.push(statuses.map(s => `[${statusName(s)}]`).join(', ') + tLabel);
+      if (statuses.length > 0) clauses.push(joinWithAnd(statuses.map(s => `[${statusName(s)}]`)) + tLabel);
     }
     if (condStat) {
       const statLabel      = parseStatComparisonLabel(condStat.conditionArg)
@@ -1571,7 +1573,7 @@ function generateEffectsText(parsed) {
         const elemLabels = filteredElems
           .map(id => DB.elementTypes[id] ? fmtElement(DB.elementTypes[id]) : `ELEMENT_${id}`)
           .join('/');
-        segs.push(`Grants ${statusTags.join('/')} based on if entry damage was ${elemLabels}`);
+        segs.push(`Grants ${statusTags.join('/')} if entry damage was ${elemLabels}`);
       }
     }
   }
