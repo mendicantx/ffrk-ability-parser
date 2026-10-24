@@ -12,7 +12,8 @@ const FLOORS = {
   LEARNING_MODE:       { names: 53, effects: 39 },
   ULTIMATE_BUDDY_MODE: { names: 270, effects: 137 },
   LIMIT_BREAK_SOUL_DRIVE: { names: 154, effects: 101 },
-  all:                 { names: 1939, effects: 1506 },
+  DUAL_AWAKE_MODE:     { names: 295, effects: 145 },
+  all:                 { names: 2234, effects: 1651 },
 };
 
 // Clauses the decoder always writes but many sheet rows leave out. A row matches if

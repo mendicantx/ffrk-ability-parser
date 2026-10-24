@@ -182,10 +182,10 @@ A battle capture holds every soul break for every party member, so one or two ca
 ## Describing statuses from game data (in progress)
 
 Since running battle.js became possible, the Status Decoder describes statuses from the game's own config (`ffrk/status_text.js`) when no helper decoder applies. Progress is measured two ways:
-- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 771 of 1259.
-- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 1939 names and 1506 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
+- `decoder.coverage.test.mjs`: statuses missing from the Status sheet that the decoder can describe, now 883 of 1259.
+- `decoder.sheet-match.test.mjs`: decoded statuses matching the sheet's existing rows, now 2234 names and 1651 effects. A row matches if the sheet has the decoder's text with or without the optional clauses in the test (the zero-hone-cost line).
 
-Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, Zenith Mode, and Soul Drive Mode.
+Described so far: element damage and resistance, multicast, quick and instant cast, ability, weakness and capped damage boosts, damage caps (plain, ability and element), DEF/RES piercing, single-ability follow-ups (including Chain Force limits), Master Mode, Zenith Mode, Soul Drive Mode, and Dual Awoken Mode.
 
 **Zenith Mode** (`ULTIMATE_BUDDY_MODE_*`): 291 of 311 decode. Of the 284 with sheet rows, 268 names and 137 effects match the sheet. The rest differ because:
 - 55 Spirit Attacks aren't on the Other tab yet, so they show `<ability missing from Other Tab>`.
@@ -196,8 +196,10 @@ Zenith statuses still undecoded (20): healers (`INCREASE_EXECUTED_HEAL`, "WHT ac
 
 **Soul Drive Mode** (`LIMIT_BREAK_SOUL_DRIVE_*`): all 199 decode; 154 names and 101 effects match the sheet. What the Soul Break use grants comes from the soul break's own follow-up, which battle.js doesn't link to the mode. When the Other tab doesn't list it, standard modes are assumed to grant [Instant ATB 1] (owner decision) and plain modes get the placeholder.
 
+**Dual Awoken Mode** (`DUAL_AWAKE_MODE_*`): 567 of 698 decode; of the 455 decoded with sheet rows, 295 names and 145 effects match. Most remaining differences are chases not yet on the Other tab and one-off sheet wordings. Still undecoded (131): tiered critical damage and healing, HP-barter and damage counters, barrier chases, Soul Break cost reductions, and a few one-offs.
+- **Parser follow-up:** the Ability Parser still names statuses only from the Status sheet, so Trey's DASB row shows `DUAL_AWAKE_MODE_FIRST_TREY_SHOOTER_II`. The decoder now names it "Dual Awoken Sharpshooter Mode I (Trey v2)". Using the decoder as the fallback is story 13 (shared `describeStatus`).
+
 Next, largest first among the statuses the sheet is missing:
-- Dual Awoken modes.
 - Chase modes.
 - Awoken modes.
 - Accel modes.

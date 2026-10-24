@@ -301,6 +301,14 @@ About 20 older sheet rows use the decoder's previous wording and now differ. `te
 - **Chases:** "(max N)" only when the chase has a limit; "after another ally uses …" when allies' abilities trigger it.
 - **"Hero Abilities have zero hone cost"** is on every generated Zenith, just before "maximum HP" (owner decision, 2026-10-23). It isn't a per-status effect: the Hero Abilities a Zenith swaps in are Kiwami panels, and battle.js's `AbilityPanel.isNoConsumption()` is always true for those. Only 64 of 307 sheet rows (mostly the newer Zeniths) have the line, so `decoder.sheet-match.test.mjs` counts a row as matching if the sheet has the decoder's text with or without that line.
 
+### Dual Awoken Mode wording (decoder)
+`DUAL_AWAKE_MODE_FIRST_*` / `_SECOND_*` statuses use the sheet's most common order and wording: damage cap, rank boost ("Sharpshooter abilities deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5"), extra triggers, cast speed, use-count tiers ("cast speed x2.00/x2.50/x3.00 and critical chance =50%/75%/100% for equipped Sharpshooter abilities after casting 1/2/3+ Sharpshooter abilities"), damage, critical chance, chase ("casts Dual Arrow Force after using Sharpshooter abilities"), "casts X when removed".
+- **Subjects** join with "and" (79 rows vs 76 with slashes). Elements keep the game's order ("Dark and Fire", 28 rows vs 2 sorted), unlike Zenith rows.
+- **Cast speed:** "instant cast speed" (191 vs 31 for "x999999"); fixed speeds are "for X abilities" (Mode I rows split 30/30 with "for equipped X abilities"; Mode II rows are plain).
+- **Chases** that need several uses: "after using two X abilities".
+- **Name:** from the Other-tab Source of the mode's chase; Mode I borrows its Mode II partner's. Otherwise built from the coded name: "Dual Awoken Earth Mode I (Biggs)", and a trailing `II` is "(Fang v2)", the sheet's usual form.
+- **Default Duration:** Mode I is 15 seconds. Mode II lasts as long as its soul break's Dual Shift pattern (`dualShiftPatternId`, arg4: pattern 0 is [3,3,2,1,0] turns, pattern 1 is [1]), which the status doesn't know, so the decoder uses the sheet's most common value, "1 turn" (149 vs 120 for "3/3/2/1/0 turns (Dual Shift)").
+
 ### Soul Drive Mode wording (decoder)
 `Soul Drive Mode: <Character>` statuses (`LIMIT_BREAK_SOUL_DRIVE_*`) use the wording every one of the 160 sheet rows shares: "Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, increases the damage/healing cap by 10000 for Soul Breaks, Soul Breaks deal 50% more damage, grants [Instant ATB 1] after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]". The cap and damage clauses appear only when the status has them.
 
