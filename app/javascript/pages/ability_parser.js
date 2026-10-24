@@ -1830,6 +1830,40 @@ async function translateSBName(abilityId, jpText) {
 // shows how it words them.
 const LEVEL_KEY_NAMES = { masterBuddyModeEnhance: 'Hero Boost' };
 
+// Tier for a soul break with no sheet row yet, by battle.js SOUL_STRIKE_CATEGORY id,
+// using the sheet's Tier labels. The sheet's "+" tiers (Glint+, Glint++, CSB+, LBG+)
+// share a category with their base tier, so new rows get the base label.
+// test/js/parser.tiers.test.mjs checks every category in battle.js has a label here.
+const SOUL_STRIKE_TIER = {
+   1: 'Default',             //  1 STANDARD
+   2: 'Shared',              //  2 COMMON
+   3: 'SB',                  //  3 UNIQUE
+   4: 'SSB',                 //  4 SUPER
+   5: 'BSB',                 //  5 BURST
+   6: 'OSB',                 //  6 OVERFLOW
+   7: 'USB',                 //  7 ULTRA
+   8: 'CSB',                 //  8 COMBO
+   9: 'AOSB',                //  9 OVERFLOW_OUGI
+  10: 'Glint',               // 10 SENGI
+  11: 'AASB',                // 11 AWAKE
+  12: 'SASB',                // 12 SYNCHRO
+  13: 'LBO',                 // 13 LIMIT_BREAK_OVERFLOW
+  14: 'LBG',                 // 14 LIMIT_BREAK_SENGI
+  15: 'ADSB',                // 15 SHIN_OUGI (Arcane Dyad; inferred, no fixture yet)
+  16: 'LBGS',                // 16 ULTIMATE_SUMMON (Limit Break Guardian Summon)
+  17: 'DASB',                // 17 DUAL_AWAKE
+  18: 'LBC',                 // 18 LIMIT_BREAK_COMBO
+  19: 'ZSB',                 // 19 ULTIMATE_SHINGI
+  20: 'OZSB',                // 20 OVERFLOW_SHINGI
+  21: 'CASB',                // 21 CRYSTAL_SHINGI
+  22: 'ASB',                 // 22 ACCEL_SHINGI
+  23: 'MASB',                // 23 MASTER_SHINGI
+  24: 'LBSD',                // 24 LIMIT_BREAK_SOUL_DRIVE
+  25: 'TASB',                // 25 TACTICAL_AWAKE
+  26: 'Buster',              // 26 BUSTER_SHINGI
+  27: 'XSB',                 // 27 EXTRA_ZETSUGI
+};
+
 // Sub-abilities listed as a second Soul Breaks row under their soul break's ID.
 const SECOND_ROWS = {
   weaponSkillAbilityId: { suffix: 'Weapon Skill', domSuffix: '-ws', tier: 'TASB' },
@@ -2062,15 +2096,6 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
       tdExtra: `data-translate-jp="${jpAttr}"`,
     };
   })();
-
-  const SOUL_STRIKE_TIER = {
-     1: 'Default',            2: 'Shared',  3: 'SB',    4: 'SSB',   5: 'BSB',
-     6: 'OSB',                7: 'USB',     8: 'CSB',   9: 'AOSB', 10: 'G',
-    11: 'AASB',              12: 'SASB',   13: 'LBO',  14: 'LIMIT_BREAK_SENGI', 15: 'LBG',
-    16: 'LBG',               17: 'DASB',  18: 'LBC',  19: 'ZSB',  20: 'OZSB',
-    21: 'CASB',              22: 'ASB',   23: 'MASB',  24: 'LBSD', 25: 'TASB',
-    26: 'Buster',            27: 'XSB',
-  };
 
   // Tier: the sheet's when the soul break has a row (docs/decisions.md "Naming").
   const tier = sb?.['Tier'] || SOUL_STRIKE_TIER[parsed.soulStrikeCategory] || '';
@@ -2871,4 +2896,4 @@ loadBattleJs();
 loadSheets();
 
 // Exposed for the Node tests (test/js); the page itself doesn't import anything from here.
-export { DB, processBattleJson, parseAbility };
+export { DB, processBattleJson, parseAbility, SOUL_STRIKE_TIER };
