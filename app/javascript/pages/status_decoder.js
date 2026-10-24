@@ -3,9 +3,9 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
-import { realmName, schoolName } from 'ffrk/names';
+import { realmName, schoolName, elementName, titleCase, canonicalCharacterName as sharedCharacterName } from 'ffrk/names';
+import { statusDescriber, KNOWN_ABILITY_NAMES } from 'ffrk/status_context';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
-import { describeStatus } from 'ffrk/status_text';
 
 // ─── DB ──────────────────────────────────────────────────────────────────────
 const DB = {
@@ -23,6 +23,7 @@ const DB = {
   damageFactor:          {},   // SIZE_NAME → numeric value
   statusAssignments:     {},   // STATUS_KEY → { funcName, argsText, defineModule, block }
   game:                  null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
+  sheetRows:             null, // the sheets as loaded, for ffrk/status_context
   helperBodies:          {},   // 'module|helperName' → helper source (for decoder fingerprints)
   // NOTE: funcName is local to its define() block's namespace.
   // The same name in a different define() block is a completely different function.
@@ -31,10 +32,6 @@ const DB = {
   // Sheets
   statusMap:             {},   // id → { commonName, effects, duration, codedName }
   otherNameMap:          {},   // other ability id → name
-  otherNamesBySource:    {},   // Other-tab Source → [ability names] (e.g. a mode's follow-ups)
-  otherNamesByIdAndSource: {}, // 'id|Source' → name (one ability can be listed under several modes)
-  otherSourcesById:      {},   // other ability id → [Sources] (e.g. a Spirit Attack → its Zenith Mode)
-  otherEffectsBySource:  {},   // Other-tab Source → [Effects] of the abilities listed under it
   extraByCharacter:      {},   // character name → [ability Name strings] from Extra sheet
   charRealm:             {},   // character name → realm (Characters sheet)
   characterNames:        {},   // lower-case name → Characters sheet name
@@ -175,6 +172,7 @@ async function loadSheets() {
     if (raw.error) throw new Error(raw.error);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const { sheets: data, lastRefreshedAt } = splitSheetsResponse(raw);
+    DB.sheetRows = data;
 
     for (const r of (data.status || [])) {
       const id = parseInt(r['ID']);
@@ -186,17 +184,9 @@ async function loadSheets() {
       };
     }
 
-    DB.otherNamesBySource = {};
-    DB.otherNamesByIdAndSource = {};
-    DB.otherSourcesById = {};
-    DB.otherEffectsBySource = {};
     for (const r of (data.other || [])) {
       const id = parseInt(r['ID']);
       if (!isNaN(id) && r['Name']) DB.otherNameMap[id] = r['Name'];
-      if (r['Source'] && r['Name']) (DB.otherNamesBySource[r['Source']] ??= []).push(r['Name']);
-      if (r['Source'] && r['Effects']) (DB.otherEffectsBySource[r['Source']] ??= []).push(r['Effects']);
-      if (r['Source'] && r['Name'] && !isNaN(id)) DB.otherNamesByIdAndSource[`${id}|${r['Source']}`] = r['Name'];
-      if (r['Source'] && !isNaN(id)) (DB.otherSourcesById[id] ??= []).push(r['Source']);
     }
 
     // Characters sheet: name → realm (e.g. 'VII'), for series qualifiers in names
@@ -344,8 +334,7 @@ function buildStatusAssignments() {
 // (docs/decisions.md "Naming"): known JP-romanisation corrections first, then a
 // case-insensitive match against the sheet (e.g. FuSoYa → Fusoya).
 function canonicalCharacterName(name) {
-  const corrected = window.FFRK?.CHAR_CORRECTIONS?.[name] ?? name;
-  return DB.characterNames[corrected.toLowerCase()] ?? corrected;
+  return sharedCharacterName(name, DB.characterNames);
 }
 
 // ─── Argument splitting ───────────────────────────────────────────────────────
@@ -368,23 +357,13 @@ function splitTopLevelArgs(argsText) {
 }
 
 // ─── Display name helpers ─────────────────────────────────────────────────────
-const ELEM_DISPLAY = {
-  FIRE: 'Fire', ICE: 'Ice', LIGHTNING: 'Lightning', EARTH: 'Earth',
-  WIND: 'Wind', WATER: 'Water', HOLY: 'Holy', DARK: 'Dark', POISON: 'Poison',
-  NON_ELEMENTAL: 'NE', NOTHING: 'NE', NON: 'NE',
-};
-
 function elementDisplayName(key) {
-  return ELEM_DISPLAY[key] ?? titleCase(key);
+  return elementName(key);
 }
 
 // Ability category as the sheet names it (SHOOTER is "Sharpshooter").
 function categoryDisplayName(key) {
   return schoolName(key);
-}
-
-function titleCase(key) {
-  return key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
 // Look up a status ID and return its [Common Name] tag
@@ -396,17 +375,10 @@ function statusTag(id) {
   return `<span class="status-tag">[Status #${id}]</span>`;
 }
 
-// ─── Hardcoded ability names ──────────────────────────────────────────────────
-// Special-case abilities that won't appear in the Other sheet tab.
-const HARDCODED_ABILITY_NAMES = {
-  31545795: '111% ATB 1',
-  31547024: '200% ATB 1',
-};
-
-// Look up a display name for any ability ID: Other sheet first, then hardcoded map.
+// Look up a display name for any ability ID: Other sheet first, then known names.
 function abilityDisplayName(id) {
   if (id == null) return null;
-  return DB.otherNameMap[id] ?? HARDCODED_ABILITY_NAMES[id] ?? null;
+  return DB.otherNameMap[id] ?? KNOWN_ABILITY_NAMES[id] ?? null;
 }
 
 // ─── Chase ability name lookup ────────────────────────────────────────────────
@@ -877,7 +849,7 @@ function decodeOr(statusKey, statusId, argsText, _block, helperBody = '') {
   const MINOR = new Set(['of', 'the', 'a', 'an']);
   let charName = words.map((w, i) => (i > 0 && MINOR.has(w.toLowerCase())) ? w.toLowerCase() : w).join(' ');
 
-  // Apply corrections from shared constant (see shared/_ffrk_constants.html.erb)
+  // Sheet name for the character (CHAR_CORRECTIONS in ffrk/names.js, then the Characters sheet)
   charName = canonicalCharacterName(charName);
 
   // Qualifier from abilityCondition (element or category) — KOKI statuses have no condition arg
@@ -1170,25 +1142,9 @@ function decodeEbmP(statusKey, statusId, argsText) {
 // Statuses no helper decoder handles are described from their battle.js config
 // (DB.game, filled by loadGameData) by ffrk/status_text.
 function describeFromGameData(statusId) {
-  const params = DB.game?.statusParams[statusId];
-  if (!params) return null;
-  return describeStatus(params, {
-    conf:        DB.game.conf,
-    element:     key => elementDisplayName(key),
-    category:    key => categoryDisplayName(key),
-    statusName:  id => DB.statusMap[id]?.commonName || (DB.statusById[id] ? titleCase(DB.statusById[id]) : null),
-    // Abilities not yet on the Other tab get a visible placeholder to fill in.
-    abilityName: id => abilityDisplayName(id) ?? '<ability missing from Other Tab>',
-    abilityNameFrom: (id, source) => DB.otherNamesByIdAndSource[`${id}|${source}`] ?? null,
-    abilitySources: id => DB.otherSourcesById[id] ?? [],
-    statusKey:   id => DB.statusById[id] ?? null,
-    statusId:    key => DB.statusAilmentsForward[key] ?? null,
-    selfKey:     DB.statusById[statusId] ?? null,
-    statusParams: key => DB.game.statusParams[DB.statusAilmentsForward[key]] ?? null,
-    characterName: raw => canonicalCharacterName(titleCase(raw)),
-    followUps:   source => DB.otherNamesBySource[source] ?? [],
-    followUpEffects: source => DB.otherEffectsBySource[source] ?? [],
-  });
+  if (!DB.game || !DB.sheetRows) return null;
+  DB.game.describer ??= statusDescriber(DB.game, DB.sheetRows);
+  return DB.game.describer.describe(statusId);
 }
 
 // ─── Decoder registry ────────────────────────────────────────────────────────

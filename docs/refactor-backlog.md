@@ -197,7 +197,7 @@ Zenith statuses still undecoded (20): healers (`INCREASE_EXECUTED_HEAL`, "WHT ac
 **Soul Drive Mode** (`LIMIT_BREAK_SOUL_DRIVE_*`): all 199 decode; 154 names and 101 effects match the sheet. What the Soul Break use grants comes from the soul break's own follow-up, which battle.js doesn't link to the mode. When the Other tab doesn't list it, standard modes are assumed to grant [Instant ATB 1] (owner decision) and plain modes get the placeholder.
 
 **Dual Awoken Mode** (`DUAL_AWAKE_MODE_*`): 567 of 698 decode; of the 455 decoded with sheet rows, 295 names and 145 effects match. Most remaining differences are chases not yet on the Other tab and one-off sheet wordings. Still undecoded (131): tiered critical damage and healing, HP-barter and damage counters, barrier chases, Soul Break cost reductions, and a few one-offs.
-- **Parser follow-up:** the Ability Parser still names statuses only from the Status sheet, so Trey's DASB row shows `DUAL_AWAKE_MODE_FIRST_TREY_SHOOTER_II`. The decoder now names it "Dual Awoken Sharpshooter Mode I (Trey v2)". Using the decoder as the fallback is story 13 (shared `describeStatus`).
+- **Parser follow-up (done):** the Ability Parser falls back to the decoder's game-data description (`ffrk/status_context`), so Trey's DASB rows name "[Dual Awoken Sharpshooter Mode II (Trey v2)]". Still to do: the decoder's older helper decoders (Crystal Force, Extra and Tactical modes) live in the decoder page, so the parser can't use them yet; moving them into `ffrk/` is part of story 12.
 
 Next, largest first among the statuses the sheet is missing:
 - Chase modes.
