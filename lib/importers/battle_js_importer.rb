@@ -1,6 +1,4 @@
-require 'net/http'
-require 'uri'
-require 'json'
+require_relative '../http_fetch'
 
 # Fetches the battle.js URL whose body contains Dean Edwards p,a,c,k,e,r packed JavaScript,
 # unpacks it, and returns the unpacked JavaScript as a plain string.
@@ -9,10 +7,8 @@ require 'json'
 #   BattleJsImporter.fetch("https://example.com/battle.js")
 #   # => "define(\"event/challenge/battle/EventLogic\", ...)"
 module BattleJsImporter
-  MAX_REDIRECTS = 5
-
   def self.fetch(url)
-    body = get_with_redirects(url)
+    body = HttpFetch.get(url)
     unpack(body).encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: '')
   end
 
@@ -54,36 +50,7 @@ module BattleJsImporter
     decode_payload(payload, base, keywords)
   end
 
-  # Searches the unpacked JS for the first JSON object `{...}` or array `[...]`
-  # and parses it.
-  def self.extract_json(unpacked_js)
-    # Try to find a JSON object or array literal
-    # Look for the first { or [ and find the matching closing bracket
-    json_string = extract_json_string(unpacked_js)
-    raise "No JSON found in unpacked source" unless json_string
-
-    JSON.parse(json_string)
-  rescue JSON::ParserError => e
-    raise "Failed to parse extracted JSON: #{e.message}"
-  end
-
   private
-
-  def self.get_with_redirects(url, redirect_limit = MAX_REDIRECTS)
-    raise "Too many redirects" if redirect_limit.zero?
-
-    uri = URI.parse(url)
-    response = Net::HTTP.get_response(uri)
-
-    case response
-    when Net::HTTPSuccess
-      response.body
-    when Net::HTTPRedirection
-      get_with_redirects(response['location'], redirect_limit - 1)
-    else
-      raise "Failed to fetch packed source (HTTP #{response.code}): #{url}"
-    end
-  end
 
   # Decodes the packed payload by replacing each encoded word with the
   # corresponding keyword from the keyword list.
@@ -115,45 +82,4 @@ module BattleJsImporter
     end
   end
 
-  # Extracts the first balanced JSON object or array from a string.
-  def self.extract_json_string(source)
-    # Find the first { or [
-    start_index = source.index(/[\{\[]/)
-    return nil unless start_index
-
-    opener = source[start_index]
-    closer = opener == '{' ? '}' : ']'
-
-    depth = 0
-    in_string = false
-    escape_next = false
-
-    source[start_index..].each_char.with_index do |char, i|
-      if escape_next
-        escape_next = false
-        next
-      end
-
-      if char == '\\' && in_string
-        escape_next = true
-        next
-      end
-
-      if char == '"'
-        in_string = !in_string
-        next
-      end
-
-      next if in_string
-
-      depth += 1 if char == opener
-      depth -= 1 if char == closer
-
-      if depth.zero?
-        return source[start_index, i + 1]
-      end
-    end
-
-    nil
-  end
 end

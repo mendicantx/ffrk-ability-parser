@@ -167,61 +167,6 @@ function checkAllLoaded() {
   document.getElementById('parse-btn').disabled = !allOk;
 }
 
-// Simple CSV parser: handles quoted fields, embedded commas and newlines
-function parseCSV(text) {
-  const rows = [];
-  let i = 0;
-  const n = text.length;
-
-  while (i < n) {
-    const row = [];
-    while (i < n) {
-      if (text[i] === '"') {
-        // Quoted field
-        i++;
-        let val = '';
-        while (i < n) {
-          if (text[i] === '"') {
-            if (text[i+1] === '"') { val += '"'; i += 2; }
-            else { i++; break; }
-          } else {
-            val += text[i++];
-          }
-        }
-        row.push(val);
-      } else {
-        // Unquoted field
-        let val = '';
-        while (i < n && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') {
-          val += text[i++];
-        }
-        row.push(val.trim());
-      }
-      if (i >= n || text[i] === '\n' || text[i] === '\r') {
-        // End of row
-        while (i < n && (text[i] === '\n' || text[i] === '\r')) i++;
-        break;
-      }
-      i++; // skip comma
-    }
-    if (row.length > 0 && !(row.length === 1 && row[0] === '')) {
-      rows.push(row);
-    }
-  }
-  return rows;
-}
-
-function csvToObjects(text) {
-  const rows = parseCSV(text);
-  if (rows.length === 0) return [];
-  const headers = rows[0];
-  return rows.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
-    return obj;
-  });
-}
-
 // Extract a simple {KEY:num, KEY:num} map from battle.js text
 // Returns { NAME: number } (forward map)
 function extractConstantMap(js, name) {
