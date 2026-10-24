@@ -45,23 +45,19 @@ Tier values used for different soul strike categories:
 "Y" = enemy can counter-attack; "N" = cannot be countered.
 Driven by `counter_enable` (top-level) and `shouldIgnoreReflection` (sub-action arg).
 
-### Status decoder O[m.KEY] pattern
-As of the current battle.js, the main `StatusAilmentsConfig` block uses `O[m.KEY]=FUNC(` for assignments.
-This was previously `A[v.KEY]=FUNC(`. Variable names shift each time battle.js is repacked by the minifier.
-If `buildStatusAssignments` throws "StatusAilmentsConfig block not found or empty", check the pattern.
-To find the current pattern: search for `STATUS_AILMENTS_TYPE:{` in the unpacked JS, then look for `VAR[SHORT_VAR.KEY]=FUNC(` assignments nearby.
+### Status decoder: assignment scanning and decoder dispatch
+battle.js assigns statuses as `X[Y.STATUS_KEY]=helper(args)`. `X`, `Y` and `helper` are minified names that change on every repack (for example `A[v.` became `O[m.`, and the Learning Mode helper went from `Or` to `qr`/`Rr`/`zr` to `Wr`).
 
-### Function name dispatch (main StatusAilmentsConfig block)
-The local function names change on every repack. `decodeStatus` dispatches by funcName; update these if statuses stop decoding after a repack:
+Decision: the decoder depends on none of those names.
+- **Scanning:** `buildStatusAssignments` detects each block's `X[Y.` prefix as the one used most often with known `STATUS_AILMENTS_TYPE` keys (`detectAssignmentPrefix`).
+- **Dispatch:** `STATUS_DECODERS` in `status_decoder.js` picks a decoder by the define() module plus a fingerprint of the helper's body: the effect types and option names it uses (`INCREASE_RECEIVED_DAMAGE`, `generalValueToAbilityDamageRateMap`, `ABILITY_BOOST`, `chaseAbilityDoneCountForIsDone`, …). These are game-logic strings, which the minifier leaves alone. When several fingerprints match, the first decoder that accepts the arguments wins.
 
-| Status type | Old funcName | Current funcName (July 2026) | Decoder |
-|-------------|-------------|------------------------------|---------|
-| General damage boost | `nt` | `nt` (unchanged) | `decodeNt` |
-| Learning Mode (`LEARNING_MODE_*`) | `Or` | `qr` / `Rr` / `zr` | `decodeOr` |
-| SS gauge cost reduction (`REDUCE_CONSUME_POINT_*`) | `Xr` | `oi` (+ `ni` with no args) | `decodeXr` (for `oi` only) |
-| Element ATK debuffs (`INCREASE_ELEMENT_ATK_*`) | *(new)* | `Xr` | no decoder yet |
+`test/js/repack.test.mjs` renames the minified names in the snapshot and checks the decoder still gives the same output. If a real repack stops a family decoding, check its fingerprint against the helper body (the decoder page's "Source" panel shows it).
 
-The per-module scanners (CrystalBuddyMode `c[s.]`, TacticalAwakeMode `h[o.]`, BusterAttack `c[s.]`, ExtraBuddyMode raw scan) and their internal function names (`p`, `d`, `v`, `h`) were unchanged in this repack.
+Switching to fingerprints fixed three name-dispatch bugs from the July 2026 repack:
+- 74 `LEARNING_MODE_*` statuses weren't decoded (helper now `Wr`).
+- `REDUCE_CONSUME_POINT_SHIN_OUGI_FOR_GORDON` wasn't decoded (helper now `hi`).
+- 20 `SEQ_ABILITY_REPEAT_*_WHILE_TACTICAL_AWAKE_MODE` statuses were mis-decoded as "Reduced SS Cost" (`oi` now builds sequence abilities).
 
 ---
 
