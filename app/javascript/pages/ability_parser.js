@@ -3,6 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
+import { realmName } from 'ffrk/names';
 
 // ─── Data stores ────────────────────────────────────────────────────────────
 let rawBattleJs = null;
@@ -794,16 +795,10 @@ function generateEffectsText(parsed) {
   }
 
   // Format a partyCondition object into a human-readable "if ..." clause.
-  // Series ID → short display name (e.g. 108001 → 'FFVIII')
-  const _SERIES_DISPLAY = {
-    FF1:'FFI', FF2:'FFII', FF3:'FFIII', FF4:'FFIV', FF5:'FFV', FF6:'FFVI',
-    FF7:'FFVII', FF8:'FFVIII', FF9:'FFIX', FF10:'FFX', FF11:'FFXI', FF12:'FFXII',
-    FF13:'FFXIII', FF14:'FFXIV', FF15:'FFXV', FF16:'FFXVI',
-    FFT:'FFT', FF_TYPE0:'FF Type-0', KH:'KH', FF_GAIDEN:'Beyond', JOB:'Core',
-  };
+  // Series ID → realm name as in the sheet's Realm column (e.g. 108001 → 'VIII')
   function seriesDisplayName(id) {
     const key = DB.seriesIds[id];
-    return key ? (_SERIES_DISPLAY[key] ?? key) : `Series #${id}`;
+    return key ? realmName(key) : `Series #${id}`;
   }
 
   // Collect names (jobs + series) from a buddyCondition object.

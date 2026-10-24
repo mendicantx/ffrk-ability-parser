@@ -168,7 +168,7 @@ When the element depends on a condition, such as the character's attach element,
 `Hybrid` in the Formula column means the attack deals two damage types (for example physical and magical). It does not mean "Type is NAT": a NAT ability can be Hybrid or not. Hybrid rows show both multipliers in the effects, such as "(8.00 or 26.50 each)", and `-` in the Multiplier column.
 
 ### Naming
-- **Series:** written without a space: `FFVII`, `FFXIII`, `FF Type-0`, as in the sheet's Effects text.
+- **Realms (series):** the Soul Breaks sheet's Realm column values: `Core`, `I`–`XVI`, `FFT`, `Type-0`, `KH`, `Beyond`. Effects text uses the same names ("if the character's Realm is VII", "VII characters"). Both tools use `realmName()` in `app/javascript/ffrk/names.js`.
 - **Element label:** `NE`.
 - **Characters:** the Characters sheet is the master list. The Cids are `Cid (IV)`, `Cid (VII)`, `Cid (XIV)`, `Cid Raines` (FFXIII) and `Cidolfus` (FFXVI).
 - **Tier column:** use the Soul Breaks sheet's Tier when the soul break already has a row. Otherwise derive it from the soul strike category, using the sheet's own labels (Glint, Glint+, CSB, LBG, LBGS, ADSB, …).

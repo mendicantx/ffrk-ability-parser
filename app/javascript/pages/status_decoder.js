@@ -3,6 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
+import { realmName } from 'ffrk/names';
 
 // ─── DB ──────────────────────────────────────────────────────────────────────
 const DB = {
@@ -314,18 +315,6 @@ function elementDisplayName(key) {
   return ELEM_DISPLAY[key] ?? titleCase(key);
 }
 
-const SERIES_DISPLAY = {
-  FF1: 'FF I', FF2: 'FF II', FF3: 'FF III', FF4: 'FF IV', FF5: 'FF V',
-  FF6: 'FF VI', FF7: 'FF VII', FF8: 'FF VIII', FF9: 'FF IX', FF10: 'FF X',
-  FF11: 'FF XI', FF12: 'FF XII', FF13: 'FF XIII', FF14: 'FF XIV', FF15: 'FF XV',
-  FF16: 'FF XVI', FFT: 'Tactics', FF_TYPE0: 'Type-0', KH: 'Kingdom Hearts',
-  FF_GAIDEN: 'Beyond', JOB: 'Core',
-};
-
-function seriesDisplayName(key) {
-  return SERIES_DISPLAY[key] ?? key;
-}
-
 function categoryDisplayName(key) {
   return titleCase(key);
 }
@@ -429,7 +418,7 @@ function decodeNt(statusKey, statusId, argsText, block) {
   let realmName = null;
   const realmMatch = condText.match(/buddySeriesId\s*:\s*[a-zA-Z$_][a-zA-Z0-9$_.]*\.SERIES_ID\.([A-Z0-9_]+)/);
   if (realmMatch) {
-    realmName = seriesDisplayName(realmMatch[1]);
+    realmName = realmName(realmMatch[1]);
     condPartsBase.push(realmName);
   }
 

@@ -28,3 +28,20 @@ test('splitSheetsResponse separates the refresh time from the sheets', () => {
   assert.equal(lastRefreshedAt, '2026-01-01T00:00:00Z');
   assert.equal(splitSheetsResponse({}).lastRefreshedAt, null);
 });
+
+const { realmName, REALM_NAMES } = await import('ffrk/names');
+
+test('realm names match the Soul Breaks sheet Realm column', () => {
+  assert.equal(realmName('FF7'), 'VII');
+  assert.equal(realmName('FF16'), 'XVI');
+  assert.equal(realmName('FF_TYPE0'), 'Type-0');
+  assert.equal(realmName('FF_GAIDEN'), 'Beyond');
+  assert.equal(realmName('JOB'), 'Core');
+  assert.equal(realmName('NEW_SERIES'), 'NEW_SERIES');
+});
+
+test('every realm name is a value used in the Soul Breaks sheet', async () => {
+  const { snapshot } = await import('./harness.mjs');
+  const realms = new Set(snapshot().sheets.soul_breaks.map(r => r.Realm));
+  for (const name of Object.values(REALM_NAMES)) assert.ok(realms.has(name), `${name} is not a Realm in the sheet`);
+});
