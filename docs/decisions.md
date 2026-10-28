@@ -41,6 +41,9 @@ Tier values used for different soul strike categories:
 - `XSB` — Extra Zetsugi (soul_strike_category_id: 27, ExtraZetsugiAction)
 - `CASB` — Crystal Awakening (Crystal Force abilities)
 
+### SB Ver
+On the Soul Breaks tab, SB Ver is usually a formula that works itself out (owner, 2026-10-27). The Ability Parser's copyable Soul Breaks row leaves that cell blank. Pasting a blank cell clears what's under it, so after pasting, fill the formula back into SB Ver, for example by copying it down from the row above. The preview table still shows the parser's value for reference. The Crystal Commands and Extra rows keep their SB Ver value.
+
 ### Counter column
 "Y" = enemy can counter-attack; "N" = cannot be countered.
 Driven by `counter_enable` (top-level) and `shouldIgnoreReflection` (sub-action arg).
