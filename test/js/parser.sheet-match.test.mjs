@@ -28,7 +28,7 @@ export function previews(html) {
   const re = /<textarea class="sbp-tsv-area" id="([a-z]+)-tsv-(\d+(?:-ws|-ds)?)"[^>]*>([\s\S]*?)<\/textarea>[\s\S]*?<table class="sb-preview-table">([\s\S]*?)<\/table>/g;
   for (const [, prefix, id, tsv, table] of html.matchAll(re)) {
     const cols = [...table.matchAll(/<td class="sbp-col">([\s\S]*?)<\/td>\s*<td([^>]*)>/g)]
-      .map(m => ({ name: decode(m[1]).trim(), fromSheet: /sbp-sheet/.test(m[2]) }));
+      .map(m => ({ name: decode(m[1]).trim(), fromSheet: /sbp-sheet/.test(m[2]), formula: /sbp-formula/.test(m[2]) }));
     out.push({ prefix, id, fields: decode(tsv).split('\t'), cols });
   }
   return out;
@@ -54,8 +54,9 @@ test('generated sheet-preview cells match the sheet at least as often as before'
       if (!row) continue;
       assert.equal(p.fields.length, p.cols.length, `${file} ${p.prefix}-${p.id}: TSV has ${p.fields.length} fields, table ${p.cols.length} columns`);
       p.cols.forEach((col, i) => {
-        // Skip copied cells, the image formula, and sheet cells nobody has filled in yet.
-        if (col.fromSheet || col.name === 'Img' || !(col.name in row) || ['', '?', '-'].includes(norm(row[col.name])) && norm(row[col.name]) !== norm(p.fields[i])) return;
+        // Skip copied cells, the image formula, columns the sheet fills with a formula (blank in
+        // the copied row), and sheet cells nobody has filled in yet.
+        if (col.fromSheet || col.formula || col.name === 'Img' || !(col.name in row) || ['', '?', '-'].includes(norm(row[col.name])) && norm(row[col.name]) !== norm(p.fields[i])) return;
         const ok = norm(p.fields[i]) === norm(row[col.name]);
         const c = (perColumn[`${p.prefix} ${col.name}`] ??= { matched: 0, total: 0, misses: [] });
         c.total++; total++;

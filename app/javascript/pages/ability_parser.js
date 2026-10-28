@@ -1843,7 +1843,7 @@ async function translateSBName(abilityId, jpText) {
     // Rebuild TSV from current table cell text content
     if (tsvArea) {
       const tbody = tsvArea.closest('.sb-preview').querySelector('.sb-preview-table tbody');
-      tsvArea.value = [...tbody.rows].map(r => r.cells[1].textContent.trim()).join('\t');
+      tsvArea.value = [...tbody.rows].map(r => (r.cells[1].classList.contains('sbp-formula') ? '' : r.cells[1].textContent.trim())).join('\t');
     }
   } catch(e) {
     const indicator = nameCell.querySelector('.sbp-translating');
@@ -2067,10 +2067,12 @@ function combatColumns(parsed) {
 // columns: [{ col, val, rawVal?, src?, tdId?, tdExtra? }] in sheet order. val is plain
 // text unless rawVal is given, in which case val is markup and rawVal its text.
 // src marks values taken from the sheet itself rather than derived from the JSON.
+// A column with formula: true is one the sheet fills in with a formula: the table shows the
+// parser's value, and the copied row leaves the cell blank.
 function renderSheetPreview({ title, idPrefix, id, columns }) {
   const escapeHtml = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const text = c => String(c.rawVal ?? c.val ?? '');
-  const tsvRow = columns.map(c => text(c).replace(/[\t\n\r]/g, ' ')).join('\t');
+  const tsvRow = columns.map(c => (c.formula ? '' : text(c).replace(/[\t\n\r]/g, ' '))).join('\t');
 
   let html = `<details class="sb-preview-details"><summary>${title}</summary>`;
   html += `<div class="sb-preview">`;
@@ -2087,13 +2089,16 @@ function renderSheetPreview({ title, idPrefix, id, columns }) {
   html += `<table class="sb-preview-table">`;
   html += `<thead><tr><th>Column</th><th>Value</th></tr></thead><tbody>`;
   for (const c of columns) {
-    const cls   = text(c) === '' ? 'sbp-empty' : c.src ? 'sbp-sheet' : 'sbp-derived';
-    const attrs = (c.tdId ? ` id="${c.tdId}"` : '') + (c.tdExtra ? ` ${c.tdExtra}` : '');
+    const cls   = (text(c) === '' ? 'sbp-empty' : c.src ? 'sbp-sheet' : 'sbp-derived') + (c.formula ? ' sbp-formula' : '');
+    const attrs = (c.tdId ? ` id="${c.tdId}"` : '') + (c.tdExtra ? ` ${c.tdExtra}` : '')
+      + (c.formula ? ` title="The sheet fills this column with a formula, so the copied row leaves it blank"` : '');
     const shown = c.rawVal != null ? c.val : escapeHtml(c.val ?? '');
     html += `<tr><td class="sbp-col">${c.col}</td><td class="${cls}"${attrs}>${shown}</td></tr>`;
   }
   html += `</tbody></table>`;
-  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON</div>`;
+  html += `<div class="sbp-legend"><span class="sbp-sheet-badge">■</span> from sheet &nbsp; <span class="sbp-derived-badge">■</span> derived from JSON`;
+  if (columns.some(c => c.formula)) html += ` &nbsp; <span class="sbp-formula-badge">■</span> formula on the sheet: blank in the copied row`;
+  html += `</div>`;
   html += `</div></details>`;
   return html;
 }
@@ -2137,7 +2142,9 @@ function renderSBSheetPreview(parsed, sb, actorName, genEffects, sheetElement, a
     'Character':      { val: sb?.['Character'] || actorName || '',                                                             src: !!sb?.['Character'] },
     'Name':           nameEntry,
     'Tier':           { val: tier,                                                                                        src: !!sb?.['Tier'] },
-    'SB Ver':         { val: sb?.['SB Ver'] || sheetAs?.sbVer || soulBreakVersion(sb, sb?.['Character'] || actorName, tier), src: !!sb?.['SB Ver'] },
+    // The Soul Breaks tab computes SB Ver with a formula, so the copied row leaves it blank
+    // (docs/decisions.md "SB Ver").
+    'SB Ver':         { val: sb?.['SB Ver'] || sheetAs?.sbVer || soulBreakVersion(sb, sb?.['Character'] || actorName, tier), src: !!sb?.['SB Ver'], formula: true },
     'Type':           { val: type,                                                                                        src: false },
     'Target':         { val: target,                                                                                      src: false },
     'Formula':        { val: formula,                                                                                     src: false },
