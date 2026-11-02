@@ -258,7 +258,7 @@ A Tactical (TASB) soul break has two Soul Breaks rows with the same ID (166 of 2
 - **The mode:** NAT, Self.
 - **"<name> (Weapon Skill)":** the `weaponSkillAbilityId` attack, Points 0, the same SB Ver.
 
-The parser shows the weapon skill under the soul break's ID and "(Weapon Skill)" name; its on-page ids carry a `-ws` suffix. The mode row's Effects in the sheet is a hand-written summary of the Tactical Awoken Mode status, which the parser doesn't produce yet. TP MAX follow-ups without an Other row are named `TPMAX<Character>`, as the sheet names them.
+The parser shows the weapon skill under the soul break's ID and "(Weapon Skill)" name; its on-page ids carry a `-ws` suffix. The mode row's Effects in the sheet is a hand-written summary of the Tactical Awoken Mode status, which the parser doesn't produce yet. TP MAX follow-ups without an Other row are named `TPMAX: <Character>`, like the other follow-ups ("Star Strike: <Character>"). This is a contributor's choice (2026-11-01), not yet reviewed by the owner, and it goes against the sheet's most common form. On 2026-10-30, 92 of the 93 TP MAX rows used the Japanese middle dot (U+30FB, `TPMAX・Squall (Fire)`); only `TPMAX: Kefka (Dark)` (31547329) used the colon. Existing rows are shown as the sheet has them, so the sheet is mixed until those 92 are renamed.
 
 ### Dual Awoken soul breaks
 A Dual Awoken (DASB) soul break has two Soul Breaks rows with the same ID, like a Tactical soul break:
