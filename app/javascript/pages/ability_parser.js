@@ -355,11 +355,12 @@ function chaseSourceName(abilityId) {
   return DB.statusMap[statusId]?.commonName || '';
 }
 
-// Other-tab name for a Tactical Awoken Mode's TP MAX follow-up, as the sheet names
-// them: "TPMAX・<Character>" with the Japanese middle dot (e.g. "TPMAX・Garland").
+// Other-tab name for a Tactical Awoken Mode's TP MAX follow-up: "TPMAX: <Character>"
+// (e.g. "TPMAX: Garland"), like the other follow-ups' "Star Strike: <Character>". Most
+// existing rows use the Japanese middle dot instead ("TPMAX・Garland"); see decisions.md.
 function tpMaxName(source) {
   const m = /^Tactical Awoken Mode: (.+)$/.exec(source ?? '');
-  return m ? `TPMAX・${m[1]}` : '';
+  return m ? `TPMAX: ${m[1]}` : '';
 }
 
 // SB Ver: the sheet's value when the soul break has a row; otherwise the tier plus the
