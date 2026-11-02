@@ -145,8 +145,12 @@ try {
       await ap.waitFor(`/configs|err/.test(document.getElementById('li-game-icon').className + ${text('li-game-detail')})`, 'battle.js to run in its Worker');
       const named = await ap.evaluate(`document.getElementById('results').textContent.includes('Dual Awoken Sharpshooter Mode II (Trey v2)')`);
       check('parser names a status from game data', named);
+      // Listed while the server's Status tab lacks it; once the sheet has the row, not listed.
+      const onTab = await ap.evaluate(`fetch('/data/sheets?names=status').then(r => r.json()).then(j => j.status.some(r => r.ID === '50344009' && r['Common Name']))`);
       const missing = await ap.evaluate(`document.getElementById('status-tsv-50344009')?.value ?? ''`);
-      check('parser lists statuses missing from the Status tab', /^50344009\tDual Awoken Sharpshooter Mode I \(Trey v2\)\t/.test(missing), missing.slice(0, 80));
+      check('parser lists statuses missing from the Status tab',
+            onTab ? missing === '' : /^50344009\tDual Awoken Sharpshooter Mode I \(Trey v2\)\t/.test(missing),
+            onTab ? 'the Status tab has 50344009, so it is not listed' : missing.slice(0, 80));
     }
     check(`parser page has no script errors (${file})`, ap.errors.length === 0, ap.errors.join(' | '));
     ap.close();
