@@ -879,6 +879,10 @@ function parseAbility(ability, allAbilities, parsedSet) {
             if (v?.increaseLevel != null) {
               sub.isStateLevelIncrement = true;
               sub.levelIncrease = { key: v.key, by: Number(v.increaseLevel) };
+              // Sent to the allies who have a mode (Learning Mode, Devotion Mode): it raises
+              // that mode's level.
+              const holder = /hasSaId\s*:\s*\[?\s*(\d+)/.exec(sub.target === 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' ? sub.targetArgRaw : '')?.[1];
+              if (holder) sub.levelIncrease.status = lookupStatus(Number(holder));
             }
             break;
           default:
@@ -1398,7 +1402,9 @@ function generateEffectsText(parsed) {
           // ELSE IF branches, in order.
           const elifBranches = blockElifs.map((start, k) => sas.slice(start + 1, blockElifs[k + 1] ?? elseIdx));
           if (![...ifBranch, ...elseBranch, ...elifBranches.flat()].some(isAtk)) {
-            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
+            // A mode's level increase grants "Increase Status Level": it's listed as the
+            // increase, not as a grant.
+            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0 && !sa.levelIncrease?.status);
             const ifSA   = statusSA(ifBranch);
             const elseSA = statusSA(elseBranch);
             if (ifSA || elseSA) {
@@ -1585,10 +1591,42 @@ function generateEffectsText(parsed) {
   }
 
   // ── 1c. Level increases: "increases Hero Boost level by 1" (Master Mode Star Strikes) ──
+  // "increases Devotion Mode: Selphie level by 1 to all allies" (docs/decisions.md), after
+  // the grants, as the sheet lists it. A soul break with two Learning Modes raises one or
+  // the other by what the user has: "increases [A] or [B] level by 1 to all allies if the
+  // user has/does not have Realm Synergy" (or Job Synergy, or a status).
+  const userHas = cond => {
+    if (!/^\s*actorCondition/.test(cond)) return null;
+    if (/hasSeriesStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Realm Synergy';
+    if (/hasJobStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Job Synergy';
+    const id = /^\s*actorCondition\s*:\s*\{\s*hasSaId\s*:\s*(\d+)\s*,?\s*\}\s*$/.exec(cond)?.[1];
+    return id ? `[${statusName(lookupStatus(Number(id)))}]` : null;
+  };
+  const modeLevels = [];
+  const blocks = [];
   for (const sa of exec.subActions) {
+    const raw = sa.controlTypeRaw ?? 0;
+    if (raw === 1) { blocks.push({ cond: sa.conditionArg ?? '', inElse: false }); continue; }
+    if (raw === 2 && blocks.length) { blocks[blocks.length - 1] = { cond: sa.conditionArg ?? '', inElse: false }; continue; }
+    if (raw === 3 && blocks.length) { blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], inElse: true }; continue; }
+    if (raw === 4) { blocks.pop(); continue; }
     const level = sa.levelIncrease;
     const name = level && LEVEL_KEY_NAMES[level.key];
     if (name) segs.push(`increases ${name} level by ${level.by}`);
+    else if (level?.status) {
+      const block = blocks.find(b => userHas(b.cond));
+      modeLevels.push({ name: statusName(level.status), by: level.by, has: block && userHas(block.cond), inElse: block?.inElse });
+    }
+  }
+  const modeLevelSegs = modeLevels.filter(m => !m.has).map(m => `increases ${m.name} level by ${m.by} to all allies`);
+  for (const has of new Set(modeLevels.map(m => m.has).filter(Boolean))) {
+    const yes = modeLevels.filter(m => m.has === has && !m.inElse), no = modeLevels.filter(m => m.has === has && m.inElse);
+    if (yes.length === 1 && no.length === 1 && yes[0].by === no[0].by) {
+      modeLevelSegs.push(`increases ${yes[0].name} or ${no[0].name} level by ${yes[0].by} to all allies if the user has/does not have ${has}`);
+    } else {
+      for (const m of yes) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user has ${has}`);
+      for (const m of no) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user does not have ${has}`);
+    }
   }
 
   // ── 2. Activation statuses ──
@@ -1824,6 +1862,8 @@ function generateEffectsText(parsed) {
 
   // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
+
+  segs.push(...modeLevelSegs);
 
   // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
   // segments start lower-case when they open with a verb, and there is no final period
