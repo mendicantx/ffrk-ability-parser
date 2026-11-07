@@ -464,6 +464,19 @@ const IGNORED_SUB_ACTION_KEYS = new Set([
 ]);
 
 // ─── Core ability parser ─────────────────────────────────────────────────────
+// A sub-action that targets "alive allies matching an actor condition" names who they
+// are in its target: "ALIVE_BUDDIES_BY_ACTOR_CONDITION:Witch" for actorCondition
+// { anyJobId: [600017], isAlive: true }, shown as "to all Witch allies". Only job and
+// series conditions; any other target is returned as it is.
+function actorConditionTarget(target, targetArg) {
+  if (target !== 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' || !/actorCondition/.test(targetArg ?? '')) return target;
+  const keys = [...String(targetArg).matchAll(/(\w+)\s*:/g)].map(m => m[1]);
+  if (keys.some(k => !['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId'].includes(k))) return target;
+  const ids = key => (String(targetArg).match(new RegExp(`${key}\\s*:\\s*\\[([^\\]]*)\\]`))?.[1] ?? '').split(',').map(x => x.trim()).filter(Boolean);
+  const names = [...ids('anyJobId').map(id => DB.jobIds[id] ? schoolName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
+  return names.length ? `${target}:${names.join(' or ')}` : target;
+}
+
 function parseAbility(ability, allAbilities, parsedSet) {
   if (parsedSet.has(ability.ability_id)) return null;
   parsedSet.add(ability.ability_id);
@@ -755,7 +768,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
       const subArgs = parseDenaArg(sa.arg);
       const sub = {
         type:           DB.subActionType[parseInt(sa.type)]           ?? sa.type,
-        target:         DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type,
+        target:         actorConditionTarget(DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type, sa.target_arg),
         targetArgRaw:   sa.target_arg || '',
         processOrder:   parseInt(sa.process_order) || 0,
         conditionType:  DB.conditionTypes[parseInt(sa.condition_type)] ?? null,
@@ -1038,6 +1051,8 @@ function generateEffectsText(parsed) {
     if (!target) return '';
     const raw = String(target);
     if (raw === 'default') return ' to the user';
+    const allies = /^ALIVE_BUDDIES_BY_ACTOR_CONDITION:(.+)$/.exec(raw);
+    if (allies) return ` to all ${allies[1]} allies`;
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
@@ -1400,6 +1415,11 @@ function generateEffectsText(parsed) {
     if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
     if (condStat.elifs.length) return partyTiers(condStat);
     const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+    // "If 1+ Witch allies, grant [X] to every Witch ally" only says who gets it.
+    const pc = partyConditionParts(condStat.conditionArg);
+    if (!condStat.hasElse && pc.count === 1 && !pc.attach && String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${pc.names.join(' or ')}`) {
+      return list(condStat.ifStatuses) ? `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}` : null;
+    }
     const parts = [];
     if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
     if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
@@ -1950,7 +1970,7 @@ function typeAndFormula(parsed) {
 
 // Who a SUB_ACTION_TARGET_TYPE name (or similar) points at.
 function targetKind(targetStr) {
-  const t       = String(targetStr ?? '').toUpperCase();
+  const t       = String(targetStr ?? '').replace(/:.*$/, '').toUpperCase();
   const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
   const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
   const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
