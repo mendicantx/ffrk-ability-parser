@@ -464,17 +464,28 @@ const IGNORED_SUB_ACTION_KEYS = new Set([
 ]);
 
 // ─── Core ability parser ─────────────────────────────────────────────────────
-// A sub-action that targets "alive allies matching an actor condition" names who they
-// are in its target: "ALIVE_BUDDIES_BY_ACTOR_CONDITION:Witch" for actorCondition
-// { anyJobId: [600017], isAlive: true }, shown as "to all Witch allies". Only job and
-// series conditions; any other target is returned as it is.
+// A sub-action that targets "alive allies matching an actor condition" says who they are
+// in its target: "ALIVE_BUDDIES_BY_ACTOR_CONDITION:Witch allies" for actorCondition
+// { anyJobId: [600017], isAlive: true }, shown as "to all Witch allies". Read: a job or
+// series ("Witch allies", "Mystic Knight or XII allies"), or an Infusion ("allies with
+// Attach Ice or Attach Dark", "allies without an Infusion"). Any other target is
+// returned as it is.
 function actorConditionTarget(target, targetArg) {
   if (target !== 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' || !/actorCondition/.test(targetArg ?? '')) return target;
-  const keys = [...String(targetArg).matchAll(/(\w+)\s*:/g)].map(m => m[1]);
-  if (keys.some(k => !['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId'].includes(k))) return target;
-  const ids = key => (String(targetArg).match(new RegExp(`${key}\\s*:\\s*\\[([^\\]]*)\\]`))?.[1] ?? '').split(',').map(x => x.trim()).filter(Boolean);
-  const names = [...ids('anyJobId').map(id => DB.jobIds[id] ? schoolName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
-  return names.length ? `${target}:${names.join(' or ')}` : target;
+  const arg = String(targetArg);
+  const keys = [...arg.matchAll(/(\w+)\s*:/g)].map(m => m[1]);
+  const read = ['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId', 'hasAnyAttachElementByElementIds', 'hasAttachElementByElementId', 'hasAttachElement'];
+  if (keys.some(k => !read.includes(k))) return target;
+  const ids = key => (arg.match(new RegExp(`${key}\\s*:\\s*(?:\\[([^\\]]*)\\]|(\\d+))`)) ?? []).slice(1).filter(Boolean).join(',').split(',').map(x => x.trim()).filter(Boolean);
+  const groups = [...ids('anyJobId').map(id => DB.jobIds[id] ? schoolName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
+  const elements = [...ids('hasAnyAttachElementByElementIds'), ...ids('hasAttachElementByElementId')]
+    .map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`);
+  const infusion = /hasAttachElement\s*:\s*(true|false)/.exec(arg)?.[1];
+  if (groups.length && (elements.length || infusion)) return target;
+  if (groups.length) return `${target}:${groups.join(' or ')} allies`;
+  const with_ = [...elements, ...(infusion === 'true' ? ['an Infusion'] : [])];
+  const who = [with_.length ? `with ${with_.join(' or ')}` : '', infusion === 'false' ? 'without an Infusion' : ''].filter(Boolean).join(' or ');
+  return who ? `${target}:allies ${who}` : target;
 }
 
 function parseAbility(ability, allAbilities, parsedSet) {
@@ -1035,7 +1046,7 @@ function generateEffectsText(parsed) {
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
     }
-    const attachM = !names.length && condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+    const attachM = !names.length && (condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/));
     if (attachM) {
       const elements = (attachM[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)]).filter(Boolean).map(fmtElement);
       return elements.length ? { count, names: elements, attach: true } : null;
@@ -1052,7 +1063,7 @@ function generateEffectsText(parsed) {
     const raw = String(target);
     if (raw === 'default') return ' to the user';
     const allies = /^ALIVE_BUDDIES_BY_ACTOR_CONDITION:(.+)$/.exec(raw);
-    if (allies) return ` to all ${allies[1]} allies`;
+    if (allies) return ` to all ${allies[1]}`;
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
@@ -1415,9 +1426,11 @@ function generateEffectsText(parsed) {
     if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
     if (condStat.elifs.length) return partyTiers(condStat);
     const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-    // "If 1+ Witch allies, grant [X] to every Witch ally" only says who gets it.
+    // "If 1+ Witch allies, grant [X] to every Witch ally" only says who gets it (likewise
+    // allies with Attach Ice).
     const pc = partyConditionParts(condStat.conditionArg);
-    if (!condStat.hasElse && pc.count === 1 && !pc.attach && String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${pc.names.join(' or ')}`) {
+    const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
+    if (!condStat.hasElse && pc.count === 1 && String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`) {
       return list(condStat.ifStatuses) ? `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}` : null;
     }
     const parts = [];
