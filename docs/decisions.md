@@ -276,6 +276,11 @@ A party condition that counts allies with an Infusion reads "…if there are 0-1
 ### Party conditions with several thresholds
 IF / ELSE IF / ELSE blocks on the same kind of ally are listed fewest allies first, as in the sheet's "0-3/4/5 VII allies": "Grants [A] to the user/[A], [B] to the user/[A], [C] to the user if there are 0-2/3/4+ Sharpshooter allies in the party". Job names use the sheet's school names (`schoolName()` in `ffrk/names.js`: SHOOTER is "Sharpshooter"), in both tools.
 
+### Grants to the allies of one job or series (2026-11-07, a contributor's choice; not yet reviewed by the owner)
+A sub-action can target only the alive allies matching an actor condition (`ALIVE_BUDDIES_BY_ACTOR_CONDITION` with `target_arg: actorCondition: { anyJobId: [600017], isAlive: true }`). When that condition is a job or series, the grant reads "to all <job/series> allies": "grants [Master +30% Boost 1] to all Witch allies". Several are joined with "or" ("to all Mystic Knight or XII allies"). This follows the sheet's most common form for such grants: 20 rows say "to all <X> allies" ("to all Knight allies", "to all FF7 allies"), 6 say "to <X> allies" ("to Summoner allies"). Other actor conditions (an Infusion, a status the ally has, a character ID) aren't read yet and keep no target.
+
+Such a grant is often inside an IF that only checks one of those allies is alive (party condition, 1+ of the same job or series, no ELSE). That IF changes nothing, so it isn't shown. The parser used to write these as "if there are 0/1+ Witch allies in the party", which reads as if the user or the party gets the status. 7 North Star rows on the Other tab still say that (2026-11-07): Lion Slash 23420022, King of the Ring 20670030, Master General 22490033, Rookie's Fury 23020031, Strange Bedfellow 20810040, Dark Cloud Lightning Strike 20460023 and King of the Blitz 22090035. North Star: Princess's Racket (20360065) says "to Summoner allies".
+
 ### Attack wording
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".
