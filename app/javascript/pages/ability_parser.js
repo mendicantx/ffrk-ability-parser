@@ -464,6 +464,30 @@ const IGNORED_SUB_ACTION_KEYS = new Set([
 ]);
 
 // ─── Core ability parser ─────────────────────────────────────────────────────
+// A sub-action that targets "alive allies matching an actor condition" says who they are
+// in its target: "ALIVE_BUDDIES_BY_ACTOR_CONDITION:Witch allies" for actorCondition
+// { anyJobId: [600017], isAlive: true }, shown as "to all Witch allies". Read: a job or
+// series ("Witch allies", "Mystic Knight or XII allies"), or an Infusion ("allies with
+// Attach Ice or Attach Dark", "allies without an Infusion"). Any other target is
+// returned as it is.
+function actorConditionTarget(target, targetArg) {
+  if (target !== 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' || !/actorCondition/.test(targetArg ?? '')) return target;
+  const arg = String(targetArg);
+  const keys = [...arg.matchAll(/(\w+)\s*:/g)].map(m => m[1]);
+  const read = ['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId', 'hasAnyAttachElementByElementIds', 'hasAttachElementByElementId', 'hasAttachElement'];
+  if (keys.some(k => !read.includes(k))) return target;
+  const ids = key => (arg.match(new RegExp(`${key}\\s*:\\s*(?:\\[([^\\]]*)\\]|(\\d+))`)) ?? []).slice(1).filter(Boolean).join(',').split(',').map(x => x.trim()).filter(Boolean);
+  const groups = [...ids('anyJobId').map(id => DB.jobIds[id] ? schoolName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
+  const elements = [...ids('hasAnyAttachElementByElementIds'), ...ids('hasAttachElementByElementId')]
+    .map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`);
+  const infusion = /hasAttachElement\s*:\s*(true|false)/.exec(arg)?.[1];
+  if (groups.length && (elements.length || infusion)) return target;
+  if (groups.length) return `${target}:${groups.join(' or ')} allies`;
+  const with_ = [...elements, ...(infusion === 'true' ? ['an Infusion'] : [])];
+  const who = [with_.length ? `with ${with_.join(' or ')}` : '', infusion === 'false' ? 'without an Infusion' : ''].filter(Boolean).join(' or ');
+  return who ? `${target}:allies ${who}` : target;
+}
+
 function parseAbility(ability, allAbilities, parsedSet) {
   if (parsedSet.has(ability.ability_id)) return null;
   parsedSet.add(ability.ability_id);
@@ -755,7 +779,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
       const subArgs = parseDenaArg(sa.arg);
       const sub = {
         type:           DB.subActionType[parseInt(sa.type)]           ?? sa.type,
-        target:         DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type,
+        target:         actorConditionTarget(DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type, sa.target_arg),
         targetArgRaw:   sa.target_arg || '',
         processOrder:   parseInt(sa.process_order) || 0,
         conditionType:  DB.conditionTypes[parseInt(sa.condition_type)] ?? null,
@@ -855,6 +879,10 @@ function parseAbility(ability, allAbilities, parsedSet) {
             if (v?.increaseLevel != null) {
               sub.isStateLevelIncrement = true;
               sub.levelIncrease = { key: v.key, by: Number(v.increaseLevel) };
+              // Sent to the allies who have a mode (Learning Mode, Devotion Mode): it raises
+              // that mode's level.
+              const holder = /hasSaId\s*:\s*\[?\s*(\d+)/.exec(sub.target === 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' ? sub.targetArgRaw : '')?.[1];
+              if (holder) sub.levelIncrease.status = lookupStatus(Number(holder));
             }
             break;
           default:
@@ -1022,7 +1050,7 @@ function generateEffectsText(parsed) {
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
     }
-    const attachM = !names.length && condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+    const attachM = !names.length && (condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/));
     if (attachM) {
       const elements = (attachM[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)]).filter(Boolean).map(fmtElement);
       return elements.length ? { count, names: elements, attach: true } : null;
@@ -1038,6 +1066,8 @@ function generateEffectsText(parsed) {
     if (!target) return '';
     const raw = String(target);
     if (raw === 'default') return ' to the user';
+    const allies = /^ALIVE_BUDDIES_BY_ACTOR_CONDITION:(.+)$/.exec(raw);
+    if (allies) return ` to all ${allies[1]}`;
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
@@ -1372,7 +1402,9 @@ function generateEffectsText(parsed) {
           // ELSE IF branches, in order.
           const elifBranches = blockElifs.map((start, k) => sas.slice(start + 1, blockElifs[k + 1] ?? elseIdx));
           if (![...ifBranch, ...elseBranch, ...elifBranches.flat()].some(isAtk)) {
-            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
+            // A mode's level increase grants "Increase Status Level": it's listed as the
+            // increase, not as a grant.
+            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0 && !sa.levelIncrease?.status);
             const ifSA   = statusSA(ifBranch);
             const elseSA = statusSA(elseBranch);
             if (ifSA || elseSA) {
@@ -1400,6 +1432,13 @@ function generateEffectsText(parsed) {
     if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
     if (condStat.elifs.length) return partyTiers(condStat);
     const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+    // "If 1+ Witch allies, grant [X] to every Witch ally" only says who gets it (likewise
+    // allies with Attach Ice).
+    const pc = partyConditionParts(condStat.conditionArg);
+    const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
+    if (!condStat.hasElse && pc.count === 1 && String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`) {
+      return list(condStat.ifStatuses) ? `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}` : null;
+    }
     const parts = [];
     if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
     if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
@@ -1552,10 +1591,42 @@ function generateEffectsText(parsed) {
   }
 
   // ── 1c. Level increases: "increases Hero Boost level by 1" (Master Mode Star Strikes) ──
+  // "increases Devotion Mode: Selphie level by 1 to all allies" (docs/decisions.md), after
+  // the grants, as the sheet lists it. A soul break with two Learning Modes raises one or
+  // the other by what the user has: "increases [A] or [B] level by 1 to all allies if the
+  // user has/does not have Realm Synergy" (or Job Synergy, or a status).
+  const userHas = cond => {
+    if (!/^\s*actorCondition/.test(cond)) return null;
+    if (/hasSeriesStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Realm Synergy';
+    if (/hasJobStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Job Synergy';
+    const id = /^\s*actorCondition\s*:\s*\{\s*hasSaId\s*:\s*(\d+)\s*,?\s*\}\s*$/.exec(cond)?.[1];
+    return id ? `[${statusName(lookupStatus(Number(id)))}]` : null;
+  };
+  const modeLevels = [];
+  const blocks = [];
   for (const sa of exec.subActions) {
+    const raw = sa.controlTypeRaw ?? 0;
+    if (raw === 1) { blocks.push({ cond: sa.conditionArg ?? '', inElse: false }); continue; }
+    if (raw === 2 && blocks.length) { blocks[blocks.length - 1] = { cond: sa.conditionArg ?? '', inElse: false }; continue; }
+    if (raw === 3 && blocks.length) { blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], inElse: true }; continue; }
+    if (raw === 4) { blocks.pop(); continue; }
     const level = sa.levelIncrease;
     const name = level && LEVEL_KEY_NAMES[level.key];
     if (name) segs.push(`increases ${name} level by ${level.by}`);
+    else if (level?.status) {
+      const block = blocks.find(b => userHas(b.cond));
+      modeLevels.push({ name: statusName(level.status), by: level.by, has: block && userHas(block.cond), inElse: block?.inElse });
+    }
+  }
+  const modeLevelSegs = modeLevels.filter(m => !m.has).map(m => `increases ${m.name} level by ${m.by} to all allies`);
+  for (const has of new Set(modeLevels.map(m => m.has).filter(Boolean))) {
+    const yes = modeLevels.filter(m => m.has === has && !m.inElse), no = modeLevels.filter(m => m.has === has && m.inElse);
+    if (yes.length === 1 && no.length === 1 && yes[0].by === no[0].by) {
+      modeLevelSegs.push(`increases ${yes[0].name} or ${no[0].name} level by ${yes[0].by} to all allies if the user has/does not have ${has}`);
+    } else {
+      for (const m of yes) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user has ${has}`);
+      for (const m of no) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user does not have ${has}`);
+    }
   }
 
   // ── 2. Activation statuses ──
@@ -1792,6 +1863,8 @@ function generateEffectsText(parsed) {
   // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
 
+  segs.push(...modeLevelSegs);
+
   // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
   // segments start lower-case when they open with a verb, and there is no final period
   // (docs/decisions.md "Effects punctuation").
@@ -1950,7 +2023,7 @@ function typeAndFormula(parsed) {
 
 // Who a SUB_ACTION_TARGET_TYPE name (or similar) points at.
 function targetKind(targetStr) {
-  const t       = String(targetStr ?? '').toUpperCase();
+  const t       = String(targetStr ?? '').replace(/:.*$/, '').toUpperCase();
   const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
   const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
   const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
