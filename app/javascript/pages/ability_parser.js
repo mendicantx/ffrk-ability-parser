@@ -3,7 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
-import { realmName, schoolName } from 'ffrk/names';
+import { jobName, realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
 import { createStatusDecoder } from 'ffrk/status_decoder';
 import { findAbilityUrl, linkMissingAbilities } from 'ffrk/status_context';
@@ -477,7 +477,7 @@ function actorConditionTarget(target, targetArg) {
   const read = ['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId', 'hasAnyAttachElementByElementIds', 'hasAttachElementByElementId', 'hasAttachElement'];
   if (keys.some(k => !read.includes(k))) return target;
   const ids = key => (arg.match(new RegExp(`${key}\\s*:\\s*(?:\\[([^\\]]*)\\]|(\\d+))`)) ?? []).slice(1).filter(Boolean).join(',').split(',').map(x => x.trim()).filter(Boolean);
-  const groups = [...ids('anyJobId').map(id => DB.jobIds[id] ? schoolName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
+  const groups = [...ids('anyJobId').map(id => DB.jobIds[id] ? jobName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
   const elements = [...ids('hasAnyAttachElementByElementIds'), ...ids('hasAttachElementByElementId')]
     .map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`);
   const infusion = /hasAttachElement\s*:\s*(true|false)/.exec(arg)?.[1];
@@ -486,6 +486,34 @@ function actorConditionTarget(target, targetArg) {
   const with_ = [...elements, ...(infusion === 'true' ? ['an Infusion'] : [])];
   const who = [with_.length ? `with ${with_.join(' or ')}` : '', infusion === 'false' ? 'without an Infusion' : ''].filter(Boolean).join(' or ');
   return who ? `${target}:allies ${who}` : target;
+}
+
+// What a chain counts, as the sheet names the chain: "Ice", "Dragoon", "VIII", "Core".
+function chainGroupName(cond) {
+  if (cond.id == null) return null;
+  if (cond.type === 'ELEMENT_TYPE') return DB.elementTypes[cond.id] ? fmtElement(DB.elementTypes[cond.id]) : `Element #${cond.id}`;
+  if (cond.type === 'ABILITY_CATEGORY') return DB.jobIds[cond.id] ? jobName(DB.jobIds[cond.id]) : `Job #${cond.id}`;
+  if (cond.type === 'SERIES') return DB.seriesIds[cond.id] ? realmName(DB.seriesIds[cond.id]) : `Series #${cond.id}`;
+  return null;
+}
+
+// "Activates Ice Chain (max 150, field +50%)"; an LBC that finds its chain already running
+// extends it instead: "… or adds 25 to the current Ice Chain maximum limit and increases
+// the current chain count on all enemies by 10" (docs/decisions.md "Chains"). Several
+// conditions are one chain, in ID order except that Core comes first, as in every sheet
+// row that names both: "Core/Beyond".
+function chainClause(chain) {
+  const rank = c => (c.type === 'SERIES' && DB.seriesIds[c.id] === 'JOB' ? 0 : 1);
+  const conds = [...(chain?.conditions ?? [])].sort((a, b) => rank(a) - rank(b) || (a.id ?? 0) - (b.id ?? 0));
+  const names = conds.map(chainGroupName);
+  if (!conds.length || chain.max == null || names.some(n => !n)) return null;
+  const boosts = [...new Set(conds.map(c => c.boost ?? 0))];
+  if (boosts.length !== 1) return null;
+  const group = names.join('/');
+  let text = `Activates ${group} Chain (max ${chain.max}, field +${boosts[0]}%)`;
+  if (chain.addMax) text += ` or adds ${chain.addMax} to the current ${group} Chain maximum limit`;
+  if (chain.addCount) text += `${chain.addMax ? ' and' : ' or'} increases the current chain count on all enemies by ${chain.addCount}`;
+  return text;
 }
 
 function parseAbility(ability, allAbilities, parsedSet) {
@@ -547,6 +575,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
 
   if (formula) {
     // Walk formula args
+    let chainCond = null;   // the chain condition the next comboCondition/boostCoefficient belong to
     for (let argNum = 1; argNum <= 30; argNum++) {
       const argKey = `arg${argNum}`;
       const argType = formula[argKey];
@@ -634,17 +663,34 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'fixedHp':
           if (numVal > 0) result.props.fixedHeal = numVal;
           break;
+        // A chain (CSB action 184, LBC action 232) lists up to four (comboType,
+        // comboCondition, boostCoefficient) triples, one per kind of ability it counts:
+        // an element, a job or a realm. boostCoefficient 150 is a +50% field.
         case 'comboType':
-          if (numVal > 0) result.props.chainType = DB.chainTypes[numVal] ?? numVal;
+          chainCond = null;
+          if (numVal > 0) {
+            chainCond = { type: DB.chainTypes[numVal] ?? String(numVal), id: null, boost: null };
+            (result.chain ??= { conditions: [] }).conditions.push(chainCond);
+            result.props.chainType = chainCond.type;
+          }
           break;
         case 'comboCondition':
-          if (numVal > 0) result.props.chainElement = DB.elementTypes[numVal] ?? numVal;
+          if (chainCond && numVal > 0) {
+            chainCond.id = numVal;
+            result.props.chainElement = chainGroupName(chainCond);
+          }
           break;
         case 'boostCoefficient':
-          if (numVal > 0) result.props.chainFieldBoost = numVal > 100 ? numVal - 100 : numVal;
+          if (chainCond && numVal > 0) chainCond.boost = result.props.chainFieldBoost = numVal - 100;
           break;
         case 'comboMaxNum':
-          if (numVal > 0) result.props.chainMaxCount = numVal;
+          if (numVal > 0) (result.chain ??= { conditions: [] }).max = result.props.chainMaxCount = numVal;
+          break;
+        case 'addComboNum':
+          if (numVal > 0) (result.chain ??= { conditions: [] }).addCount = numVal;
+          break;
+        case 'addComboMaxNum':
+          if (numVal > 0) (result.chain ??= { conditions: [] }).addMax = numVal;
           break;
         case 'synchroAbilityId1':
           if (numVal > 0) result.props.synchroAbility1 = numVal;
@@ -653,6 +699,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
           if (numVal > 0) result.props.synchroAbility2 = numVal;
           break;
         case 'burstAbilityArgs':
+        case '_getFirstAbilityId':   // ComboAction (CSB, 184): the ability the chain wraps
         case 'wrappedAbilityId':
         case 'defaultAbility':
         case 'defaultAbilityId':
@@ -989,7 +1036,7 @@ function generateEffectsText(parsed) {
     const jobIds = Array.isArray(src.anyJobId) ? src.anyJobId : (src.anyJobId != null ? [src.anyJobId] : []);
     for (const id of jobIds) {
       const key = DB.jobIds[id];
-      names.push(key ? schoolName(key) : `Job #${id}`);
+      names.push(key ? jobName(key) : `Job #${id}`);
     }
     const serIds = Array.isArray(src.anyBuddySeriesId) ? src.anyBuddySeriesId : (src.anyBuddySeriesId != null ? [src.anyBuddySeriesId] : []);
     for (const id of serIds) names.push(seriesDisplayName(id));
@@ -1043,7 +1090,7 @@ function generateEffectsText(parsed) {
     if (jobM) {
       for (const id of (jobM[1].match(/\d+/g) ?? []).map(Number)) {
         const key = DB.jobIds[id];
-        names.push(key ? schoolName(key) : `Job #${id}`);
+        names.push(key ? jobName(key) : `Job #${id}`);
       }
     }
     const serM = condArgStr.match(/anyBuddySeriesId\s*:\s*\[([^\]]+)\]/);
@@ -1185,7 +1232,7 @@ function generateEffectsText(parsed) {
 
   const segs = [];
 
-  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  const wrappedLabels = new Set(['arg1', '_getFirstAbilityId', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
   const wrapped  = parsed.subAbilities.find(s => wrappedLabels.has(s._label));
   const commands = parsed.subAbilities.filter(s => !wrappedLabels.has(s._label));
   const exec     = wrapped ?? parsed;
@@ -1579,6 +1626,12 @@ function generateEffectsText(parsed) {
     }
   }
 
+  // ── 1a. Chain: after the attack (LBC), or first when there is none (CSB) ──
+  {
+    const chain = chainClause(parsed.chain);
+    if (chain) segs.push(chain);
+  }
+
   // ── 1b. HEAL_HP sub-actions ──
   {
     const healSAs = exec.subActions.filter(sa => sa.props.healFactor != null);
@@ -1868,9 +1921,38 @@ function generateEffectsText(parsed) {
   // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
   // segments start lower-case when they open with a verb, and there is no final period
   // (docs/decisions.md "Effects punctuation").
-  const SEGMENT_VERBS = /^(Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
+  const SEGMENT_VERBS = /^(Activates|Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
   const sentence = segs.map((seg, i) => (i > 0 && SEGMENT_VERBS.test(seg) ? seg.charAt(0).toLowerCase() + seg.slice(1) : seg));
-  return segs.length ? sentence.join(', ') : '(No effects detected)';
+  return segs.length ? collapsePrismatic(sentence.join(', ')) : '(No effects detected)';
+}
+
+// The same status for all nine elements is one "Prismatic" status, as the sheet writes it:
+// "[Imperil Prismatic 10% (15s)]" for [Imperil Fire 10% (15s)], …, [Imperil Poison 10% (15s)]
+// (docs/decisions.md "Prismatic").
+const PRISMATIC_ELEMENTS = ['Fire', 'Ice', 'Lightning', 'Earth', 'Wind', 'Water', 'Holy', 'Dark', 'Poison'];
+function collapsePrismatic(text) {
+  const elementRe = new RegExp(`\\b(${PRISMATIC_ELEMENTS.join('|')})\\b`);
+  return text.replace(/\[[^\]]+\](?:(?:, | and )\[[^\]]+\])+/g, list => {
+    const items = list.slice(1, -1).split(/\](?:, | and )\[/);
+    const byTemplate = new Map();
+    for (const item of items) {
+      const m = elementRe.exec(item);
+      if (!m) continue;
+      const template = item.replace(elementRe, '%E%');
+      (byTemplate.get(template) ?? byTemplate.set(template, new Set()).get(template)).add(m[1]);
+    }
+    const full = [...byTemplate].filter(([, els]) => els.size === PRISMATIC_ELEMENTS.length).map(([t]) => t);
+    if (!full.length) return list;
+    const out = [];
+    for (const item of items) {
+      const template = elementRe.test(item) ? item.replace(elementRe, '%E%') : null;
+      if (template && full.includes(template)) {
+        const name = template.replace('%E%', 'Prismatic');
+        if (!out.includes(name)) out.push(name);
+      } else out.push(item);
+    }
+    return out.length < 2 ? `[${out[0]}]` : `[${out.slice(0, -1).join('], [')}] and [${out[out.length - 1]}]`;
+  });
 }
 
 // ─── Soul break lookup ────────────────────────────────────────────────────────
@@ -1977,7 +2059,7 @@ const SECOND_ROWS = {
 };
 
 // Sub-ability labels that mean "this sub-ability is what actually executes".
-const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+const WRAPPED_LABELS = new Set(['arg1', '_getFirstAbilityId', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
 // The ability whose sub-actions do the work: the wrapped sub-ability, or the ability itself.
 function execAbility(parsed) {

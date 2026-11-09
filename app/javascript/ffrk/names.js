@@ -21,6 +21,14 @@ export function schoolName(key) {
   return SCHOOL_NAMES[key] ?? String(key).toLowerCase().split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
+// battle.js JOB_ID key → the sheet's job name, as in "Dragoon Chain" and "Mage I allies"
+// (docs/decisions.md "Job names"). Other jobs read like schools ('WARRIOR_I' → 'Warrior I').
+const JOB_NAMES = { DRAGON_KNIGHT: 'Dragoon', MYSTIC_KNIGHT: 'Spellblade', SORCERER_I: 'Mage I', SORCERER_II: 'Mage II' };
+export function jobName(key) {
+  if (!key) return '';
+  return JOB_NAMES[key] ?? schoolName(key).replace(/\bI+$/i, m => m.toUpperCase());
+}
+
 // Coded character names that don't title-case to the sheet's name: JP romanisations,
 // collapsed multi-word names and compound names. Keys are title-cased coded names
 // ('SHERUKU' → 'Sheruku'); the Characters sheet is matched case-insensitively after this.
