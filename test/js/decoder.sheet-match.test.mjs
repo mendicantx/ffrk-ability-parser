@@ -9,11 +9,11 @@ import { loadPage, snapshot } from './harness.mjs';
 
 // Matches per family as of the last improvement.
 const FLOORS = {
-  LEARNING_MODE:       { names: 53, effects: 39 },
+  LEARNING_MODE:       { names: 53, effects: 40 },
   ULTIMATE_BUDDY_MODE: { names: 270, effects: 137 },
   LIMIT_BREAK_SOUL_DRIVE: { names: 154, effects: 101 },
   DUAL_AWAKE_MODE:     { names: 295, effects: 145 },
-  all:                 { names: 2649, effects: 2069 },  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%
+  all:                 { names: 2649, effects: 2070 },  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%
 };
 
 // Clauses the decoder always writes but many sheet rows leave out. A row matches if

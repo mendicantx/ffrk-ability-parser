@@ -823,9 +823,10 @@ export function createStatusDecoder() {
       { level: 4, sizeName: 'SMALL_125' },
       { level: 5, sizeName: 'MEDIUM' },
     ];
-    // {numberCondition:{greaterEqual:N},damageFactor:…DAMAGE_FACTOR.SIZE} entries, from the
+    // {numberCondition:{greaterEqual:N},damageFactor:…DAMAGE_FACTOR.SIZE} entries (the
+    // helper writes x[E.INCREASE_EXECUTED_DAMAGE].DAMAGE_FACTOR.LARGE, brackets and all), from the
     // args if they pass a table, else from the helper's own default, else OR_DEFAULT_MAP.
-    const tableOf = text => [...text.matchAll(/greaterEqual\s*:\s*(\d+)\s*\}\s*,\s*damageFactor\s*:[^,}\]]*?DAMAGE_FACTOR\.([A-Z_0-9]+)/g)]
+    const tableOf = text => [...text.matchAll(/greaterEqual\s*:\s*(\d+)\s*\}\s*,\s*damageFactor\s*:[^,}]*?DAMAGE_FACTOR\.([A-Z_0-9]+)/g)]
       .map(m => ({ level: parseInt(m[1]), sizeName: m[2] })).sort((a, b) => a.level - b.level);
     const argsTable = tableOf(argsText);
     const helperTable = tableOf(helperBody);
