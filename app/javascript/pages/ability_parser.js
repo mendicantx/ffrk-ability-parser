@@ -704,6 +704,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'defaultAbility':
         case 'defaultAbilityId':
         case 'tpMaxAbilityId':
+        case 'soulDriveChaseAbilityId': // LimitBreakSoulDriveAction (240): what Soul Drive Mode casts
         case 'weaponSkillAbilityId':
         case 'repeatSkillAbilityId':
         case 'abilityId': {
@@ -2107,9 +2108,10 @@ function typeAndFormula(parsed) {
 function targetKind(targetStr) {
   const t       = String(targetStr ?? '').replace(/:.*$/, '').toUpperCase();
   const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
+  // BUDDIES: the *_BUDDIES_BY_ACTOR_CONDITION targets (allies with a condition, 6001–6005).
+  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE') || t.includes('BUDD');
   const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
-  const isAll   = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
+  const isAll   = t.includes('_ALL') || t.includes('BUDDIES') || (t.includes('ALL') && !t.includes('SINGLE'));
   let target = '';
   if      (isSelf)            target = 'Self';
   else if (isEnemy && isAll)  target = 'All enemies';
@@ -2141,14 +2143,18 @@ function targetColumns(parsed) {
 
   // No attack: the widest target among the sub-actions.
   const exec = execAbility(parsed);
-  const found = new Set();
+  // Allies picked by a condition (*_BUDDIES_BY_ACTOR_CONDITION) count only when nothing
+  // else is targeted: a soul break that also grants to Witch allies is still "Self".
+  const found = new Set(), byCondition = new Set();
   for (const sa of exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions) {
     if ((sa.controlTypeRaw ?? 0) !== 0 || !sa.target || String(sa.target) === '0') continue;
     const { target } = targetKind(sa.target);
-    if (target) found.add(target);
+    if (target) (/BUDD/i.test(String(sa.target)) ? byCondition : found).add(target);
   }
-  for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
-    if (found.has(target)) return { target, autoTarget: target };
+  for (const set of [found, byCondition]) {
+    for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
+      if (set.has(target)) return { target, autoTarget: target };
+    }
   }
 
   // Nothing else: the ability's own range and segment.
@@ -2711,6 +2717,17 @@ function renderAbility(parsed, depth, ctx) {
     html += renderFollowUpSheetPreview(parsed, genText, masterFinishSource);
   }
 
+  // Other tab column preview — for a soul drive's follow-up (soulDriveChaseAbilityId), unless
+  // it grants just [Instant ATB 1], which its mode is assumed to grant and which has no row
+  // of its own (owner decision, docs/decisions.md "Soul Drive Mode wording (decoder)").
+  const soulDriveSource = relations.soulDriveSource[parseInt(parsed.abilityId)];
+  const instantAtbId = Object.keys(DB.statusAilments).find(sid => DB.statusAilments[sid] === 'INCREASE_ATB_TIME_FACTOR_MAX_TURN_1');
+  const instantAtb = DB.statusMap[instantAtbId]?.commonName;
+  if (soulDriveSource !== undefined && !DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]
+      && genText !== `Grants [${instantAtb}] to the user`) {
+    html += renderFollowUpSheetPreview(parsed, genText, soulDriveSource);
+  }
+
   // Other tab column preview — for EXTRA_ZETSUGI ability crush (arg2)
   const ekCrushSource = relations.extraCrushSource[parseInt(parsed.abilityId)];
   if (ekCrushSource !== undefined) {
@@ -2747,6 +2764,7 @@ function newRelations() {
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
     extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
     masterFinish:      {}, // MASB masterFinishAbilityId → source label ("Master Mode: <character>")
+    soulDriveSource:   {}, // soul drive soulDriveChaseAbilityId → source label ("Soul Drive Mode: <character>")
   };
 }
 
@@ -2835,6 +2853,15 @@ function recordRelations(parsed, ability, ctx) {
     const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
       .map(st => st.commonName ?? '').find(n => n.startsWith('Master Mode: ')) ?? '';
     relations.masterFinish[masterFinish.abilityId] = modeName;
+  }
+
+  // Soul drive: the follow-up its Soul Drive Mode casts after a Soul Break belongs on the
+  // Other tab, under that mode (docs/decisions.md "Soul Drive Mode wording (decoder)").
+  const soulDriveChase = parsed.subAbilities.find(sub => sub._label === 'soulDriveChaseAbilityId');
+  if (soulDriveChase) {
+    const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
+      .map(st => st.commonName ?? '').find(n => n.startsWith('Soul Drive Mode: ')) ?? '';
+    relations.soulDriveSource[soulDriveChase.abilityId] = modeName;
   }
 
   // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
