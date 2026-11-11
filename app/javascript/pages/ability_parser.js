@@ -1464,6 +1464,7 @@ function generateEffectsText(parsed) {
               }));
               return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
                        ifTarget: ifSA?.target, elseTarget: elseSA?.target,
+                       ifTargetArg: ifSA?.targetArgRaw ?? '',
                        conditionArg: sas[blockStart].conditionArg ?? '',
                        hasElse: !!elseSA, elifs };
             }
@@ -1486,13 +1487,33 @@ function generateEffectsText(parsed) {
     // allies with Attach Ice).
     const pc = partyConditionParts(condStat.conditionArg);
     const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
-    if (!condStat.hasElse && pc.count === 1 && String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`) {
+    if (!condStat.hasElse && pc.count === 1 && (String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`
+        || sameAllies(condStat.conditionArg, condStat.ifTargetArg))) {
       return list(condStat.ifStatuses) ? `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}` : null;
     }
     const parts = [];
     if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
     if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
     return parts.length ? `${parts.join('/')} ${parsePartyConditionLabel(condStat.conditionArg)}` : null;
+  }
+
+  // True when a partyCondition counts the same allies the block grants to: its
+  // buddyCondition is the target's actorCondition. Compared as game data, since the
+  // count's label leaves parts out ("or without an Infusion", Cidolfus's soul drive).
+  function sameAllies(conditionArg, targetArg) {
+    const body = (text, key) => {
+      const at = String(text ?? '').search(new RegExp(`\\b${key}\\s*:\\s*\\{`));
+      if (at < 0) return null;
+      const open = String(text).indexOf('{', at);
+      let depth = 0;
+      for (let i = open; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}' && --depth === 0) return text.slice(open, i + 1).replace(/\s+/g, '').replace(/,(?=[}\]])/g, '');
+      }
+      return null;
+    };
+    const buddy = body(conditionArg, 'buddyCondition');
+    return buddy !== null && buddy === body(targetArg, 'actorCondition');
   }
 
   // Sub-actions inside IF/ELSE blocks (and the block markers themselves).
