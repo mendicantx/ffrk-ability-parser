@@ -309,6 +309,7 @@ The same status for all nine elements is written once as "Prismatic", as in the 
 The Effects text follows the sheet's majority wording:
 - A hit on all enemies is a **group** attack: "One group attack (8.00)".
 - "(x each)" is used only for more than one hit: "Six single attacks (0.90 each)", but "One single attack (26.50)".
+- Ranged, piercing and jump go between "single"/"group" and "attack(s)", in that order: "Seven single ranged attacks (0.90 each)", "One single piercing attack (11.00)", "One single ranged jump attack". Counts over the Soul Breaks and Other tabs on 2026-11-10: "single ranged" 591, "group ranged" 113, "single ranged jump" 142, "single piercing" 108, "single ranged piercing" 22 vs "single piercing ranged" 4; the trailing ", ranged" / ", ranged, jump" only 14, and "piercing single" none. This raised the mined-soul-break check from 86.8% to 87.0%. (A contributor's choice; not yet reviewed by the owner.) "Hybrid" isn't generated yet; where it is, its place next to "ranged" is close in the sheet ("hybrid ranged" 43, "ranged hybrid" 40) and needs the owner.
 
 ### Effects punctuation
 Effects text is one sentence in the sheet's most common style:

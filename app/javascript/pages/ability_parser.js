@@ -992,9 +992,11 @@ function generateEffectsText(parsed) {
   function hitsWord(n) { return NUM_WORDS[n] ?? String(n); }
   // Attack wording, as in the sheet (docs/decisions.md "Attack wording"): attacks on
   // all enemies are "group" attacks, and "(x each)" is only used for more than one hit.
+  // Ranged, piercing and jump come between the two, in that order: "single ranged jump attacks".
   function attackNoun(sa, hits) {
     const kind = sa?.target === 'OPPONENT_ALIVE_ALL' ? 'group' : 'single';
-    return hits === 1 ? `${kind} attack` : `${kind} attacks`;
+    const words = [kind, sa?.props?.ranged && 'ranged', sa?.props?.piercing && 'piercing', sa?.props?.jump && 'jump'].filter(Boolean);
+    return `${words.join(' ')} ${hits === 1 ? 'attack' : 'attacks'}`;
   }
   // "[A], [B] and [C]", as the sheet lists statuses.
   function joinWithAnd(items) {
@@ -1148,16 +1150,10 @@ function generateEffectsText(parsed) {
                   : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
     const capStr  = capVal ? ` capped at ${capVal}` : '';
-    const flags   = [
-      // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
-      sa.props.ranged   ? 'ranged'           : null,
-      sa.props.jump     ? 'jump'             : null,
-      extraNote         ?? null,
-    ].filter(Boolean);
-    const flagStr    = flags.length ? `, ${flags.join(', ')}` : '';
-    const piercingStr = sa.props.piercing ? 'piercing ' : '';
-    const atkWord    = attackNoun(sa, hits);
-    return `${hitsWord(hits)} ${elemStr}${piercingStr}${atkWord}${perHit}${capStr}${flagStr}`;
+    // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
+    const flagStr = extraNote ? `, ${extraNote}` : '';
+    const atkWord = attackNoun(sa, hits);
+    return `${hitsWord(hits)} ${elemStr}${atkWord}${perHit}${capStr}${flagStr}`;
   }
 
   // Collect statuses from an ability's sub-actions, tagged with their target.
