@@ -381,6 +381,16 @@ What the Soul Break use grants isn't part of the status. The base [Soul Drive Mo
 
 Names keep an element suffix (15 of 18 sheet rows) and drop the `KOKI` word from the coded name.
 
+### Crystal Force Mode chases (2026-11-10, a contributor's choice; not yet reviewed by the owner)
+A Crystal Force Mode's chase (its Radiant Strike, Light Strike, …) is described from the mode's game config, not assumed to follow Crystal Force abilities. Of the 28 modes with a chase, 24 trigger on the user's Crystal Force abilities, and the decoder words those as before: "after using Crystal Force abilities" (Garland and Noel on the sheet) and "every 2 Crystal Force abilities" (Squall and Dr. Mog; Thief's row says "after using 2 Crystal Force abilities"). The other four use the sheet's chase wording for Chain Force Modes ("after using a Dark ability", 480 rows; "after another ally uses an Earth ability", 16 rows):
+- Dion: "after using a Holy ability". The sheet's row (56459) says "after using Crystal Force abilities", which the game data doesn't support. This costs one effects match in `decoder.sheet-match` (2070 → 2069), and fixing that sheet row gets it back.
+- Edge (Water/Fire/Lightning): "after using a Ninja ability".
+- Gogo: "after another ally uses a Fire/Ice/Wind/Earth ability" (the chase reacts to every ally, not the user, `isAbilityOwner: false`).
+- Cidolfus: "after any ally uses an ability that deals damage (max 10)" (every ally, the user included).
+- Zell (Fire): "after using a Crystal Force ability that lands a critical hit" (the condition adds `isCritical`). The sheet has no wording for a critical-hit trigger.
+
+A mode whose `repeatNum` is 0 (Gogo, Cidolfus) has no "abilities trigger 1 additional time" clause. The sheet's Gogo row has one. Before battle.js has run, and for any trigger shape not listed here, the decoder keeps its older wording from the helper's arguments.
+
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
 

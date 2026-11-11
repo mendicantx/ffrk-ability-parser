@@ -440,6 +440,49 @@ export function createStatusDecoder() {
   const CBM_ELEMENT_KEYS = new Set(['FIRE','ICE','LIGHTNING','EARTH','WIND','WATER','HOLY','DARK','POISON']);
   const CBM_ALL_ELEMENTS = ['FIRE','ICE','LIGHTNING','EARTH','WIND','WATER','HOLY','DARK','POISON'];
 
+  // The chase clause from the mode's game config, or null before the game data has loaded
+  // or for a trigger it doesn't know (docs/decisions.md "Crystal Force Mode chases"):
+  //   a Crystal Force ability      "after using Crystal Force abilities", "every 2 Crystal Force abilities"
+  //   one that crits               "after using a Crystal Force ability that lands a critical hit"
+  //   the user's own abilities     "after using a Holy ability"
+  //   another ally's               "after another ally uses a Fire/Ice/Wind/Earth ability"
+  //   any ally's damaging ability  "after any ally uses an ability that deals damage"
+  function cbmChaseClause(statusKey, statusId) {
+    const conf = DB.game?.conf, effects = DB.game?.statusParams?.[statusId]?.effects;
+    if (!conf || !effects) return null;
+    const chases = effects.filter(e => e.chaseAbilityId != null);
+    if (chases.length !== 1) return null;
+    const e = chases[0], c = e.abilityCondition ?? {};
+    const keyOf = (table, id) => Object.keys(conf[table] ?? {}).find(k => conf[table][k] === id);
+    const subject = c.anyElementIds ? c.anyElementIds.map(id => elementDisplayName(keyOf('ELEMENT_TYPE', id))).join('/')
+      : c.anyCategoryIds ? c.anyCategoryIds.map(id => categoryDisplayName(keyOf('ABILITY_CATEGORY_ID', id))).join('/')
+      : null;
+    const a = what => `${/^[AEIOU]/.test(what) ? 'an' : 'a'} ${what} ability`;
+    const known = new Set(['isCrystalForceAbility', 'isAbility', 'isCritical', 'anyElementIds', 'anyCategoryIds', 'hasDamage']);
+    if (Object.keys(c).some(k => !known.has(k)) || (e.abilityUseCountCondition && !c.isCrystalForceAbility)) return null;
+    let when;
+    const types = conf.STATUS_AILMENTS_PARAM_EFFECT_TYPE ?? {};
+    const byAllies = e.type === types.REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE_REACT_ALL_ACTOR;
+    if (byAllies) {
+      if (!e.targetActorCondition?.all?.isBuddy || c.isCrystalForceAbility || c.isCritical) return null;
+      if (e.isAbilityOwner === false && subject && !c.hasDamage) when = `after another ally uses ${a(subject)}`;
+      else if (e.isAbilityOwner == null && !subject && c.hasDamage) when = 'after any ally uses an ability that deals damage';
+      else return null;
+    } else if (e.type === types.REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE) {
+      if (e.targetActorCondition || c.hasDamage) return null;
+      const every = e.abilityUseCountCondition?.multiple ?? 1;
+      if (c.isCrystalForceAbility && !subject) {
+        when = c.isCritical ? (every === 1 ? 'after using a Crystal Force ability that lands a critical hit' : null)
+          : every > 1 ? `every ${every} Crystal Force abilities` : 'after using Crystal Force abilities';
+      } else if (!c.isCrystalForceAbility && !c.isCritical && subject) when = `after using ${a(subject)}`;
+      if (!when) return null;
+    } else return null;
+    const name = chaseAbilityName(statusKey);
+    if (name == null) return null;
+    const max = e.chaseAbilityDoneCountForIsDone != null ? ` (max ${e.chaseAbilityDoneCountForIsDone})` : '';
+    return `triggers [${name}] ${when}${max}`;
+  }
+
   function decodeCbmP(statusKey, statusId, argsText) {
     // ── 1. Character name and key-level element qualifier from the status key ──
     const suffix = statusKey.replace(/^CRYSTAL_BUDDY_MODE_/, '');
@@ -486,9 +529,15 @@ export function createStatusDecoder() {
 
     // ── 3. Effects ──
     const hasChase = args.length > 1 && args[1].includes('REGISTER_CHASE_ABILITY');
-    const baseEffects = `${condDesc} abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5, ${condDesc} abilities trigger 1 additional time, [DEF and RES 25% Piercing (15s)], removed if user hasn't Crystal Force Mode`;
+    // repeatNum: 0 (Gogo, Cidolfus) means no extra trigger.
+    const repeat = Number(/\brepeatNum\s*:\s*(\d+)/.exec(args[1] ?? '')?.[1] ?? 1);
+    const seqClause = repeat ? `, ${condDesc} abilities trigger ${repeat} additional time${repeat === 1 ? '' : 's'}` : '';
+    const baseEffects = `${condDesc} abilities don't consume uses and deal 5/10/15/20/30% more damage at ability rank 1/2/3/4/5${seqClause}, [DEF and RES 25% Piercing (15s)], removed if user hasn't Crystal Force Mode`;
     let effects = baseEffects;
-    if (hasChase) {
+    const fromConfig = hasChase && cbmChaseClause(statusKey, statusId);
+    if (fromConfig) {
+      effects = `${baseEffects}, ${fromConfig}`;
+    } else if (hasChase) {
       const chaseName = chaseAbilityName(statusKey);
       const chaseText  = args[1];
       const multipleM  = chaseText.match(/abilityUseCountCondition\s*:\s*\{[^}]*multiple\s*:\s*(\d+)/);
