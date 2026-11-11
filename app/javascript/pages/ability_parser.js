@@ -50,6 +50,7 @@ const DB = {
   game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   lastInput:          null, // the last text parsed, shown again when game data arrives
   missingStatuses:    new Map(), // id → { id, codedName, described } seen in this parse without a Status-tab row
+  soulDriveFollowUps: {},        // Soul Drive Mode name → the Effects of what it casts, from this parse's soul drive
   unknownActions:     new Set(), // action ids seen in this parse that the Action Args sheet doesn't list
   decoderError:       null,      // why the Status Decoder engine couldn't start, if it couldn't
 };
@@ -141,8 +142,9 @@ async function loadBattleJs() {
 const statusDecoder = createStatusDecoder();
 let statusDecoderReady = false;
 
-// { name, effects, defaultDuration } for a status from the decoder, or null.
-function describeFromGameData(id) {
+// { name, effects, defaultDuration } for a status from the decoder, or null. followUpEffects:
+// { source: [Effects] } for follow-ups the Other tab doesn't list (a Soul Drive Mode's).
+function describeFromGameData(id, followUpEffects) {
   const key = DB.statusAilments[id];
   if (!key || !rawBattleJs || !DB.sheetRows || DB.decoderError) return null;
   // If the engine can't start (e.g. a battle.js update moved what it scans), parsing
@@ -154,7 +156,7 @@ function describeFromGameData(id) {
       statusDecoder.buildStatusAssignments();
       statusDecoderReady = true;
     }
-    const d = statusDecoder.decodeStatus(key);
+    const d = statusDecoder.decodeStatus(key, { followUpEffects });
     return d?.decoded
       ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '', missingAbilities: d.missingAbilities ?? [] }
       : null;
@@ -2108,10 +2110,9 @@ function typeAndFormula(parsed) {
 function targetKind(targetStr) {
   const t       = String(targetStr ?? '').replace(/:.*$/, '').toUpperCase();
   const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
-  // BUDDIES: the *_BUDDIES_BY_ACTOR_CONDITION targets (allies with a condition, 6001–6005).
-  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE') || t.includes('BUDD');
+  const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
   const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
-  const isAll   = t.includes('_ALL') || t.includes('BUDDIES') || (t.includes('ALL') && !t.includes('SINGLE'));
+  const isAll   = t.includes('_ALL') || (t.includes('ALL') && !t.includes('SINGLE'));
   let target = '';
   if      (isSelf)            target = 'Self';
   else if (isEnemy && isAll)  target = 'All enemies';
@@ -2143,18 +2144,14 @@ function targetColumns(parsed) {
 
   // No attack: the widest target among the sub-actions.
   const exec = execAbility(parsed);
-  // Allies picked by a condition (*_BUDDIES_BY_ACTOR_CONDITION) count only when nothing
-  // else is targeted: a soul break that also grants to Witch allies is still "Self".
-  const found = new Set(), byCondition = new Set();
+  const found = new Set();
   for (const sa of exec !== parsed ? [...parsed.subActions, ...exec.subActions] : parsed.subActions) {
     if ((sa.controlTypeRaw ?? 0) !== 0 || !sa.target || String(sa.target) === '0') continue;
     const { target } = targetKind(sa.target);
-    if (target) (/BUDD/i.test(String(sa.target)) ? byCondition : found).add(target);
+    if (target) found.add(target);
   }
-  for (const set of [found, byCondition]) {
-    for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
-      if (set.has(target)) return { target, autoTarget: target };
-    }
+  for (const target of ['All enemies', 'Single enemy', 'All allies', 'Single ally', 'Self']) {
+    if (found.has(target)) return { target, autoTarget: target };
   }
 
   // Nothing else: the ability's own range and segment.
@@ -2717,17 +2714,6 @@ function renderAbility(parsed, depth, ctx) {
     html += renderFollowUpSheetPreview(parsed, genText, masterFinishSource);
   }
 
-  // Other tab column preview — for a soul drive's follow-up (soulDriveChaseAbilityId), unless
-  // it grants just [Instant ATB 1], which its mode is assumed to grant and which has no row
-  // of its own (owner decision, docs/decisions.md "Soul Drive Mode wording (decoder)").
-  const soulDriveSource = relations.soulDriveSource[parseInt(parsed.abilityId)];
-  const instantAtbId = Object.keys(DB.statusAilments).find(sid => DB.statusAilments[sid] === 'INCREASE_ATB_TIME_FACTOR_MAX_TURN_1');
-  const instantAtb = DB.statusMap[instantAtbId]?.commonName;
-  if (soulDriveSource !== undefined && !DB.chaseAbilityIdToKey[parseInt(parsed.abilityId)]
-      && genText !== `Grants [${instantAtb}] to the user`) {
-    html += renderFollowUpSheetPreview(parsed, genText, soulDriveSource);
-  }
-
   // Other tab column preview — for EXTRA_ZETSUGI ability crush (arg2)
   const ekCrushSource = relations.extraCrushSource[parseInt(parsed.abilityId)];
   if (ekCrushSource !== undefined) {
@@ -2764,7 +2750,6 @@ function newRelations() {
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
     extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
     masterFinish:      {}, // MASB masterFinishAbilityId → source label ("Master Mode: <character>")
-    soulDriveSource:   {}, // soul drive soulDriveChaseAbilityId → source label ("Soul Drive Mode: <character>")
   };
 }
 
@@ -2855,13 +2840,14 @@ function recordRelations(parsed, ability, ctx) {
     relations.masterFinish[masterFinish.abilityId] = modeName;
   }
 
-  // Soul drive: the follow-up its Soul Drive Mode casts after a Soul Break belongs on the
-  // Other tab, under that mode (docs/decisions.md "Soul Drive Mode wording (decoder)").
+  // Soul drive: what its Soul Drive Mode casts after a Soul Break (arg2) is written into the
+  // mode's own Effects, with no Other-tab row (docs/decisions.md "Soul Drive Mode wording
+  // (decoder)"). Recorded by the mode's name for the "Not on the Status tab" rows.
   const soulDriveChase = parsed.subAbilities.find(sub => sub._label === 'soulDriveChaseAbilityId');
   if (soulDriveChase) {
     const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
-      .map(st => st.commonName ?? '').find(n => n.startsWith('Soul Drive Mode: ')) ?? '';
-    relations.soulDriveSource[soulDriveChase.abilityId] = modeName;
+      .map(st => st.commonName ?? '').find(n => n.startsWith('Soul Drive Mode: '));
+    if (modeName) DB.soulDriveFollowUps[modeName] = generateEffectsText(soulDriveChase);
   }
 
   // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
@@ -3082,6 +3068,7 @@ document.getElementById('results').addEventListener('click', e => {
 function processBattleJson(jsonText) {
   DB.lastInput = jsonText;
   DB.missingStatuses = new Map();
+  DB.soulDriveFollowUps = {};
   DB.unknownActions = new Set();
   let json;
   try {
@@ -3149,6 +3136,10 @@ function processBattleJson(jsonText) {
   }
 
   if (DB.missingStatuses.size) {
+    // A Soul Drive Mode's Effects take what it casts, from its soul drive in this paste.
+    for (const m of DB.missingStatuses.values()) {
+      if (m.described?.name in DB.soulDriveFollowUps) m.described = describeFromGameData(m.id, { [m.described.name]: [DB.soulDriveFollowUps[m.described.name]] }) ?? m.described;
+    }
     const missing = [...DB.missingStatuses.values()];
     resultsEl.innerHTML = markMissingStatuses(resultsEl.innerHTML, missing) + renderMissingStatuses(missing);
   }

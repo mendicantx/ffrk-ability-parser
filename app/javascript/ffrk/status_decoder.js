@@ -1129,7 +1129,7 @@ export function createStatusDecoder() {
   function describeFromGameData(statusId) {
     if (!DB.game || !DB.sheetRows) return null;
     DB.game.describer ??= statusDescriber(DB.game, DB.sheetRows);
-    const described = DB.game.describer.describe(statusId);
+    const described = DB.game.describer.describe(statusId, { followUpEffects });
     for (const id of described?.missingAbilities ?? []) missingAbilityIds.add(id);
     return described;
   }
@@ -1176,9 +1176,14 @@ export function createStatusDecoder() {
 
   // decodeStatusResult, plus missingAbilities: the IDs of abilities shown as
   // MISSING_ABILITY, so the tools can link to adding them to the Other tab.
-  function decodeStatus(statusKey) {
+  // options.followUpEffects: { source: [Effects] } for follow-ups the Other tab doesn't
+  // list, such as what a Soul Drive Mode casts (the Ability Parser has it from the paste).
+  let followUpEffects = null;
+  function decodeStatus(statusKey, options = {}) {
     missingAbilityIds = new Set();
-    const result = decodeStatusResult(statusKey);
+    followUpEffects = options.followUpEffects ?? null;
+    let result;
+    try { result = decodeStatusResult(statusKey); } finally { followUpEffects = null; }
     if (missingAbilityIds.size && `${result.commonName} ${result.effects}`.includes(MISSING_ABILITY)) {
       result.missingAbilities = [...missingAbilityIds];
     }

@@ -514,7 +514,10 @@ function describeSoulDriveMode(params, ctx) {
   // 102 of 107 sheet rows, so it's assumed (owner decision); plain modes vary too much.
   const standard = params.effects.some(e => effectName(e, ctx) === 'INCREASE_EXECUTED_DAMAGE');
   const instantAtb = ctx.statusName(ctx.statusId?.('INCREASE_ATB_TIME_FACTOR_MAX_TURN_1'));
-  clauses.push(listed ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
+  // A follow-up that grants just [Instant ATB 1] to the user reads as the sheet's rows do.
+  const onlyInstantAtb = listed && listed.replace(/\.$/, '') === `Grants [${instantAtb}] to the user`;
+  clauses.push(onlyInstantAtb ? `grants [${instantAtb}] after using a Soul Break`
+    : listed ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
     : standard && instantAtb ? `grants [${instantAtb}] after using a Soul Break`
     : 'casts <ability missing from Other Tab> after using a Soul Break');
   clauses.push('removed after triggering', `removed if the character hasn't [${durations.suffixes[0].removedUnless}]`);
