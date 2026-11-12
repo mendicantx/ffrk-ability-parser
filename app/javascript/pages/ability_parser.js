@@ -854,7 +854,11 @@ function parseAbility(ability, allAbilities, parsedSet) {
             }
             break;
           case 'factorForHealHp':
-            sub.props.healingMultiplier = Number(v);
+            // HEAL_HP_OR_HEAL_DEATH (type 12): heals the living and revives the KO'd.
+            sub.props.healFactor = Number(v);
+            break;
+          case 'rateOfMaxHpForHealDeath':
+            sub.props.reviveRate = Number(v);
             break;
           case 'hitNum':
             sub.props.hits = Number(v);
@@ -1658,8 +1662,12 @@ function generateEffectsText(parsed) {
     const effectiveHealSAs = healSAs.length > 0
       ? healSAs
       : parsed.subActions.filter(sa => sa.props.healFactor != null);
+    // "Restores HP (105) capped at 19999, removes KO [Raise: 100%] capped at 19999", as the
+    // sheet has it (docs/decisions.md "Heals").
     for (const hsa of effectiveHealSAs) {
-      segs.push(`Restores HP (${hsa.props.healFactor})`);
+      const cap = hsa.props.damageCapBoost ? ` capped at ${9999 + hsa.props.damageCapBoost}` : '';
+      segs.push(`Restores HP (${hsa.props.healFactor})${cap}`);
+      if (hsa.props.reviveRate) segs.push(`removes KO [Raise: ${hsa.props.reviveRate}%]${cap}`);
     }
   }
 

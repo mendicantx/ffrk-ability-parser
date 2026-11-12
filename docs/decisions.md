@@ -311,6 +311,9 @@ The Effects text follows the sheet's majority wording:
 - "(x each)" is used only for more than one hit: "Six single attacks (0.90 each)", but "One single attack (26.50)".
 - Ranged, piercing and jump go between "single"/"group" and "attack(s)", in that order: "Seven single ranged attacks (0.90 each)", "One single piercing attack (11.00)", "One single ranged jump attack". Counts over the Soul Breaks and Other tabs on 2026-11-10: "single ranged" 591, "group ranged" 113, "single ranged jump" 142, "single piercing" 108, "single ranged piercing" 22 vs "single piercing ranged" 4; the trailing ", ranged" / ", ranged, jump" only 14, and "piercing single" none. This raised the mined-soul-break check from 86.8% to 87.0%. (A contributor's choice; not yet reviewed by the owner.) "Hybrid" isn't generated yet; where it is, its place next to "ranged" is close in the sheet ("hybrid ranged" 43, "ranged hybrid" 40) and needs the owner.
 
+### Heals
+A party heal that also revives (sub-action type 12, `HEAL_HP_OR_HEAL_DEATH`: `factorForHealHp`, `rateOfMaxHpForHealDeath`) reads "Restores HP (105), removes KO [Raise: 100%]", first in the Effects. With a raised cap (`damageThresholdLv`), both clauses carry it: "Restores HP (105) capped at 19999, removes KO [Raise: 100%] capped at 19999". Counts over Soul Breaks rows that start with a heal, on 2026-11-11: 189 heal only, 38 heal and revive without a cap; of the capped ones, 28 cap both clauses and 7 only the heal. [Raise: N%] is the Status tab's name (-3 to -8). The parser used to read `factorForHealHp` but never wrote it, so these soul breaks lost the heal and the revive (71 in `toolkit/` and `mined/`, all of them healers' DASBs, ZSBs, AASBs and SASBs). (A contributor's choice; not yet reviewed by the owner.)
+
 ### Effects punctuation
 Effects text is one sentence in the sheet's most common style:
 - Clauses are joined with ", ", and a following verb is lower-case ("…capped at 19999, grants [X] to the user").
