@@ -612,10 +612,15 @@ function dualAwakeName(params, ctx, roman) {
   const version = { II: ' v2', III: ' v3' }[words[words.length - 1]] ?? '';
   if (version) words.pop();
   const last = words[words.length - 1];
-  const subject = ELEMENT_KEYS.includes(last) ? ctx.element(last)
+  let subject = ELEMENT_KEYS.includes(last) ? ctx.element(last)
     : ctx.conf.ABILITY_CATEGORY_ID?.[last] != null ? ctx.category(last) : null;
+  let character = words.slice(0, -1);
+  // 16 keys put the element first: "DUAL_AWAKE_MODE_SECOND_LIGHTNING_SHERUKU_II" is
+  // "Dual Awoken Lightning Mode II (Shelke v2)". An element at the end still wins, so
+  // "…_LIGHTNING_HOLY" is the character Lightning's Holy mode.
+  if (!subject && ELEMENT_KEYS.includes(words[0])) { subject = ctx.element(words[0]); character = words.slice(1); }
   if (!subject || words.length < 2) return null;
-  return `Dual Awoken ${subject} Mode ${roman} (${ctx.characterName(words.slice(0, -1).join('_'))}${version})`;
+  return `Dual Awoken ${subject} Mode ${roman} (${ctx.characterName(character.join('_'))}${version})`;
 }
 
 function describeDualAwakeMode(params, ctx) {

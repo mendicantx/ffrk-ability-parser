@@ -353,8 +353,32 @@ function chaseSourceName(abilityId) {
   const chaseKey = DB.chaseAbilityIdToKey[parseInt(abilityId)];
   if (!chaseKey) return '';
   const statusKey = chaseKey.replace(/^CHASE_ABILITY_FOR_/, '');
-  const statusId = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
-  return DB.statusMap[statusId]?.commonName || '';
+  // Some chase keys are named after the ability (CHASE_ABILITY_FOR_DRAGON_TEMPEST) or carry
+  // a suffix (…_SHERUKU_II_MODE): then the one status whose game config casts it. A shared
+  // follow-up with several casters (the Tactical ATB ones) gets none.
+  const byKey = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
+  const casters = byKey ? [byKey] : (statusCasters()[parseInt(abilityId)] ?? []);
+  const statusId = casters.length === 1 ? casters[0] : null;
+  // A status the Status tab doesn't name yet gives the name its new row will have (and is
+  // listed with that row), so the follow-up can be entered with its Source.
+  return statusId ? lookupStatus(Number(statusId)).commonName || '' : '';
+}
+
+// { ability ID: [IDs of the statuses whose game config casts it] }, built once per game data
+// (statusParams is keyed by status ID).
+const statusCastersCache = new WeakMap();
+function statusCasters() {
+  if (!DB.game?.statusParams) return {};
+  if (!statusCastersCache.has(DB.game)) {
+    const map = {};
+    for (const [statusId, params] of Object.entries(DB.game.statusParams)) {
+      for (const e of params?.effects ?? []) {
+        for (const id of new Set([e.chaseAbilityId, e.abilityId].filter(Boolean))) (map[id] ??= new Set()).add(statusId);
+      }
+    }
+    statusCastersCache.set(DB.game, Object.fromEntries(Object.entries(map).map(([id, ids]) => [id, [...ids]])));
+  }
+  return statusCastersCache.get(DB.game);
 }
 
 // Other-tab name for a Tactical Awoken Mode's TP MAX follow-up: "TPMAX: <Character>"
