@@ -1352,7 +1352,8 @@ function generateEffectsText(parsed) {
       }
       const p = findParam(cond);
       const STAT_LABELS = { atk:'ATK', def:'DEF', matk:'MAG', mdef:'RES', mnd:'MND', spd:'SPD' };
-      const fmt = s => STAT_LABELS[String(s).toLowerCase()] ?? String(s).toUpperCase();
+      // "atk," when the condition is written with commas ({ a: atk, b: matk }).
+      const fmt = s => { const k = String(s).replace(/[^a-z]/gi, '').toLowerCase(); return STAT_LABELS[k] ?? k.toUpperCase(); };
       if (p?.a && p?.b) return `${fmt(p.a)} and ${fmt(p.b)}`;
     } catch(e) {}
     return null;
@@ -1566,11 +1567,18 @@ function generateEffectsText(parsed) {
         const list = statuses => joinWithAnd(statuses.map(s => `[${statusName(s)}]`));
         for (const sa of sas.slice(i, block.end + 1)) skip.add(sa);
         // The ELSE branch first: "[ATK +50% (25s)] or [MAG +50% (25s)]" (10 sheet rows vs 3).
-        inserts.set(sas[i], [{ id: `_either_${i}`, _text: `${list(onlyB)} or ${list(onlyA)}`, _target: onlyA[0]._target, _partyCondition: null }, ...both]);
+        inserts.set(sas[i], [{ id: `_either_${i}`, _text: `${list(onlyB)} or ${list(onlyA)}`, _basedOn: statsInOrder(sas[i].conditionArg),
+          _target: onlyA[0]._target, _partyCondition: null }, ...both]);
       }
       i = block.end;
     }
     return subActionStatuses(ab, skip, inserts);
+  }
+
+  // "ATK or MAG" for isAParamLessThanBParam { a: atk, b: matk }: the IF branch is the one
+  // where b is higher, so with the ELSE branch first the stats read a, then b.
+  function statsInOrder(condArgStr) {
+    return parseStatComparisonLabel(condArgStr)?.replace(' and ', ' or ') ?? null;
   }
 
   // The top-level IF at sas[start], when it compares two stats and has an ELSE (and no
@@ -1807,7 +1815,7 @@ function generateEffectsText(parsed) {
     const wrappedCond = findConditionalStatus(wrapped.subActions);
     const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond) : null;
     // A stat comparison with an ELSE grants one branch or the other: "[ATK +50% (25s)] or
-    // [MAG +50% (25s)] to all allies" (ELSE branch first), in the IF block's place among the
+    // [MAG +50% (25s)] to all allies based on ATK or MAG" (ELSE branch first), in the IF block's place among the
     // grants, also when the branches hold a hybrid attack (docs/decisions.md "Either/or grants").
     const wrappedStatuses = wrappedPartyClause
       ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions))
@@ -1827,14 +1835,17 @@ function generateEffectsText(parsed) {
       const unconditional = uniqueStatuses.filter(s => !s._partyCondition);
       const conditional   = uniqueStatuses.filter(s =>  s._partyCondition);
 
+      // An either/or grant is a clause of its own, so its "based on" covers only it.
       const byTargetUnc = new Map();
       for (const s of unconditional) {
-        const tLabel = targetLabel(s._target);
-        if (!byTargetUnc.has(tLabel)) byTargetUnc.set(tLabel, []);
-        byTargetUnc.get(tLabel).push(s);
+        const key = s._basedOn ? s.id : targetLabel(s._target);
+        if (!byTargetUnc.has(key)) byTargetUnc.set(key, []);
+        byTargetUnc.get(key).push(s);
       }
-      for (const [tLabel, group] of byTargetUnc) {
-        const statusStr = joinWithAnd(group.map(s => s._text ?? `[${statusName(s)}]`));
+      for (const group of byTargetUnc.values()) {
+        const tLabel = targetLabel(group[0]._target);
+        if (group[0]._basedOn) { segs.push(`Grants ${group[0]._text}${tLabel} based on ${group[0]._basedOn}`); continue; }
+        const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
         } else {
@@ -1912,16 +1923,16 @@ function generateEffectsText(parsed) {
           if (parts.length) clauses.push(parts.join(', grants '));
         } else {
           // Two-sided: "grants [Y] or [X] to the user". On a stat comparison the ELSE branch
-          // comes first and the condition isn't spelled out, as for a wrapped ability's
+          // comes first, then "based on ATK or MAG", as for a wrapped ability's
           // (docs/decisions.md "Either/or grants").
           const stat = parseStatComparisonLabel(condStat.conditionArg);
           const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
           if (stat && ifStr && elseStr && ifT !== elseT) {
             // Branches to different targets each keep theirs: "[Y] to all allies or [X] to the user".
-            clauses.push(`${elseStr}${elseT} or ${ifStr}${ifT}`);
+            clauses.push(`${elseStr}${elseT} or ${ifStr}${ifT} based on ${statsInOrder(condStat.conditionArg)}`);
           } else {
             const parts = (stat ? [elseStr, ifStr] : [ifStr, elseStr]).filter(Boolean);
-            if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel && !stat ? ` based on ${statLabel}` : ''));
+            if (parts.length) clauses.push(parts.join(' or ') + tLabel + (stat ? ` based on ${statsInOrder(condStat.conditionArg)}` : statLabel ? ` based on ${statLabel}` : ''));
           }
         }
       } else {
