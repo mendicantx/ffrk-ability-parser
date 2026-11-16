@@ -1049,9 +1049,12 @@ function generateEffectsText(parsed) {
   }
 
   // True for mode-level tracker statuses that don't belong in a plain effects line
-  // (Common Name matches "Status Level while under specific status ID" pattern)
+  // (Common Name matches "Status Level while under specific status ID" pattern), and for
+  // the shared counters a soul break keys for its own mode (`option: { key: gogekiBiggs,
+  // maxLevel: 2 }`), which the sheet never lists (docs/decisions.md "Hidden counters").
+  const HIDDEN_COUNTERS = new Set(['STATE_LEVEL_BY_GENERAL_VALUE', 'STATE_LEVEL_BY_GENERAL_VALUE_WHILE_ACCEL_BUDDY_MODE']);
   function isLevelTracker(s) {
-    return (s.commonName ?? '').toLowerCase().startsWith('status level');
+    return (s.commonName ?? '').toLowerCase().startsWith('status level') || HIDDEN_COUNTERS.has(s.codedName);
   }
 
   // Format a partyCondition object into a human-readable "if ..." clause.
