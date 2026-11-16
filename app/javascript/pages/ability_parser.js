@@ -1186,9 +1186,11 @@ function generateEffectsText(parsed) {
 
   // Collect statuses from an ability's sub-actions, tagged with their target.
   // HIT_ACTOR_OF_SPECIFIC_SUB_ACTION (5001): resolves to the target of the referenced sub-action.
-  function subActionStatuses(ab, skip = new Set()) {
+  // inserts: { sub-action → entries to list in its place } (statusesWithEither).
+  function subActionStatuses(ab, skip = new Set(), inserts = new Map()) {
     const out = [];
     for (const sa of ab.subActions) {
+      if (inserts.has(sa)) out.push(...inserts.get(sa));
       if (sa.isStateLevelIncrement || skip.has(sa)) continue;
       let target = sa.target;
       if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
@@ -1540,6 +1542,54 @@ function generateEffectsText(parsed) {
     return buddy !== null && buddy === body(targetArg, 'actorCondition');
   }
 
+  // subActionStatuses, except that each top-level IF/ELSE on a stat comparison
+  // (isAParamLessThanBParam) becomes one entry in its place: { _text: "[B] or [A]" } for
+  // what only one branch grants (ELSE branch first), with what both grant listed as usual. A block whose
+  // branch-only grants go to different targets is listed as before.
+  function statusesWithEither(ab) {
+    const sas = ab.subActions;
+    const skip = new Set(), inserts = new Map();
+    // A branch's statuses, read against the whole ability (targets can point at another
+    // sub-action), leaving out any IF nested in it.
+    const branchStatuses = branch => {
+      const keep = new Set(branch.filter(sa => !subActionsInBlocks(branch).has(sa)));
+      return subActionStatuses(ab, new Set(sas.filter(sa => !keep.has(sa)))).filter(s => !isLevelTracker(s));
+    };
+    for (let i = 0; i < sas.length; i++) {
+      const block = (sas[i].controlTypeRaw ?? 0) === 1 && statComparisonBlock(sas, i);
+      if (!block) continue;
+      const a = branchStatuses(block.ifBranch), b = branchStatuses(block.elseBranch);
+      const inA = new Set(a.map(s => s.id)), inB = new Set(b.map(s => s.id));
+      const both = a.filter(s => inB.has(s.id)), onlyA = a.filter(s => !inB.has(s.id)), onlyB = b.filter(s => !inA.has(s.id));
+      const labels = new Set([...onlyA, ...onlyB].map(s => targetLabel(s._target)));
+      if (onlyA.length && onlyB.length && labels.size === 1) {
+        const list = statuses => joinWithAnd(statuses.map(s => `[${statusName(s)}]`));
+        for (const sa of sas.slice(i, block.end + 1)) skip.add(sa);
+        // The ELSE branch first: "[ATK +50% (25s)] or [MAG +50% (25s)]" (10 sheet rows vs 3).
+        inserts.set(sas[i], [{ id: `_either_${i}`, _text: `${list(onlyB)} or ${list(onlyA)}`, _target: onlyA[0]._target, _partyCondition: null }, ...both]);
+      }
+      i = block.end;
+    }
+    return subActionStatuses(ab, skip, inserts);
+  }
+
+  // The top-level IF at sas[start], when it compares two stats and has an ELSE (and no
+  // ELSE IF): { ifBranch, elseBranch, end }, or null.
+  function statComparisonBlock(sas, start) {
+    if (!parseStatComparisonLabel(sas[start].conditionArg)) return null;
+    let depth = 0, elseAt = -1;
+    for (let i = start; i < sas.length; i++) {
+      const raw = sas[i].controlTypeRaw ?? 0;
+      if (raw === 1) depth++;
+      else if (raw === 2 && depth === 1) return null;
+      else if (raw === 3 && depth === 1) elseAt = i;
+      else if (raw === 4 && --depth === 0) {
+        return elseAt < 0 ? null : { ifBranch: sas.slice(start + 1, elseAt), elseBranch: sas.slice(elseAt + 1, i), end: i };
+      }
+    }
+    return null;
+  }
+
   // Sub-actions inside IF/ELSE blocks (and the block markers themselves).
   function subActionsInBlocks(sas) {
     const inside = new Set();
@@ -1756,9 +1806,15 @@ function generateEffectsText(parsed) {
     // list of everything in both branches.
     const wrappedCond = findConditionalStatus(wrapped.subActions);
     const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond) : null;
+    // A stat comparison with an ELSE grants one branch or the other: "[ATK +50% (25s)] or
+    // [MAG +50% (25s)] to all allies" (ELSE branch first), in the IF block's place among the
+    // grants, also when the branches hold a hybrid attack (docs/decisions.md "Either/or grants").
+    const wrappedStatuses = wrappedPartyClause
+      ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions))
+      : statusesWithEither(wrapped);
     const activationStatuses = [
       ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
-      ...subActionStatuses(wrapped, wrappedPartyClause ? subActionsInBlocks(wrapped.subActions) : undefined),
+      ...wrappedStatuses,
       ...attachLvStatuses,
     ].filter(s => !isLevelTracker(s));
     const seenIds = new Set();
@@ -1778,7 +1834,7 @@ function generateEffectsText(parsed) {
         byTargetUnc.get(tLabel).push(s);
       }
       for (const [tLabel, group] of byTargetUnc) {
-        const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
+        const statusStr = joinWithAnd(group.map(s => s._text ?? `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
         } else {
@@ -1855,9 +1911,18 @@ function generateEffectsText(parsed) {
           if (elseStr) parts.push(`${elseStr}${tLabel} if not`);
           if (parts.length) clauses.push(parts.join(', grants '));
         } else {
-          // Two-sided: "grants [X] or [Y] to self based on condition"
-          const parts = [ifStr, elseStr].filter(Boolean);
-          if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
+          // Two-sided: "grants [Y] or [X] to the user". On a stat comparison the ELSE branch
+          // comes first and the condition isn't spelled out, as for a wrapped ability's
+          // (docs/decisions.md "Either/or grants").
+          const stat = parseStatComparisonLabel(condStat.conditionArg);
+          const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
+          if (stat && ifStr && elseStr && ifT !== elseT) {
+            // Branches to different targets each keep theirs: "[Y] to all allies or [X] to the user".
+            clauses.push(`${elseStr}${elseT} or ${ifStr}${ifT}`);
+          } else {
+            const parts = (stat ? [elseStr, ifStr] : [ifStr, elseStr]).filter(Boolean);
+            if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel && !stat ? ` based on ${statLabel}` : ''));
+          }
         }
       } else {
         // One-sided: "grants [X] to self if condition" or "after N uses" for stateLevel.equal
