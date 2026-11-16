@@ -1133,7 +1133,9 @@ function generateEffectsText(parsed) {
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
     }
-    const attachM = !names.length && (condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/));
+    // The older form counts one Infusion directly: `attachElementIdCount: { 100: { greaterEqual: 4 } }`.
+    const attachM = !names.length && (condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/)
+      ?? condArgStr.match(/attachElementIdCount\s*:\s*\{\s*(\d+)\s*:/));
     if (attachM) {
       const elements = (attachM[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)]).filter(Boolean).map(fmtElement);
       return elements.length ? { count, names: elements, attach: true } : null;
@@ -1519,12 +1521,26 @@ function generateEffectsText(parsed) {
     const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
     if (!condStat.hasElse && pc.count === 1 && (String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`
         || sameAllies(condStat.conditionArg, condStat.ifTargetArg))) {
-      return list(condStat.ifStatuses) ? `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}` : null;
+      return list(condStat.ifStatuses) ? { text: `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`, verb: 'Grants' } : null;
     }
-    const parts = [];
-    if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
-    if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
-    return parts.length ? `${parts.join('/')} ${parsePartyConditionLabel(condStat.conditionArg)}` : null;
+    const tiers = [{ statuses: condStat.elseStatuses, target: condStat.elseTarget }, { statuses: condStat.ifStatuses, target: condStat.ifTarget }]
+      .filter(t => list(t.statuses));
+    if (!tiers.length) return null;
+    const { text, verb } = tierList(tiers);
+    return { text: `${text} ${parsePartyConditionLabel(condStat.conditionArg)}`, verb };
+  }
+
+  // The tiers of a party-condition block, "[A]/[B]/[C] to all allies": one target at the
+  // end when they share it (as in 102 sheet rows, against 25 that repeat it), else each
+  // keeps its own. Enemy tiers are caused: { text: "[A]/[B] on enemies", verb: 'Causes' }.
+  function tierList(tiers) {
+    const list = t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+    const labels = [...new Set(tiers.filter(list).map(t => targetLabel(t.target)))];
+    const enemy = labels.length > 0 && labels.every(l => l.includes('enem'));
+    const on = l => enemy ? l.replace(' to ', ' on ') : l;
+    const text = labels.length === 1 ? tiers.map(list).join('/') + on(labels[0])
+      : tiers.map(t => list(t) + on(targetLabel(t.target))).join('/');
+    return { text, verb: enemy ? 'Causes' : 'Grants' };
   }
 
   // True when a partyCondition counts the same allies the block grants to: its
@@ -1634,8 +1650,8 @@ function generateEffectsText(parsed) {
       if (next == null) return `${t.from}+`;
       return next - 1 === t.from ? `${t.from}` : `${t.from}-${next - 1}`;
     });
-    const parts = tiers.map(t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ') + targetLabel(t.target));
-    return `${parts.join('/')} if there are ${labels.join('/')} ${who(branches[0])}`;
+    const { text, verb } = tierList(tiers);
+    return { text: `${text} if there are ${labels.join('/')} ${who(branches[0])}`, verb };
   }
 
   const nestedCondAtk = findNestedConditionalAtk(exec.subActions);
@@ -1820,8 +1836,13 @@ function generateEffectsText(parsed) {
     // A stat comparison with an ELSE grants one branch or the other: "[ATK +50% (25s)] or
     // [MAG +50% (25s)] to all allies based on ATK or MAG" (ELSE branch first), in the IF block's place among the
     // grants, also when the branches hold a hybrid attack (docs/decisions.md "Either/or grants").
+    // The party-condition clause goes in its IF block's place, as the sheet lists it
+    // ("Activates Fire Chain …, causes [Imperil Fire 10% (5s)]/… if there are 0-1/2-3/4+
+    // allies with Attach Fire, grants [ATK +50% (25s)] to all allies").
+    const partyIf = wrappedPartyClause && wrapped.subActions.find(sa => (sa.controlTypeRaw ?? 0) === 1 && (sa.conditionArg ?? '') === (wrappedCond.conditionArg ?? ''));
     const wrappedStatuses = wrappedPartyClause
-      ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions))
+      ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions),
+          new Map([[partyIf, [{ id: '_party', _clause: wrappedPartyClause, _target: null, _partyCondition: null }]]]))
       : statusesWithEither(wrapped);
     const activationStatuses = [
       ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
@@ -1841,13 +1862,14 @@ function generateEffectsText(parsed) {
       // An either/or grant is a clause of its own, so its "based on" covers only it.
       const byTargetUnc = new Map();
       for (const s of unconditional) {
-        const key = s._basedOn ? s.id : targetLabel(s._target);
+        const key = s._basedOn || s._clause ? s.id : targetLabel(s._target);
         if (!byTargetUnc.has(key)) byTargetUnc.set(key, []);
         byTargetUnc.get(key).push(s);
       }
       for (const group of byTargetUnc.values()) {
         const tLabel = targetLabel(group[0]._target);
         if (group[0]._basedOn) { segs.push(`Grants ${group[0]._text}${tLabel} based on ${group[0]._basedOn}`); continue; }
+        if (group[0]._clause) { segs.push(`${group[0]._clause.verb} ${group[0]._clause.text}`); continue; }
         const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
@@ -1878,7 +1900,6 @@ function generateEffectsText(parsed) {
         if (allyParts.length)  segs.push(`Grants ${allyParts.join('/')}${condSuffix}`);
       }
     }
-    if (wrappedPartyClause) segs.push(`Grants ${wrappedPartyClause}`);
   } else {
     // Direct ability (exec = parsed): depth-aware collection with conditional status support.
     // Collect unconditional statuses at depth 0, grouped by target.
@@ -1903,7 +1924,7 @@ function generateEffectsText(parsed) {
     }
     // Conditional status block: IF(/ELSE) where branches have status sub-actions.
     const condStat = findConditionalStatus(exec.subActions);
-    const clauses = [];
+    const clauses = [], causes = [];
     for (const [tLabel, statuses] of byTarget) {
       if (statuses.length > 0) clauses.push(joinWithAnd(statuses.map(s => `[${statusName(s)}]`)) + tLabel);
     }
@@ -1913,8 +1934,10 @@ function generateEffectsText(parsed) {
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
       const partyClause = partyConditionClause(condStat);
-      if (partyClause) {
-        clauses.push(partyClause);
+      if (partyClause?.verb === 'Causes') {
+        causes.push(partyClause.text);
+      } else if (partyClause) {
+        clauses.push(partyClause.text);
       } else if (condStat.hasElse) {
         const tLabel  = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const elseStr = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
@@ -1960,6 +1983,7 @@ function generateEffectsText(parsed) {
       }
     }
     if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
+    for (const c of causes) segs.push(`Causes ${c}`);
   }
 
   // Pre-compute elements handled by section 3b (INFLICT_SA with increaseLv) so sections 3 and 3a
