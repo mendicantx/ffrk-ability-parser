@@ -1545,19 +1545,25 @@ function generateEffectsText(parsed) {
   }
 
   // IF the user has Attach Dark, grant [X] to allies with Attach Dark; ELSE IF an ally has
-  // Attach Ice, grant [X] to allies with Attach Ice (Edea's Super Raiment): one grant to
-  // "all allies with Attach Dark or Attach Ice", as the sheet writes it ("to allies with
-  // Attach Dark or Attach Wind", Ultimecia). Null for any other block.
+  // Attach Ice, grant [X] to allies with Attach Ice (Edea's Super Raiment). The user's
+  // Infusion decides, in the sheet's "if the user has Attach Fire, … otherwise" form:
+  // "[X] to all allies with Attach Dark if the user has Attach Dark, to all allies with
+  // Attach Ice otherwise". The ELSE IF's own check (an ally has Attach Ice) only says who
+  // gets it, so it isn't shown. Null for any other block.
   function infusionAlliesClause(condStat) {
-    if (!condStat.elifs.length || condStat.hasElse) return null;
-    const branches = [{ statuses: condStat.ifStatuses, target: condStat.ifTarget, conditionArg: condStat.conditionArg }, ...condStat.elifs];
+    if (condStat.elifs.length !== 1 || condStat.hasElse) return null;
+    const [first, second] = [{ statuses: condStat.ifStatuses, target: condStat.ifTarget, conditionArg: condStat.conditionArg }, condStat.elifs[0]];
     const prefix = 'ALIVE_BUDDIES_BY_ACTOR_CONDITION:allies with ';
     const ids = b => b.statuses.filter(st => !isLevelTracker(st)).map(st => st.id).join(',');
-    if (!ids(branches[0]) || branches.some(b => ids(b) !== ids(branches[0]))) return null;
-    if (branches.some(b => !String(b.target ?? '').startsWith(prefix) || !/has(Any)?AttachElementByElementIds?\b/.test(b.conditionArg ?? ''))) return null;
-    const withs = [...new Set(branches.flatMap(b => String(b.target).slice(prefix.length).split(' or ')))];
-    const names = joinWithAnd(branches[0].statuses.filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
-    return { text: `${names}${targetLabel(prefix + withs.join(' or '))}`, verb: 'Grants' };
+    if (!ids(first) || ids(second) !== ids(first)) return null;
+    if ([first, second].some(b => !String(b.target ?? '').startsWith(prefix))) return null;
+    // The IF checks the user's Infusion; the ELSE IF counts allies with an Infusion.
+    const userIds = /^\s*actorCondition/.test(first.conditionArg ?? '')
+      && (first.conditionArg.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? first.conditionArg.match(/hasAttachElementByElementId\s*:\s*(\d+)/));
+    if (!userIds || !partyConditionParts(second.conditionArg)?.attach) return null;
+    const userHas = (userIds[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`).join(' or ');
+    const names = joinWithAnd(first.statuses.filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
+    return { text: `${names}${targetLabel(first.target)} if the user has ${userHas},${targetLabel(second.target)} otherwise`, verb: 'Grants' };
   }
 
   // The tiers of a party-condition block, "[A]/[B]/[C] to all allies": one target at the
