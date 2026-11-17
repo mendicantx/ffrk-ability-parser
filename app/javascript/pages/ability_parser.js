@@ -1462,6 +1462,13 @@ function generateEffectsText(parsed) {
   // Find the first top-level IF/ELSE block where BOTH branches contain status (non-attack) sub-actions.
   // Returns { ifStatuses, elseStatuses, conditionArg } or null.
   // Skips blocks that contain any attacks (those are handled by the attack conditional logic).
+  // [{ s, target }] for every status a branch grants, or null when it has a nested block.
+  function branchGrants(branch) {
+    if (branch.some(sa => (sa.controlTypeRaw ?? 0) !== 0)) return null;
+    return branch.filter(sa => sa.statuses.length > 0 && !sa.levelIncrease?.status && !sa.isStateLevelIncrement)
+      .flatMap(sa => sa.statuses.filter(st => !isLevelTracker(st)).map(st => ({ s: st, target: sa.target })));
+  }
+
   function findConditionalStatus(sas) {
     const isAtk = sa => sa.props.hits != null || sa.props.multiplier != null;
     let depth = 0, blockStart = -1, blockElse = -1, blockElifs = [];
@@ -1498,6 +1505,9 @@ function generateEffectsText(parsed) {
                        ifTarget: ifSA?.target, elseTarget: elseSA?.target,
                        ifTargetArg: ifSA?.targetArgRaw ?? '',
                        ifBranch,
+                       // Every grant in each branch, when a branch has several (Eiko's AASB:
+                       // one to all allies and one to the user in each).
+                       ifAll: branchGrants(ifBranch), elseAll: branchGrants(elseBranch),
                        conditionArg: sas[blockStart].conditionArg ?? '',
                        hasElse: !!elseSA, elifs };
             }
@@ -1541,6 +1551,29 @@ function generateEffectsText(parsed) {
     // do ("grants [X] to user if Level 2+ EnEarth, grants [Y] to user if not"): "grants
     // [Gold] to the user if there are 3+ V allies in the party, grants [Blue] to the user
     // if not" (docs/decisions.md "Weapon skill Gold conditions").
+    // Branches with several grants: what both grant is listed as usual (`shared`), and only
+    // the difference is conditional: "grants [Critical Chance +50% (25s)] and [High Quick
+    // Cast 2] to all allies, grants [Soul Break Gauge +250] to the user/[100% Critical (25s)]
+    // to all allies if there are 0-3/4+ IX allies in the party".
+    const multi = condStat.ifAll && condStat.elseAll && condStat.hasElse
+      && new Set([...condStat.ifAll, ...condStat.elseAll].map(g => String(g.target))).size > 1;
+    if (multi) {
+      const key = g => `${g.s.id}|${targetLabel(g.target)}`;
+      const inElse = new Set(condStat.elseAll.map(key)), inIf = new Set(condStat.ifAll.map(key));
+      const shared = condStat.ifAll.filter(g => inElse.has(key(g)));
+      const only = (gs, other) => gs.filter(g => !other.has(key(g)));
+      const part = gs => {
+        const byT = new Map();
+        for (const g of gs) { const t = targetLabel(g.target); if (!byT.has(t)) byT.set(t, []); byT.get(t).push(g.s); }
+        return [...byT].map(([t, sts]) => ({ statuses: sts, target: gs.find(g => targetLabel(g.target) === t).target }));
+      };
+      const ifP = part(only(condStat.ifAll, inElse)), elseP = part(only(condStat.elseAll, inIf));
+      if (ifP.length <= 1 && elseP.length <= 1 && (ifP.length || elseP.length)) {
+        const ifOnly = { ...condStat, ifStatuses: ifP[0]?.statuses ?? [], ifTarget: ifP[0]?.target, elseStatuses: elseP[0]?.statuses ?? [], elseTarget: elseP[0]?.target, hasElse: elseP.length > 0, ifAll: null, elseAll: null };
+        const clause = partyConditionClause(ifOnly, { goldFirst });
+        return clause && { ...clause, shared };
+      }
+    }
     const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
     if (goldFirst && list(condStat.ifStatuses) && !`${ifT}${elseT}`.includes('enem')) {
       const gold = `${list(condStat.ifStatuses)}${ifT} if there are ${pc.count}+ ${pc.allies}`;
@@ -1887,7 +1920,8 @@ function generateEffectsText(parsed) {
     const partyIf = wrappedPartyClause && wrapped.subActions.find(sa => (sa.controlTypeRaw ?? 0) === 1 && (sa.conditionArg ?? '') === (wrappedCond.conditionArg ?? ''));
     const wrappedStatuses = wrappedPartyClause
       ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions),
-          new Map([[partyIf, [{ id: '_party', _clause: wrappedPartyClause, _target: null, _partyCondition: null }]]]))
+          new Map([[partyIf, [...(wrappedPartyClause.shared ?? []).map(({ s, target }) => ({ ...s, _target: target, _partyCondition: null })),
+            { id: '_party', _clause: wrappedPartyClause, _target: null, _partyCondition: null }]]]))
       : statusesWithEither(wrapped);
     const activationStatuses = [
       ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
@@ -1969,6 +2003,12 @@ function generateEffectsText(parsed) {
     }
     // Conditional status block: IF(/ELSE) where branches have status sub-actions.
     const condStat = findConditionalStatus(exec.subActions);
+    const partyClause = condStat && (infusionAlliesClause(condStat) ?? partyConditionClause(condStat, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' }));
+    for (const { s, target } of partyClause?.shared ?? []) {
+      const tLabel = targetLabel(target);
+      if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
+      if (!byTarget.get(tLabel).some(x => x.id === s.id)) byTarget.get(tLabel).push(s);
+    }
     const clauses = [], causes = [];
     for (const [tLabel, statuses] of byTarget) {
       if (statuses.length > 0) clauses.push(joinWithAnd(statuses.map(s => `[${statusName(s)}]`)) + tLabel);
@@ -1978,7 +2018,6 @@ function generateEffectsText(parsed) {
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const partyClause = infusionAlliesClause(condStat) ?? partyConditionClause(condStat, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' });
       if (partyClause?.verb === 'Causes') {
         causes.push(partyClause.text);
       } else if (partyClause) {
