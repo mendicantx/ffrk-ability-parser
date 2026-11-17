@@ -273,6 +273,9 @@ The parser shows the Dual Shift under the soul break's ID and "(Dual Shift)" nam
 ### Party conditions on Infusions
 A party condition that counts allies with an Infusion reads "…if there are 0-1/2+ allies with Attach Dark" (the sheet writes "2+ allies with Attach Earth"). A wrapped ability's party-condition IF/ELSE is one conditional clause, like a direct ability's. Crystal Force I is a Crystal soul break's arg2 and Crystal Force II its arg3.
 
+### Weapon skill Gold conditions
+A Tactical soul break's weapon skill grants its Gold effect when its condition is met, and its Blue effect otherwise. A party-count IF/ELSE on a weapon skill is written in the weapon skills' usual form, Gold first: "grants [Earth Ability FFV Boost (Tactical)] to the user if there are 3+ V allies in the party, grants [Earth Ally 200% ATB 1 Follow-Up (Tactical)] to the user if not" (Bartz). The sheet writes 72 weapon-skill rows this way, "grants [X] to user if Level 2+ EnEarth, grants [Y] to user if not" (41 of them mined), and 12 in the tier form "[Blue]/[Gold] if there are 0-2/3+ …" (4 mined). For party counts alone it's close: Gold first in 9 rows (5 mined: Celes, Cyan, Zell, Ward, Kimahri), tiers in 12 (4 mined: Matoya, Josef, Cid (IV), Xezat). The user asked for Gold first, to match the other weapon skills. Grants to enemies keep the tier form. 41 weapon skills in the toolkit export change. (2026-11-16, a contributor's choice; not yet reviewed by the owner.)
+
 ### Party conditions with several thresholds
 IF / ELSE IF / ELSE blocks on the same kind of ally are listed fewest allies first, as in the sheet's "0-3/4/5 VII allies": "Grants [A]/[A], [B]/[A], [C] to the user if there are 0-2/3/4+ Sharpshooter allies in the party". Job names follow "Job names" below.
 

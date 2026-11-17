@@ -1512,7 +1512,7 @@ function generateEffectsText(parsed) {
   // A status block on a party condition, or null: "[X] to the user/[X] to all allies if
   // there are 0-2/3+ Job allies in the party" — ELSE first (fewer allies), IF second —
   // or every tier when there are ELSE IF branches.
-  function partyConditionClause(condStat) {
+  function partyConditionClause(condStat, { goldFirst = false } = {}) {
     if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
     if (condStat.elifs.length) return partyTiers(condStat);
     const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
@@ -1536,6 +1536,15 @@ function generateEffectsText(parsed) {
         }
       }
       return list(condStat.ifStatuses) ? { text: `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`, verb: 'Grants' } : null;
+    }
+    // A weapon skill's IF is its Gold condition, written first as the sheet's weapon skills
+    // do ("grants [X] to user if Level 2+ EnEarth, grants [Y] to user if not"): "grants
+    // [Gold] to the user if there are 3+ V allies in the party, grants [Blue] to the user
+    // if not" (docs/decisions.md "Weapon skill Gold conditions").
+    const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
+    if (goldFirst && list(condStat.ifStatuses) && !`${ifT}${elseT}`.includes('enem')) {
+      const gold = `${list(condStat.ifStatuses)}${ifT} if there are ${pc.count}+ ${pc.allies}`;
+      return { text: list(condStat.elseStatuses) ? `${gold}, grants ${list(condStat.elseStatuses)}${elseT} if not` : gold, verb: 'Grants' };
     }
     const tiers = [{ statuses: condStat.elseStatuses, target: condStat.elseTarget }, { statuses: condStat.ifStatuses, target: condStat.ifTarget }]
       .filter(t => list(t.statuses));
@@ -1868,7 +1877,7 @@ function generateEffectsText(parsed) {
     // A party-condition IF/ELSE in the wrapped ability is one conditional clause, not a
     // list of everything in both branches.
     const wrappedCond = findConditionalStatus(wrapped.subActions);
-    const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond) : null;
+    const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' }) : null;
     // A stat comparison with an ELSE grants one branch or the other: "[ATK +50% (25s)] or
     // [MAG +50% (25s)] to all allies based on ATK or MAG" (ELSE branch first), in the IF block's place among the
     // grants, also when the branches hold a hybrid attack (docs/decisions.md "Either/or grants").
@@ -1969,7 +1978,7 @@ function generateEffectsText(parsed) {
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const partyClause = infusionAlliesClause(condStat) ?? partyConditionClause(condStat);
+      const partyClause = infusionAlliesClause(condStat) ?? partyConditionClause(condStat, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' });
       if (partyClause?.verb === 'Causes') {
         causes.push(partyClause.text);
       } else if (partyClause) {
