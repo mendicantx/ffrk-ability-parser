@@ -1497,6 +1497,7 @@ function generateEffectsText(parsed) {
               return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
                        ifTarget: ifSA?.target, elseTarget: elseSA?.target,
                        ifTargetArg: ifSA?.targetArgRaw ?? '',
+                       ifBranch,
                        conditionArg: sas[blockStart].conditionArg ?? '',
                        hasElse: !!elseSA, elifs };
             }
@@ -1521,6 +1522,19 @@ function generateEffectsText(parsed) {
     const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
     if (!condStat.hasElse && pc.count === 1 && (String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`
         || sameAllies(condStat.conditionArg, condStat.ifTargetArg))) {
+      // Its branch can itself pick by stat: "[Deadly Strikes +15% (15s)] or [Sorcery +15%
+      // Boost (15s)] to all allies with Attach Wind based on ATK or MAG" (Wedge's Super Raiment).
+      const at = (condStat.ifBranch ?? []).findIndex(sa => (sa.controlTypeRaw ?? 0) === 1);
+      const pick = at >= 0 && statComparisonBlock(condStat.ifBranch, at);
+      if (pick) {
+        const side = branch => branch.filter(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length);
+        const a = side(pick.ifBranch), b = side(pick.elseBranch);
+        const targets = new Set([...a, ...b].map(sa => targetLabel(sa.target)));
+        if (a.length && b.length && targets.size === 1) {
+          const names = sas => joinWithAnd(sas.flatMap(sa => sa.statuses).filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
+          return { text: `${names(b)} or ${names(a)}${[...targets][0]} based on ${statsInOrder(condStat.ifBranch[at].conditionArg)}`, verb: 'Grants' };
+        }
+      }
       return list(condStat.ifStatuses) ? { text: `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`, verb: 'Grants' } : null;
     }
     const tiers = [{ statuses: condStat.elseStatuses, target: condStat.elseTarget }, { statuses: condStat.ifStatuses, target: condStat.ifTarget }]
@@ -1528,6 +1542,22 @@ function generateEffectsText(parsed) {
     if (!tiers.length) return null;
     const { text, verb } = tierList(tiers);
     return { text: `${text} ${parsePartyConditionLabel(condStat.conditionArg)}`, verb };
+  }
+
+  // IF the user has Attach Dark, grant [X] to allies with Attach Dark; ELSE IF an ally has
+  // Attach Ice, grant [X] to allies with Attach Ice (Edea's Super Raiment): one grant to
+  // "all allies with Attach Dark or Attach Ice", as the sheet writes it ("to allies with
+  // Attach Dark or Attach Wind", Ultimecia). Null for any other block.
+  function infusionAlliesClause(condStat) {
+    if (!condStat.elifs.length || condStat.hasElse) return null;
+    const branches = [{ statuses: condStat.ifStatuses, target: condStat.ifTarget, conditionArg: condStat.conditionArg }, ...condStat.elifs];
+    const prefix = 'ALIVE_BUDDIES_BY_ACTOR_CONDITION:allies with ';
+    const ids = b => b.statuses.filter(st => !isLevelTracker(st)).map(st => st.id).join(',');
+    if (!ids(branches[0]) || branches.some(b => ids(b) !== ids(branches[0]))) return null;
+    if (branches.some(b => !String(b.target ?? '').startsWith(prefix) || !/has(Any)?AttachElementByElementIds?\b/.test(b.conditionArg ?? ''))) return null;
+    const withs = [...new Set(branches.flatMap(b => String(b.target).slice(prefix.length).split(' or ')))];
+    const names = joinWithAnd(branches[0].statuses.filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
+    return { text: `${names}${targetLabel(prefix + withs.join(' or '))}`, verb: 'Grants' };
   }
 
   // The tiers of a party-condition block, "[A]/[B]/[C] to all allies": one target at the
@@ -1933,7 +1963,7 @@ function generateEffectsText(parsed) {
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const partyClause = partyConditionClause(condStat);
+      const partyClause = infusionAlliesClause(condStat) ?? partyConditionClause(condStat);
       if (partyClause?.verb === 'Causes') {
         causes.push(partyClause.text);
       } else if (partyClause) {
