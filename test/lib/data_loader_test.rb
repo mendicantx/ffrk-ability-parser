@@ -2,7 +2,7 @@ require "test_helper"
 
 class DataLoaderTest < ActiveSupport::TestCase
   test "registry lists every sheet the tools use" do
-    assert_equal %i[soul_breaks characters status other hero_abilities extra action_args].sort,
+    assert_equal %i[soul_breaks characters status other hero_abilities extra synchro action_args].sort,
                  DataLoader::GOOGLE_SHEETS.keys.sort
   end
 

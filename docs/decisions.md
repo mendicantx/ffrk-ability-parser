@@ -428,6 +428,12 @@ A mode whose `repeatNum` is 0 (Gogo, Cidolfus) has no "abilities trigger 1 addit
 ### Chase text for non-Crystal Force chases
 This is handled case by case as new chase types come up. Until then the parser keeps its current wording.
 
+### Synchro commands (2026-11-16, a contributor's choices; not yet reviewed by the owner)
+A Synchro soul break's two commands have rows on the sheet's Synchro tab (gid 13552509, `SYNCHRO_SHEET_URL`; 686 rows on 2026-11-16). Its columns are the Extra tab's plus "Synchro Ability Slot", "Synchro Condition" and "Synchro Condition ID".
+- **Which command is which.** arg2 is slot 1 and arg3 slot 2; arg4 and arg5 are their conditions' IDs. This matches the tab in 628 of the 630 commands of the toolkit export it has. The other two are Jack's (23340006): the game's condition is 12 (Samurai), the tab's 100 (Fire). That's for the owner.
+- **Condition names come from the tab.** "Synchro Condition" is the tab's own name for the ID ("17" is "Darkness", "2003" is "Dark, Fire"), learned from its rows, or the element's name for an element ID. Any other ID gets the placeholder `<synchro condition N>`.
+- **Name.** It comes from the tab when the tab has the command, and is otherwise left blank for whoever pastes the row to translate from the Name (JP).
+
 ### Scope
 The refactor covers the Ability Parser and the Status Decoder. `scripts/infer_statuses.py` is left as it is.
 

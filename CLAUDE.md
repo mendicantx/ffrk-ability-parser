@@ -2,7 +2,7 @@
 
 A Rails 7 app for maintaining the FFRK community Google Sheet, intended to eventually serve as a public-facing website. It has two tools:
 
-- **Ability Parser** (`/ability_parser`): paste a soul break's JSON and get its rows for the sheet (Soul Breaks, Other and Extra tabs), ready to copy. Statuses the Status tab doesn't have yet are listed with a row to paste into that tab.
+- **Ability Parser** (`/ability_parser`): paste a soul break's JSON and get its rows for the sheet (Soul Breaks, Other, Extra and Synchro tabs), ready to copy. Statuses the Status tab doesn't have yet are listed with a row to paste into that tab.
 - **Status Decoder** (`/status_decoder`): look up any status by coded name or ID and get its Status-tab row.
 
 Both read the community sheet and the game's own code (battle.js). The dashboard (`/`) shows the cached data.
@@ -59,6 +59,7 @@ Configure via environment variables (copy `.env.example` to `.env`):
 | `OTHER_SHEET_URL` | Other tab | 2001933731 |
 | `HERO_ABILITIES_SHEET_URL` | Hero Abilities tab | 329671300 |
 | `EXTRA_SHEET_URL` | Extra tab | 1700445928 |
+| `SYNCHRO_SHEET_URL` | Synchro tab | 13552509 |
 
 To add a new sheet tab: add an entry to `GOOGLE_SHEETS` in `lib/data_loader.rb`, add its env var to `.env.example`, and set it in `.env` — locally and in the server's `shared/.env` (then restart and refresh; see "Production"). `GOOGLE_SHEETS` is the only sheet list. A tab whose URL isn't set is skipped with only a warning in the Rails log ("[DataLoader] SKIPPED …"), so check the dashboard's sheet count.
 

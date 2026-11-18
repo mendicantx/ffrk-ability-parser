@@ -46,6 +46,8 @@ const DB = {
   heroAbilitiesMap:   {},   // id (number) → hero ability row
   heroAbilityNameMap: {},   // id (number) → Name string
   extraMap:           {},   // id (number) → Extra sheet row
+  synchroMap:         {},   // id (number) → Synchro sheet row
+  synchroConditionNames: {}, // Synchro Condition ID → the tab's name for it
   sheetRows:          null, // the sheets as loaded, for ffrk/status_context
   game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   lastInput:          null, // the last text parsed, shown again when game data arrives
@@ -207,6 +209,7 @@ async function loadSheets() {
     const characterRows    = data.characters       || [];
     const heroAbilityRows  = data.hero_abilities   || [];
     const extraRows        = data.extra            || [];
+    const synchroRows      = data.synchro          || [];
 
     // Status map: id → { commonName, effects, duration }
     for (const r of statusRows) {
@@ -261,9 +264,20 @@ async function loadSheets() {
       if (!isNaN(id)) DB.extraMap[id] = r;
     }
 
+    // Synchro sheet map: ID → row, and the tab's names for its condition IDs
+    // ("17" → "Darkness", "2003" → "Dark, Fire").
+    DB.synchroMap = {};
+    DB.synchroConditionNames = {};
+    for (const r of synchroRows) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id)) DB.synchroMap[id] = r;
+      const condId = String(r['Synchro Condition ID'] ?? '').trim();
+      if (/^\d+$/.test(condId) && r['Synchro Condition']) DB.synchroConditionNames[condId] ??= r['Synchro Condition'];
+    }
+
     const refreshed = lastRefreshedAt ? ` · refreshed ${new Date(lastRefreshedAt).toLocaleString()}` : '';
     setLoadState('sheets', 'ok',
-      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length}${refreshed}`);
+      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length} synchro:${synchroRows.length}${refreshed}`);
   } catch(e) {
     setLoadState('sheets', 'err', e.message);
   }
@@ -2703,6 +2717,54 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
   });
 }
 
+// ─── Synchro sheet column preview (a Synchro soul break's commands) ──────────
+// The condition's name is the Synchro tab's own name for its ID ("17" → "Darkness"),
+// or the element's; any other ID gets a placeholder.
+function synchroConditionName(conditionId) {
+  if (!conditionId) return '';
+  if (DB.synchroConditionNames[conditionId]) return DB.synchroConditionNames[conditionId];
+  const element = DB.elementTypes[Number(conditionId)];
+  return element ? fmtElement(element) : `<synchro condition ${conditionId}>`;
+}
+
+function renderSynchroSheetPreview(parsed, parent, genEffects) {
+  const id = parsed.abilityId;
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
+  const synchroRow = DB.synchroMap[id] ?? null;
+  const imgFormula = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/ability/${id}/${id}_128.png")`;
+
+  const colValues = {
+    'Character':            { val: parent.character },
+    'Source':               { val: parent.sbName },
+    'SB Ver':               { val: parent.sbVer || 'SASB' },
+    'Name':                 { val: synchroRow?.['Name'] || '', src: !!synchroRow?.['Name'] },
+    'Synchro Ability Slot': { val: String(parent.slot) },
+    'Synchro Condition':    { val: synchroConditionName(parent.conditionId) },
+    'Type':                 { val: type },
+    'Target':               { val: target },
+    'Formula':              { val: formula },
+    'Multiplier':           { val: multiplier },
+    'Element':              { val: element },
+    'Time':                 { val: parsed.castTime ?? '' },
+    'Effects':              { val: genEffects },
+    'Counter':              { val: counter },
+    'Auto Target':          { val: autoTarget },
+    'SB':                   { val: String(parsed.sbCharge || '') },
+    'School':               { val: schoolName(parsed.category) },
+    'Name (JP)':            { val: parsed.name },
+    'ID':                   { val: String(id) },
+    'Synchro Condition ID': { val: parent.conditionId },
+    'GL':                   { val: '' },
+    '✓':                    { val: '' },
+  };
+
+  const COLUMN_ORDER = ['Character', 'Source', 'SB Ver', 'Img', 'Name', 'Synchro Ability Slot', 'Synchro Condition', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'Synchro Condition ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Synchro tab columns', idPrefix: 'syp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
+  });
+}
+
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
 function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
 
@@ -2939,6 +3001,12 @@ function renderAbility(parsed, depth, ctx) {
     html += renderFollowUpSheetPreview(parsed, genText, busterOtherSource);
   }
 
+  // Synchro tab column preview — for a Synchro soul break's commands
+  const synchroParent = relations.synchroParent[parseInt(parsed.abilityId)];
+  if (synchroParent) {
+    html += renderSynchroSheetPreview(parsed, synchroParent, genText);
+  }
+
   // Extra tab column preview — for EXTRA_ZETSUGI extra kiwami abilities
   const ekParent = relations.extraKiwamiParent[parseInt(parsed.abilityId)];
   if (ekParent) {
@@ -2986,6 +3054,7 @@ function newRelations() {
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
     extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
     masterFinish:      {}, // MASB masterFinishAbilityId → source label ("Master Mode: <character>")
+    synchroParent:     {}, // SYNCHRO command IDs (arg2/arg3) → { character, sbName, sbVer, slot, conditionId }
   };
 }
 
@@ -3084,6 +3153,23 @@ function recordRelations(parsed, ability, ctx) {
     const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
       .map(st => st.commonName ?? '').find(n => n.startsWith('Soul Drive Mode: '));
     if (modeName) DB.soulDriveFollowUps[modeName] = generateEffectsText(soulDriveChase);
+  }
+
+  // A Synchro soul break's commands: arg2 is slot 1 and arg3 slot 2, with their
+  // conditions' IDs in arg4 and arg5 (as the Synchro tab has them in 628 of 630 rows).
+  if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'SYNCHRO') {
+    [['arg2', 'arg4'], ['arg3', 'arg5']].forEach(([abilityArg, conditionArg], i) => {
+      const commandId = parseInt(ability.options?.[abilityArg] ?? 0);
+      if (commandId > 0) {
+        relations.synchroParent[commandId] = {
+          character:   sbRow?.['Character'] || actorName,
+          sbName:      sbRow?.['Name']      || parsed.name,
+          sbVer:       soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'SASB'),
+          slot:        i + 1,
+          conditionId: String(parseInt(ability.options?.[conditionArg] ?? 0) || ''),
+        };
+      }
+    });
   }
 
   // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
