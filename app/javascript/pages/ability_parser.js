@@ -1477,13 +1477,40 @@ function generateEffectsText(parsed) {
   // Returns { ifStatuses, elseStatuses, conditionArg } or null.
   // Skips blocks that contain any attacks (those are handled by the attack conditional logic).
   // [{ s, target }] for every status a branch grants, or null when it has a nested block.
-  function branchGrants(branch) {
+  function branchGrants(branch, all = branch) {
     if (branch.some(sa => (sa.controlTypeRaw ?? 0) !== 0)) return null;
     return branch.filter(sa => sa.statuses.length > 0 && !sa.levelIncrease?.status && !sa.isStateLevelIncrement)
-      .flatMap(sa => sa.statuses.filter(st => !isLevelTracker(st)).map(st => ({ s: st, target: sa.target })));
+      .flatMap(sa => sa.statuses.filter(st => !isLevelTracker(st)).map(st => ({ s: st, target: resolvedTarget(sa, all) })));
   }
 
-  function findConditionalStatus(sas) {
+  // Two status blocks that test the same condition and grant the same things to the same
+  // targets in each branch.
+  function sameStatusBlock(a, b) {
+    const ids = sts => sts.map(st => st.id).join(',');
+    const same = (x, y) => ids(x.statuses) === ids(y.statuses) && targetLabel(x.target) === targetLabel(y.target);
+    const norm = arg => String(arg ?? '').replace(/\s+/g, '');
+    return norm(a.conditionArg) === norm(b.conditionArg) && a.hasElse === b.hasElse
+      && same({ statuses: a.ifStatuses, target: a.ifTarget }, { statuses: b.ifStatuses, target: b.ifTarget })
+      && same({ statuses: a.elseStatuses, target: a.elseTarget }, { statuses: b.elseStatuses, target: b.elseTarget })
+      && a.elifs.length === b.elifs.length && a.elifs.every((e, k) => norm(e.conditionArg) === norm(b.elifs[k].conditionArg) && same(e, b.elifs[k]));
+  }
+
+  // Marks a clause in the direct path's list that takes "causes" instead of "grants".
+  const CAUSES = '\u0001';
+
+  // A sub-action's target, with "whoever sub-action N hit" (HIT_ACTOR, processOrder: N)
+  // read as that sub-action's target, as subActionStatuses does.
+  function resolvedTarget(sa, all) {
+    if (!sa) return undefined;
+    if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
+      const m = String(sa.targetArgRaw ?? '').match(/processOrder\s*:\s*(\d+)/);
+      const ref = m && all.find(r => r.processOrder === parseInt(m[1]));
+      if (ref) return ref.target;
+    }
+    return sa.target;
+  }
+
+  function findConditionalStatus(sas, all = sas) {
     const isAtk = sa => sa.props.hits != null || sa.props.multiplier != null;
     let depth = 0, blockStart = -1, blockElse = -1, blockElifs = [];
     for (let i = 0; i < sas.length; i++) {
@@ -1512,19 +1539,25 @@ function generateEffectsText(parsed) {
             const elseSA = statusSA(elseBranch);
             if (ifSA || elseSA) {
               const elifs = elifBranches.map((branch, k) => ({
-                statuses: statusSA(branch)?.statuses ?? [], target: statusSA(branch)?.target,
+                statuses: statusSA(branch)?.statuses ?? [], target: resolvedTarget(statusSA(branch), all),
                 conditionArg: sas[blockElifs[k]].conditionArg ?? '',
               }));
               return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
-                       ifTarget: ifSA?.target, elseTarget: elseSA?.target,
+                       ifTarget: resolvedTarget(ifSA, all), elseTarget: resolvedTarget(elseSA, all),
                        ifTargetArg: ifSA?.targetArgRaw ?? '',
                        ifBranch,
                        // Every grant in each branch, when a branch has several (Eiko's AASB:
                        // one to all allies and one to the user in each).
-                       ifAll: branchGrants(ifBranch), elseAll: branchGrants(elseBranch),
+                       ifAll: branchGrants(ifBranch, all), elseAll: branchGrants(elseBranch, all),
                        conditionArg: sas[blockStart].conditionArg ?? '',
                        hasElse: !!elseSA, elifs };
             }
+          } else if (blockElse >= 0 && !blockElifs.length && parseStatComparisonLabel(sas[blockStart].conditionArg)) {
+            // A hybrid attack whose physical and magic branches each hold the same status
+            // block (Wedge's Triple Star: after either attack, Imperil Prismatic 30% with
+            // 4+ Thief/XIX/XX allies, 10% otherwise) has that block, once.
+            const inner = findConditionalStatus(ifBranch, all), other = findConditionalStatus(elseBranch, all);
+            if (inner && other && sameStatusBlock(inner, other)) return inner;
           }
           blockStart = -1; blockElse = -1; blockElifs = [];
         }
@@ -2063,7 +2096,11 @@ function generateEffectsText(parsed) {
         // One-sided: "grants [X] to self if condition" or "after N uses" for stateLevel.equal
         const tLabel   = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const useCount = parseStateLevelEqualCondition(condStat.conditionArg);
-        if (ifStr) clauses.push(ifStr + tLabel + (useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : ''));
+        const when = useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : '';
+        // A status on enemies is caused: "causes [Blind] on enemy".
+        // A status on enemies is caused, in its place among the clauses: "causes [Blind] on enemy".
+        if (ifStr && tLabel.includes('enem')) clauses.push(`${CAUSES}${ifStr}${tLabel.replace(' to ', ' on ')}${when}`);
+        else if (ifStr) clauses.push(ifStr + tLabel + when);
         // TACTICAL_AWAKE weapon skill: if the condition is an element infusion check without ELSE,
         // battle.js implies the else branch grants "Attach <elements> <level> with Stacking" to user.
         if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE') {
@@ -2080,7 +2117,8 @@ function generateEffectsText(parsed) {
         }
       }
     }
-    if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
+    // Clauses marked CAUSES take "causes" instead of "grants".
+    if (clauses.length > 0) segs.push(clauses.map((c, i) => c.startsWith(CAUSES) ? `${i ? 'causes' : 'Causes'} ${c.slice(1)}` : `${i ? 'grants' : 'Grants'} ${c}`).join(', '));
     for (const c of causes) segs.push(`Causes ${c}`);
   }
 
