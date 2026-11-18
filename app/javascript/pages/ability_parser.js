@@ -1295,6 +1295,60 @@ function generateEffectsText(parsed) {
     return null;
   }
 
+  // A follow-up that scales with the rank of the ability that triggered it checks
+  // `abilityCondition: { grade: { greaterEqual: N } }` in an IF / ELSE IF … / ELSE chain,
+  // highest rank first; the ELSE is every rank below the lowest one checked.
+  const rankOf = cond => {
+    const m = /^\s*abilityCondition\s*:\s*\{\s*grade\s*:\s*\{\s*greaterEqual\s*:\s*(\d+)\s*\}\s*,?\s*\}\s*$/.exec(cond ?? '');
+    return m ? Number(m[1]) : null;
+  };
+  // Every such chain in a sub-action list, at any depth, as { start, end, tiers }: tiers
+  // in ascending rank, each { rank, sas } with only the branch's own sub-actions (nested
+  // blocks included). Chains without an ELSE or with a non-rank branch are skipped.
+  function rankChains(sas) {
+    const chains = [];
+    for (let i = 0; i < sas.length; i++) {
+      if ((sas[i].controlTypeRaw ?? 0) !== 1 || rankOf(sas[i].conditionArg) == null) continue;
+      let depth = 0, end = -1;
+      const heads = [];
+      for (let j = i; j < sas.length; j++) {
+        const raw = sas[j].controlTypeRaw ?? 0;
+        if (raw === 1) { depth++; if (depth === 1) heads.push(j); }
+        else if ((raw === 2 || raw === 3) && depth === 1) heads.push(j);
+        else if (raw === 4 && --depth === 0) { end = j; break; }
+      }
+      if (end < 0) continue;
+      const branches = heads.map((h, k) => ({ head: sas[h], sas: sas.slice(h + 1, heads[k + 1] ?? end) }));
+      const ranks = branches.map(b => (b.head.controlTypeRaw === 3 ? null : rankOf(b.head.conditionArg)));
+      const last = branches[branches.length - 1];
+      if (last.head.controlTypeRaw !== 3 || ranks.slice(0, -1).some(r => r == null)) continue;
+      ranks[ranks.length - 1] = 1;
+      if (Math.min(...ranks.slice(0, -1)) <= 1) continue;
+      chains.push({ start: i, end, tiers: branches.map((b, k) => ({ rank: ranks[k], sas: b.sas })).sort((a, b) => a.rank - b.rank) });
+      i = end;
+    }
+    return chains;
+  }
+  // "at rank 1/2/3/4/5 of the triggering ability" (docs/decisions.md "Rank of the
+  // triggering ability"); tiers that cover several ranks read "1-2/3+".
+  function rankLabel(tiers) {
+    const parts = tiers.map((t, k) => {
+      const next = tiers[k + 1]?.rank;
+      if (next == null) return t.rank >= 5 ? `${t.rank}` : `${t.rank}+`;
+      return next - 1 > t.rank ? `${t.rank}-${next - 1}` : `${t.rank}`;
+    });
+    return `at rank ${parts.join('/')} of the triggering ability`;
+  }
+  // "[HP Stock (500)]", "[HP Stock (1000)]" … → "[HP Stock (500/1000/…)]" when the names
+  // differ only in one number, as the sheet writes them; "[A]/[B]/…" otherwise.
+  function rankNames(names) {
+    const split = names.map(n => /^(\D*?)(\d[\d,.]*)(.*)$/.exec(n));
+    if (split.every(Boolean) && new Set(split.map(m => `${m[1]}\u0000${m[3]}`)).size === 1 && !/\d/.test(split[0][3]) && !/\d/.test(split[0][1])) {
+      return `[${split[0][1]}${split.map(m => m[2]).join('/')}${split[0][3]}]`;
+    }
+    return names.map(n => `[${n}]`).join('/');
+  }
+
   // Detect an IF/ELSE_IF/ELSE/ENDIF conditional attack block in a sub-action list.
   // Returns { ifAtk, elseIfAtks, elseAtk, conditionArg } or null.
   // Known controlTypeRaw values: 1=IF, 2=ELSE_IF, 3=ELSE, 4=ENDIF.
@@ -1842,7 +1896,19 @@ function generateEffectsText(parsed) {
     const ifElems   = ifAtk?.elements  ?? [];
     const elseElems = elseAtk?.elements ?? [];
     const elemsDiffer = JSON.stringify([...ifElems].sort()) !== JSON.stringify([...elseElems].sort());
-    if (enLabel && sameFactors && elemsDiffer) {
+    // An attack that scales with the triggering ability's rank lists every rank's
+    // multiplier (and cap, when they differ): "Six single attacks (0.24/0.37/0.45/0.63/0.76
+    // each) at rank 1/2/3/4/5 of the triggering ability".
+    const rankChain = rankOf(conditionArg) != null
+      ? rankChains(exec.subActions).find(c => exec.subActions[c.start].conditionArg === conditionArg) : null;
+    const rankAtks = rankChain?.tiers.map(t => t.sas.find(sa => sa.props.hits != null || sa.props.multiplier != null));
+    const rankPerHit = rankAtks?.every(Boolean) && new Set(rankAtks.map(a => a.props.hits ?? 1)).size === 1
+      ? rankAtks.map(a => resolvePerHit(a, exec)) : null;
+    if (rankPerHit?.every(f => f != null)) {
+      const caps = rankAtks.map(atkCap);
+      const capStr = new Set(caps).size > 1 ? ` capped at ${caps.join('/')}` : (caps[0] !== 9999 ? ` capped at ${caps[0]}` : '');
+      segs.push(`${hitsWord(hits)} ${atkWord}${perHitText(hits, rankPerHit.map(f => f.toFixed(2)).join('/'))}${capStr} ${rankLabel(rankChain.tiers)}${hpStr}`);
+    } else if (enLabel && sameFactors && elemsDiffer) {
       // "One Fire/NE or Ice/NE or Lightning/NE single attack (34.60 each) capped at 199,999 based on EnFire or EnIce"
       const fmtEL      = sa => sa?.elements?.map(fmtElement).filter(Boolean).join('/') || 'NE';
       const allBranches = [ifAtk, ...elseIfAtks.map(e => e.atk), elseAtk].filter(Boolean);
@@ -1890,7 +1956,20 @@ function generateEffectsText(parsed) {
       : parsed.subActions.filter(sa => sa.props.healFactor != null);
     // "Restores HP (105) capped at 19999, removes KO [Raise: 100%] capped at 19999", as the
     // sheet has it (docs/decisions.md "Heals").
+    // Heals that scale with the triggering ability's rank are one heal: "Restores HP
+    // (10/15/25/35/45) at rank 1/2/3/4/5 of the triggering ability". A chain repeated in
+    // both branches of another condition (Aria's Tears of the Priestess) is written once.
+    const healSource = healSAs.length > 0 ? exec.subActions : parsed.subActions;
+    const rankHealed = new Set(), rankHealTexts = new Set();
+    for (const chain of rankChains(healSource)) {
+      const heals = chain.tiers.map(t => t.sas.filter(sa => sa.props.healFactor != null));
+      if (!heals.every(h => h.length === 1) || heals.some(h => h[0].props.reviveRate || h[0].props.damageCapBoost)) continue;
+      heals.forEach(h => rankHealed.add(h[0]));
+      rankHealTexts.add(`Restores HP (${heals.map(h => h[0].props.healFactor).join('/')}) ${rankLabel(chain.tiers)}`);
+    }
+    for (const text of rankHealTexts) segs.push(text);
     for (const hsa of effectiveHealSAs) {
+      if (rankHealed.has(hsa)) continue;
       const cap = hsa.props.damageCapBoost ? ` capped at ${9999 + hsa.props.damageCapBoost}` : '';
       segs.push(`Restores HP (${hsa.props.healFactor})${cap}`);
       if (hsa.props.reviveRate) segs.push(`removes KO [Raise: ${hsa.props.reviveRate}%]${cap}`);
@@ -2049,7 +2128,33 @@ function generateEffectsText(parsed) {
       }
     }
     // Conditional status block: IF(/ELSE) where branches have status sub-actions.
-    const condStat = findConditionalStatus(exec.subActions);
+    let condStat = findConditionalStatus(exec.subActions);
+    // Grants that scale with the triggering ability's rank: "Grants [HP Stock
+    // (500/1000/1500/2000/3000)] at rank 1/2/3/4/5 of the triggering ability". What every
+    // rank grants is listed as usual. The sheet leaves out "to all allies" on these (5 rows
+    // vs 1; docs/decisions.md "Rank of the triggering ability").
+    let rankClause = null;
+    if (condStat && rankOf(condStat.conditionArg) != null) {
+      const chain = rankChains(exec.subActions).find(c => exec.subActions[c.start].conditionArg === condStat.conditionArg);
+      const grants = chain?.tiers.map(t => t.sas.filter(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length && !sa.levelIncrease?.status)
+        .flatMap(sa => sa.statuses.filter(s => !isLevelTracker(s)).map(s => ({ s, target: resolvedTarget(sa, exec.subActions) }))));
+      if (grants?.every(g => g.length)) {
+        const key = g => `${g.s.id}|${targetLabel(g.target)}`;
+        const everyRank = grants[0].filter(g => grants.every(gs => gs.some(x => key(x) === key(g))));
+        const differ = grants.map(gs => gs.filter(g => !everyRank.some(x => key(x) === key(g))));
+        const targets = new Set(differ.flat().map(g => targetLabel(g.target)));
+        if (differ.every(d => d.length === 1) && targets.size === 1) {
+          const t = [...targets][0];
+          rankClause = `${rankNames(differ.map(d => statusName(d[0].s)))}${t === ' to all allies' ? '' : t} ${rankLabel(chain.tiers)}`;
+          for (const { s, target } of everyRank) {
+            const tLabel = targetLabel(target);
+            if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
+            if (!byTarget.get(tLabel).some(x => x.id === s.id)) byTarget.get(tLabel).push(s);
+          }
+          condStat = null;
+        }
+      }
+    }
     const partyClause = condStat && (infusionAlliesClause(condStat) ?? partyConditionClause(condStat, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' }));
     for (const { s, target } of partyClause?.shared ?? []) {
       const tLabel = targetLabel(target);
@@ -2060,6 +2165,7 @@ function generateEffectsText(parsed) {
     for (const [tLabel, statuses] of byTarget) {
       if (statuses.length > 0) clauses.push(joinWithAnd(statuses.map(s => `[${statusName(s)}]`)) + tLabel);
     }
+    if (rankClause) clauses.unshift(rankClause);
     if (condStat) {
       const statLabel      = parseStatComparisonLabel(condStat.conditionArg)
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
@@ -2505,6 +2611,12 @@ function combatColumns(parsed) {
     const damage = multiplier ? damageFormula(parsed) : null;
     Object.assign(columns, damage === 'Hybrid' ? { formula: 'Hybrid', multiplier: '-' }
                          : damage ? { formula: damage } : { formula: '', multiplier: '' });
+  }
+  // A heal with no attack has no Formula: every heal-only Soul Breaks row (238) and 35 of
+  // 42 Other rows leave it blank (docs/decisions.md "Rank of the triggering ability").
+  if (columns.formula && !attackSubActions(parsed).length) {
+    const exec = execAbility(parsed);
+    if ([...parsed.subActions, ...exec.subActions].some(sa => sa.props.healFactor != null)) columns.formula = '';
   }
   return columns;
 }

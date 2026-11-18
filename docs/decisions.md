@@ -343,6 +343,29 @@ Some soul breaks keep a count for their own mode in a shared status, keyed by an
 ### Heals
 A party heal that also revives (sub-action type 12, `HEAL_HP_OR_HEAL_DEATH`: `factorForHealHp`, `rateOfMaxHpForHealDeath`) reads "Restores HP (105), removes KO [Raise: 100%]", first in the Effects. With a raised cap (`damageThresholdLv`), both clauses carry it: "Restores HP (105) capped at 19999, removes KO [Raise: 100%] capped at 19999". Counts over Soul Breaks rows that start with a heal, on 2026-11-11: 189 heal only, 38 heal and revive without a cap; of the capped ones, 28 cap both clauses and 7 only the heal. [Raise: N%] is the Status tab's name (-3 to -8). The parser used to read `factorForHealHp` but never wrote it, so these soul breaks lost the heal and the revive (71 in `toolkit/` and `mined/`, all of them healers' DASBs, ZSBs, AASBs and SASBs). (A contributor's choice; not yet reviewed by the owner.)
 
+A heal with no attack leaves Formula blank. That's every heal-only Soul Breaks row (238) and 35 of the 42 heal-only Other rows (2026-11-17). The 7 that say "Magical" are the Battle Strikes and Spirit Attacks of Yuna, Selphie and Elarra. Before this, the parser wrote "Magical" on all of them. (A contributor's choice; not yet reviewed by the owner.)
+
+### Rank of the triggering ability
+Many follow-ups of Awoken and Dual Awoken modes scale with the rank of the ability that triggered them. In the game data this is an IF / ELSE IF … / ELSE chain on `abilityCondition: { grade: { greaterEqual: N } }`, highest rank first, and the ELSE is rank 1. The sheet writes every rank's value in rank order and then "at rank 1/2/3/4/5 of the triggering ability". That's 31 Other rows on 2026-11-17, against 1 with "at triggering ability rank" and 1 with "at ability rank". So the parser writes:
+
+- **Heals:** "Restores HP (10/15/25/35/45) at rank 1/2/3/4/5 of the triggering ability". If the same chain appears in both branches of another condition, it's written once (Aria's D: Tears of the Priestess).
+- **Attacks:** "Six single attacks (0.24/0.37/0.45/0.63/0.76 each) at rank 1/2/3/4/5 of the triggering ability". Caps are listed the same way when they differ: "capped at 19999/29999/39999/49999/59999".
+- **Grants:** "Grants [HP Stock (500/1000/1500/2000/3000)] at rank 1/2/3/4/5 of the triggering ability".
+  - Names that differ in one number are merged inside one pair of brackets. The sheet does this in 5 rows (4 HP Stock, 1 Barrier Dance) and writes "[HP Stock (500)]/[HP Stock (1000)]/…" in 1.
+  - Names that differ any other way stay "[A]/[B]/…".
+  - The sheet leaves out "to all allies" on these, 5 rows to 1, so the parser does too. Other targets are kept.
+  - Anything every rank grants is listed as a normal grant.
+
+A chain whose ranks skip some would read "1-2/3+". None of the exports has one.
+
+Before this, heals were listed once per rank ("Restores HP (45), restores HP (35), …"). Grants showed only the top and bottom rank ("[HP Stock (3000)] or [HP Stock (500)]"), and so did attacks ("(0.24 or 0.76 each)"). Across `toolkit-combined/` that's 24 follow-ups. 18 now read as the sheet does, Eiko's 乙女の想い included. Not yet handled:
+
+- Trailing Combo, a fixed-damage attack ("deals 10000/20000/… damage").
+- Dual Clearsight Grimoire, a hybrid attack.
+- A rank attack's "100% hit rate". The parser doesn't write that for these follow-ups yet.
+
+(A contributor's choice; not yet reviewed by the owner.)
+
 ### Effects punctuation
 Effects text is one sentence in the sheet's most common style:
 - Clauses are joined with ", ", and a following verb is lower-case ("…capped at 19999, grants [X] to the user").
