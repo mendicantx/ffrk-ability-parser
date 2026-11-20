@@ -185,7 +185,7 @@ A refresh checks each download before it replaces the cached file: a sheet must 
 
 After rows are added to the Status or Other tab, **Reload Status & Other tabs** (on both tools) re-fetches just those two sheets with the same checks (`POST /data/refresh?sheets=status,other`, `DataLoader.refresh_sheets`, at most once a minute). It keeps battle.js and the full refresh time; `/data/status` shows the reload as `sheets_refreshed_at`.
 
-**Upgrading Ruby:** install the new version on the server first (`asdf install ruby <version>` as `jason`), then merge the change to `.ruby-version` and `.tool-versions`. Merging deploys straight away, and Capistrano uses the version in `.tool-versions`.
+**Upgrading Ruby:** install the new version on the server first (`asdf install ruby <version>` as `jason`), then merge the change to `.ruby-version` and `.tool-versions`. Merging deploys straight away, and Capistrano uses the version in `.tool-versions`. Nothing else on the server changes: Passenger is the system package (`/usr/lib/apache2/modules/mod_passenger.so`), the site's Apache config (`/etc/apache2/sites-available/ffrk-ability-parser.conf`) sets `PassengerRuby /home/jason/.asdf/shims/ruby`, which follows the app's `.tool-versions`, and the cron's `shared/asdf-wrapper` just loads asdf. Keep the old Ruby installed until the deploy is checked.
 
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
