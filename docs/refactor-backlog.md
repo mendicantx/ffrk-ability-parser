@@ -172,6 +172,10 @@ Still wanted:
 1. **Requested, not yet received:** Lasswell AASB (八垓抜刀 軌ら星, 23500020), Enna Kros ASB (轟・Aの力, 23280023), Tama SASB (99プラザの日常, 23290014).
 2. **Not yet covered:** a healing soul break, a Synchro soul break, a Chain soul break, and a cut-in ability.
 
+## Synchro commands
+
+Synchro commands (2026-11-16): the Ability Parser shows a Synchro soul break's two commands as Synchro-tab rows (docs/decisions.md "Synchro commands"). **Owner:** add `SYNCHRO_SHEET_URL` (gid 13552509, in `.env.example`) to the server's `shared/.env`, restart and press **Refresh data**. For the owner, from the tab: 18 rows have no ID (Shadowsmith, Palom, Setzer, Elena, Nabaat, Mustadio, King, Lann, Tama), and Jack's commands (31541014, 31541015) have the condition 100 (Fire) where the game has 12 (Samurai).
+
 ## Findings from the captures
 
 - **Ability Crash gets a Soul Break row.** In the Seymour XSB, Ability Crash (22540040) renders a Soul Break preview with character "Unknown" as well as its Other-tab follow-up row. decisions.md routes Ability Crash to the Other tab and the Soul Breaks sheet has no row for it. Fixed in `task/ability-crash-row`: Ability Crash now gets only its Other-tab row.

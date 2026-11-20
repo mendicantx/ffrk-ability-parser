@@ -21,6 +21,8 @@
 //   followUpEffects(source), // the Effects of those Other-tab rows
 // }
 
+import { jobName, realmName } from 'ffrk/names';
+
 const nameOf = (table, value) => Object.keys(table ?? {}).find(k => table[k] === value) ?? null;
 
 // "A", "A and B", "A, B and C" (or "or").
@@ -512,7 +514,10 @@ function describeSoulDriveMode(params, ctx) {
   // 102 of 107 sheet rows, so it's assumed (owner decision); plain modes vary too much.
   const standard = params.effects.some(e => effectName(e, ctx) === 'INCREASE_EXECUTED_DAMAGE');
   const instantAtb = ctx.statusName(ctx.statusId?.('INCREASE_ATB_TIME_FACTOR_MAX_TURN_1'));
-  clauses.push(listed ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
+  // A follow-up that grants just [Instant ATB 1] to the user reads as the sheet's rows do.
+  const onlyInstantAtb = listed && listed.replace(/\.$/, '') === `Grants [${instantAtb}] to the user`;
+  clauses.push(onlyInstantAtb ? `grants [${instantAtb}] after using a Soul Break`
+    : listed ? `${listed.replace(/^Grants /, 'grants ').replace(/\.$/, '')} after using a Soul Break`
     : standard && instantAtb ? `grants [${instantAtb}] after using a Soul Break`
     : 'casts <ability missing from Other Tab> after using a Soul Break');
   clauses.push('removed after triggering', `removed if the character hasn't [${durations.suffixes[0].removedUnless}]`);
@@ -607,10 +612,15 @@ function dualAwakeName(params, ctx, roman) {
   const version = { II: ' v2', III: ' v3' }[words[words.length - 1]] ?? '';
   if (version) words.pop();
   const last = words[words.length - 1];
-  const subject = ELEMENT_KEYS.includes(last) ? ctx.element(last)
+  let subject = ELEMENT_KEYS.includes(last) ? ctx.element(last)
     : ctx.conf.ABILITY_CATEGORY_ID?.[last] != null ? ctx.category(last) : null;
+  let character = words.slice(0, -1);
+  // 16 keys put the element first: "DUAL_AWAKE_MODE_SECOND_LIGHTNING_SHERUKU_II" is
+  // "Dual Awoken Lightning Mode II (Shelke v2)". An element at the end still wins, so
+  // "…_LIGHTNING_HOLY" is the character Lightning's Holy mode.
+  if (!subject && ELEMENT_KEYS.includes(words[0])) { subject = ctx.element(words[0]); character = words.slice(1); }
   if (!subject || words.length < 2) return null;
-  return `Dual Awoken ${subject} Mode ${roman} (${ctx.characterName(words.slice(0, -1).join('_'))}${version})`;
+  return `Dual Awoken ${subject} Mode ${roman} (${ctx.characterName(character.join('_'))}${version})`;
 }
 
 function describeDualAwakeMode(params, ctx) {
@@ -728,7 +738,44 @@ function describeDoneCount(params, ctx) {
   return { name: `${ability} Uses`, effects: `Keeps track of the number of uses of ${ability} (0~${max}), removed after reaching ${max}`, defaultDuration: durations.duration };
 }
 
-const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode, describeAwakeMode, describeDoneCount];
+// Linked Assist Mode: <realm or job> (LINK_ASSIST_MODE_*), granted by Bond CSBs: once per
+// element, an ally of that realm or job dealing that element's damage makes the user cast the
+// mode's follow-up. "Casts [Link Assist: IX] when a IX ally uses an ability that deals
+// elemental damage, once per element (max 3)", 15 seconds (docs/decisions.md "Linked Assist
+// Mode"). Core comes before Beyond, as in every sheet row that names both.
+const LINK_ASSIST_KEYS = new Set(['key', 'type', 'chaseType', 'chaseAbilityParams', 'abilityCondition', 'chaseAbilityDoneCountForIsDone', 'targetActorCondition']);
+function describeLinkAssistMode(params, ctx) {
+  if (!/^LINK_ASSIST_MODE_/.test(ctx.selfKey ?? '') || params.effects.length !== 1) return null;
+  const e = params.effects[0];
+  if (effectName(e, ctx) !== 'REGISTER_CHASE_ABILITY_WHEN_ABILITY_DONE_REACT_ALL_ACTOR' || Object.keys(e).some(k => !LINK_ASSIST_KEYS.has(k))) return null;
+  if (nameOf(ctx.conf.STATUS_AILMENTS_PARAM_SUB_EFFECT_TYPE?.CHASE, e.chaseType) !== 'DETECTED_ELEMENT_ID') return null;
+  // "an ability that deals elemental damage": any of the nine elements.
+  const cond = e.abilityCondition ?? {};
+  if (Object.keys(cond).some(k => k !== 'anyElementIds') || new Set(cond.anyElementIds ?? []).size !== ELEMENT_KEYS.length) return null;
+  const chases = e.chaseAbilityParams ?? [];
+  const chaseIds = new Set(chases.map(c => c.chaseAbilityId));
+  const oncePerElement = chases.every(c => Object.keys(c).every(k => ['elementId', 'chaseAbilityId', 'chaseAbilityRegisterCountCondition'].includes(k))
+    && JSON.stringify(c.chaseAbilityRegisterCountCondition) === '{"less":1}');
+  if (chaseIds.size !== 1 || new Set(chases.map(c => c.elementId)).size !== ELEMENT_KEYS.length || !oncePerElement) return null;
+  const limit = e.chaseAbilityDoneCountForIsDone;
+  const who = e.targetActorCondition?.all ?? {};
+  if (limit == null || who.isBuddy !== true || Object.keys(who).some(k => !['isBuddy', 'buddySeriesId', 'anyBuddySeriesId', 'hasJobId'].includes(k))) return null;
+  const series = [].concat(who.buddySeriesId ?? who.anyBuddySeriesId ?? []).map(id => nameOf(ctx.conf.SERIES_ID, id));
+  const jobs = [].concat(who.hasJobId ?? []).map(id => nameOf(ctx.conf.JOB_ID, id));
+  if (series.length + jobs.length === 0 || [...series, ...jobs].some(k => !k)) return null;
+  const groups = [...series.sort((a, b) => (b === 'JOB') - (a === 'JOB')).map(realmName), ...jobs.map(jobName)];
+  const durations = describeDurations(params.durations, ctx, params.effects);
+  if (!durations || durations.suffixes.length) return null;
+  const ability = ctx.abilityName([...chaseIds][0]);
+  if (!ability) return null;
+  return {
+    name: `Linked Assist Mode: ${groups.join('/')}`,
+    effects: `Casts [${ability}] when a ${groups.join(' or ')} ally uses an ability that deals elemental damage, once per element (max ${limit})`,
+    defaultDuration: durations.duration,
+  };
+}
+
+const MODE_FAMILIES = [describeMasterMode, describeZenithMode, describeSoulDriveMode, describeDualAwakeMode, describeAwakeMode, describeDoneCount, describeLinkAssistMode];
 
 // ─── Stat changes ────────────────────────────────────────────────────────────
 // The sheet's stat names, and its stat lists: equal values grouped in the order they

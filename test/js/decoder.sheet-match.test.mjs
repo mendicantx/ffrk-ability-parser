@@ -9,11 +9,14 @@ import { loadPage, snapshot } from './harness.mjs';
 
 // Matches per family as of the last improvement.
 const FLOORS = {
-  LEARNING_MODE:       { names: 53, effects: 39 },
+  LEARNING_MODE:       { names: 53, effects: 40 },
   ULTIMATE_BUDDY_MODE: { names: 270, effects: 137 },
   LIMIT_BREAK_SOUL_DRIVE: { names: 154, effects: 101 },
-  DUAL_AWAKE_MODE:     { names: 295, effects: 145 },
-  all:                 { names: 2636, effects: 2065 },  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%
+  DUAL_AWAKE_MODE:     { names: 296, effects: 145 },
+  // effects: Tactical rows say [ATB_10%]; the follow-up's name is the Other tab's, ATB短縮_10%.
+  // 2070 → 2069: the sheet's Crystal Force Mode: Dion row says its chase follows Crystal Force
+  // abilities; the game data says Holy abilities (docs/decisions.md "Crystal Force Mode chases").
+  all:                 { names: 2650, effects: 2069 },
 };
 
 // Clauses the decoder always writes but many sheet rows leave out. A row matches if

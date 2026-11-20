@@ -3,7 +3,7 @@
 
 import { extractConstantMap, invert } from 'ffrk/battle_js';
 import { refreshServerData, splitSheetsResponse } from 'ffrk/server_data';
-import { realmName, schoolName } from 'ffrk/names';
+import { jobName, realmName, schoolName } from 'ffrk/names';
 import { startBattleRuntime } from 'ffrk/battle_runtime';
 import { createStatusDecoder } from 'ffrk/status_decoder';
 import { findAbilityUrl, linkMissingAbilities } from 'ffrk/status_context';
@@ -46,10 +46,13 @@ const DB = {
   heroAbilitiesMap:   {},   // id (number) → hero ability row
   heroAbilityNameMap: {},   // id (number) → Name string
   extraMap:           {},   // id (number) → Extra sheet row
+  synchroMap:         {},   // id (number) → Synchro sheet row
+  synchroConditionNames: {}, // Synchro Condition ID → the tab's name for it
   sheetRows:          null, // the sheets as loaded, for ffrk/status_context
   game:               null, // { conf, statusParams } from running battle.js (ffrk/battle_runtime)
   lastInput:          null, // the last text parsed, shown again when game data arrives
   missingStatuses:    new Map(), // id → { id, codedName, described } seen in this parse without a Status-tab row
+  soulDriveFollowUps: {},        // Soul Drive Mode name → the Effects of what it casts, from this parse's soul drive
   unknownActions:     new Set(), // action ids seen in this parse that the Action Args sheet doesn't list
   decoderError:       null,      // why the Status Decoder engine couldn't start, if it couldn't
 };
@@ -141,8 +144,9 @@ async function loadBattleJs() {
 const statusDecoder = createStatusDecoder();
 let statusDecoderReady = false;
 
-// { name, effects, defaultDuration } for a status from the decoder, or null.
-function describeFromGameData(id) {
+// { name, effects, defaultDuration } for a status from the decoder, or null. followUpEffects:
+// { source: [Effects] } for follow-ups the Other tab doesn't list (a Soul Drive Mode's).
+function describeFromGameData(id, followUpEffects) {
   const key = DB.statusAilments[id];
   if (!key || !rawBattleJs || !DB.sheetRows || DB.decoderError) return null;
   // If the engine can't start (e.g. a battle.js update moved what it scans), parsing
@@ -154,7 +158,7 @@ function describeFromGameData(id) {
       statusDecoder.buildStatusAssignments();
       statusDecoderReady = true;
     }
-    const d = statusDecoder.decodeStatus(key);
+    const d = statusDecoder.decodeStatus(key, { followUpEffects });
     return d?.decoded
       ? { name: d.commonName || null, effects: d.effects ?? '', defaultDuration: d.defaultDuration ?? '', missingAbilities: d.missingAbilities ?? [] }
       : null;
@@ -205,6 +209,7 @@ async function loadSheets() {
     const characterRows    = data.characters       || [];
     const heroAbilityRows  = data.hero_abilities   || [];
     const extraRows        = data.extra            || [];
+    const synchroRows      = data.synchro          || [];
 
     // Status map: id → { commonName, effects, duration }
     for (const r of statusRows) {
@@ -259,9 +264,20 @@ async function loadSheets() {
       if (!isNaN(id)) DB.extraMap[id] = r;
     }
 
+    // Synchro sheet map: ID → row, and the tab's names for its condition IDs
+    // ("17" → "Darkness", "2003" → "Dark, Fire").
+    DB.synchroMap = {};
+    DB.synchroConditionNames = {};
+    for (const r of synchroRows) {
+      const id = parseInt(r['ID']);
+      if (!isNaN(id)) DB.synchroMap[id] = r;
+      const condId = String(r['Synchro Condition ID'] ?? '').trim();
+      if (/^\d+$/.test(condId) && r['Synchro Condition']) DB.synchroConditionNames[condId] ??= r['Synchro Condition'];
+    }
+
     const refreshed = lastRefreshedAt ? ` · refreshed ${new Date(lastRefreshedAt).toLocaleString()}` : '';
     setLoadState('sheets', 'ok',
-      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length}${refreshed}`);
+      `status:${statusRows.length} actions:${actionRows.length} sb:${sbRows.length} other:${otherRows.length} chars:${characterRows.length} hero:${heroAbilityRows.length} extra:${extraRows.length} synchro:${synchroRows.length}${refreshed}`);
   } catch(e) {
     setLoadState('sheets', 'err', e.message);
   }
@@ -351,8 +367,32 @@ function chaseSourceName(abilityId) {
   const chaseKey = DB.chaseAbilityIdToKey[parseInt(abilityId)];
   if (!chaseKey) return '';
   const statusKey = chaseKey.replace(/^CHASE_ABILITY_FOR_/, '');
-  const statusId = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
-  return DB.statusMap[statusId]?.commonName || '';
+  // Some chase keys are named after the ability (CHASE_ABILITY_FOR_DRAGON_TEMPEST) or carry
+  // a suffix (…_SHERUKU_II_MODE): then the one status whose game config casts it. A shared
+  // follow-up with several casters (the Tactical ATB ones) gets none.
+  const byKey = Object.keys(DB.statusAilments).find(id => DB.statusAilments[id] === statusKey);
+  const casters = byKey ? [byKey] : (statusCasters()[parseInt(abilityId)] ?? []);
+  const statusId = casters.length === 1 ? casters[0] : null;
+  // A status the Status tab doesn't name yet gives the name its new row will have (and is
+  // listed with that row), so the follow-up can be entered with its Source.
+  return statusId ? lookupStatus(Number(statusId)).commonName || '' : '';
+}
+
+// { ability ID: [IDs of the statuses whose game config casts it] }, built once per game data
+// (statusParams is keyed by status ID).
+const statusCastersCache = new WeakMap();
+function statusCasters() {
+  if (!DB.game?.statusParams) return {};
+  if (!statusCastersCache.has(DB.game)) {
+    const map = {};
+    for (const [statusId, params] of Object.entries(DB.game.statusParams)) {
+      for (const e of params?.effects ?? []) {
+        for (const id of new Set([e.chaseAbilityId, e.abilityId].filter(Boolean))) (map[id] ??= new Set()).add(statusId);
+      }
+    }
+    statusCastersCache.set(DB.game, Object.fromEntries(Object.entries(map).map(([id, ids]) => [id, [...ids]])));
+  }
+  return statusCastersCache.get(DB.game);
 }
 
 // Other-tab name for a Tactical Awoken Mode's TP MAX follow-up: "TPMAX: <Character>"
@@ -464,6 +504,58 @@ const IGNORED_SUB_ACTION_KEYS = new Set([
 ]);
 
 // ─── Core ability parser ─────────────────────────────────────────────────────
+// A sub-action that targets "alive allies matching an actor condition" says who they are
+// in its target: "ALIVE_BUDDIES_BY_ACTOR_CONDITION:Witch allies" for actorCondition
+// { anyJobId: [600017], isAlive: true }, shown as "to all Witch allies". Read: a job or
+// series ("Witch allies", "Mystic Knight or XII allies"), or an Infusion ("allies with
+// Attach Ice or Attach Dark", "allies without an Infusion"). Any other target is
+// returned as it is.
+function actorConditionTarget(target, targetArg) {
+  if (target !== 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' || !/actorCondition/.test(targetArg ?? '')) return target;
+  const arg = String(targetArg);
+  const keys = [...arg.matchAll(/(\w+)\s*:/g)].map(m => m[1]);
+  const read = ['actorCondition', 'any', 'isAlive', 'anyJobId', 'anyBuddySeriesId', 'hasAnyAttachElementByElementIds', 'hasAttachElementByElementId', 'hasAttachElement'];
+  if (keys.some(k => !read.includes(k))) return target;
+  const ids = key => (arg.match(new RegExp(`${key}\\s*:\\s*(?:\\[([^\\]]*)\\]|(\\d+))`)) ?? []).slice(1).filter(Boolean).join(',').split(',').map(x => x.trim()).filter(Boolean);
+  const groups = [...ids('anyJobId').map(id => DB.jobIds[id] ? jobName(DB.jobIds[id]) : `Job #${id}`), ...ids('anyBuddySeriesId').map(id => DB.seriesIds[id] ? realmName(DB.seriesIds[id]) : `Series #${id}`)];
+  const elements = [...ids('hasAnyAttachElementByElementIds'), ...ids('hasAttachElementByElementId')]
+    .map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`);
+  const infusion = /hasAttachElement\s*:\s*(true|false)/.exec(arg)?.[1];
+  if (groups.length && (elements.length || infusion)) return target;
+  if (groups.length) return `${target}:${groups.join(' or ')} allies`;
+  const with_ = [...elements, ...(infusion === 'true' ? ['an Infusion'] : [])];
+  const who = [with_.length ? `with ${with_.join(' or ')}` : '', infusion === 'false' ? 'without an Infusion' : ''].filter(Boolean).join(' or ');
+  return who ? `${target}:allies ${who}` : target;
+}
+
+// What a chain counts, as the sheet names the chain: "Ice", "Dragoon", "VIII", "Core".
+function chainGroupName(cond) {
+  if (cond.id == null) return null;
+  if (cond.type === 'ELEMENT_TYPE') return DB.elementTypes[cond.id] ? fmtElement(DB.elementTypes[cond.id]) : `Element #${cond.id}`;
+  if (cond.type === 'ABILITY_CATEGORY') return DB.jobIds[cond.id] ? jobName(DB.jobIds[cond.id]) : `Job #${cond.id}`;
+  if (cond.type === 'SERIES') return DB.seriesIds[cond.id] ? realmName(DB.seriesIds[cond.id]) : `Series #${cond.id}`;
+  return null;
+}
+
+// "Activates Ice Chain (max 150, field +50%)"; an LBC that finds its chain already running
+// extends it instead: "… or adds 25 to the current Ice Chain maximum limit and increases
+// the current chain count on all enemies by 10" (docs/decisions.md "Chains"). Several
+// conditions are one chain, in ID order except that Core comes first, as in every sheet
+// row that names both: "Core/Beyond".
+function chainClause(chain) {
+  const rank = c => (c.type === 'SERIES' && DB.seriesIds[c.id] === 'JOB' ? 0 : 1);
+  const conds = [...(chain?.conditions ?? [])].sort((a, b) => rank(a) - rank(b) || (a.id ?? 0) - (b.id ?? 0));
+  const names = conds.map(chainGroupName);
+  if (!conds.length || chain.max == null || names.some(n => !n)) return null;
+  const boosts = [...new Set(conds.map(c => c.boost ?? 0))];
+  if (boosts.length !== 1) return null;
+  const group = names.join('/');
+  let text = `Activates ${group} Chain (max ${chain.max}, field +${boosts[0]}%)`;
+  if (chain.addMax) text += ` or adds ${chain.addMax} to the current ${group} Chain maximum limit`;
+  if (chain.addCount) text += `${chain.addMax ? ' and' : ' or'} increases the current chain count on all enemies by ${chain.addCount}`;
+  return text;
+}
+
 function parseAbility(ability, allAbilities, parsedSet) {
   if (parsedSet.has(ability.ability_id)) return null;
   parsedSet.add(ability.ability_id);
@@ -523,6 +615,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
 
   if (formula) {
     // Walk formula args
+    let chainCond = null;   // the chain condition the next comboCondition/boostCoefficient belong to
     for (let argNum = 1; argNum <= 30; argNum++) {
       const argKey = `arg${argNum}`;
       const argType = formula[argKey];
@@ -610,17 +703,34 @@ function parseAbility(ability, allAbilities, parsedSet) {
         case 'fixedHp':
           if (numVal > 0) result.props.fixedHeal = numVal;
           break;
+        // A chain (CSB action 184, LBC action 232) lists up to four (comboType,
+        // comboCondition, boostCoefficient) triples, one per kind of ability it counts:
+        // an element, a job or a realm. boostCoefficient 150 is a +50% field.
         case 'comboType':
-          if (numVal > 0) result.props.chainType = DB.chainTypes[numVal] ?? numVal;
+          chainCond = null;
+          if (numVal > 0) {
+            chainCond = { type: DB.chainTypes[numVal] ?? String(numVal), id: null, boost: null };
+            (result.chain ??= { conditions: [] }).conditions.push(chainCond);
+            result.props.chainType = chainCond.type;
+          }
           break;
         case 'comboCondition':
-          if (numVal > 0) result.props.chainElement = DB.elementTypes[numVal] ?? numVal;
+          if (chainCond && numVal > 0) {
+            chainCond.id = numVal;
+            result.props.chainElement = chainGroupName(chainCond);
+          }
           break;
         case 'boostCoefficient':
-          if (numVal > 0) result.props.chainFieldBoost = numVal > 100 ? numVal - 100 : numVal;
+          if (chainCond && numVal > 0) chainCond.boost = result.props.chainFieldBoost = numVal - 100;
           break;
         case 'comboMaxNum':
-          if (numVal > 0) result.props.chainMaxCount = numVal;
+          if (numVal > 0) (result.chain ??= { conditions: [] }).max = result.props.chainMaxCount = numVal;
+          break;
+        case 'addComboNum':
+          if (numVal > 0) (result.chain ??= { conditions: [] }).addCount = numVal;
+          break;
+        case 'addComboMaxNum':
+          if (numVal > 0) (result.chain ??= { conditions: [] }).addMax = numVal;
           break;
         case 'synchroAbilityId1':
           if (numVal > 0) result.props.synchroAbility1 = numVal;
@@ -629,10 +739,12 @@ function parseAbility(ability, allAbilities, parsedSet) {
           if (numVal > 0) result.props.synchroAbility2 = numVal;
           break;
         case 'burstAbilityArgs':
+        case '_getFirstAbilityId':   // ComboAction (CSB, 184): the ability the chain wraps
         case 'wrappedAbilityId':
         case 'defaultAbility':
         case 'defaultAbilityId':
         case 'tpMaxAbilityId':
+        case 'soulDriveChaseAbilityId': // LimitBreakSoulDriveAction (240): what Soul Drive Mode casts
         case 'weaponSkillAbilityId':
         case 'repeatSkillAbilityId':
         case 'abilityId': {
@@ -755,7 +867,7 @@ function parseAbility(ability, allAbilities, parsedSet) {
       const subArgs = parseDenaArg(sa.arg);
       const sub = {
         type:           DB.subActionType[parseInt(sa.type)]           ?? sa.type,
-        target:         DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type,
+        target:         actorConditionTarget(DB.subActionTargetType[parseInt(sa.target_type)] ?? sa.target_type, sa.target_arg),
         targetArgRaw:   sa.target_arg || '',
         processOrder:   parseInt(sa.process_order) || 0,
         conditionType:  DB.conditionTypes[parseInt(sa.condition_type)] ?? null,
@@ -780,7 +892,11 @@ function parseAbility(ability, allAbilities, parsedSet) {
             }
             break;
           case 'factorForHealHp':
-            sub.props.healingMultiplier = Number(v);
+            // HEAL_HP_OR_HEAL_DEATH (type 12): heals the living and revives the KO'd.
+            sub.props.healFactor = Number(v);
+            break;
+          case 'rateOfMaxHpForHealDeath':
+            sub.props.reviveRate = Number(v);
             break;
           case 'hitNum':
             sub.props.hits = Number(v);
@@ -855,6 +971,10 @@ function parseAbility(ability, allAbilities, parsedSet) {
             if (v?.increaseLevel != null) {
               sub.isStateLevelIncrement = true;
               sub.levelIncrease = { key: v.key, by: Number(v.increaseLevel) };
+              // Sent to the allies who have a mode (Learning Mode, Devotion Mode): it raises
+              // that mode's level.
+              const holder = /hasSaId\s*:\s*\[?\s*(\d+)/.exec(sub.target === 'ALIVE_BUDDIES_BY_ACTOR_CONDITION' ? sub.targetArgRaw : '')?.[1];
+              if (holder) sub.levelIncrease.status = lookupStatus(Number(holder));
             }
             break;
           default:
@@ -914,9 +1034,11 @@ function generateEffectsText(parsed) {
   function hitsWord(n) { return NUM_WORDS[n] ?? String(n); }
   // Attack wording, as in the sheet (docs/decisions.md "Attack wording"): attacks on
   // all enemies are "group" attacks, and "(x each)" is only used for more than one hit.
+  // Ranged, piercing and jump come between the two, in that order: "single ranged jump attacks".
   function attackNoun(sa, hits) {
     const kind = sa?.target === 'OPPONENT_ALIVE_ALL' ? 'group' : 'single';
-    return hits === 1 ? `${kind} attack` : `${kind} attacks`;
+    const words = [kind, sa?.props?.ranged && 'ranged', sa?.props?.piercing && 'piercing', sa?.props?.jump && 'jump'].filter(Boolean);
+    return `${words.join(' ')} ${hits === 1 ? 'attack' : 'attacks'}`;
   }
   // "[A], [B] and [C]", as the sheet lists statuses.
   function joinWithAnd(items) {
@@ -941,9 +1063,12 @@ function generateEffectsText(parsed) {
   }
 
   // True for mode-level tracker statuses that don't belong in a plain effects line
-  // (Common Name matches "Status Level while under specific status ID" pattern)
+  // (Common Name matches "Status Level while under specific status ID" pattern), and for
+  // the shared counters a soul break keys for its own mode (`option: { key: gogekiBiggs,
+  // maxLevel: 2 }`), which the sheet never lists (docs/decisions.md "Hidden counters").
+  const HIDDEN_COUNTERS = new Set(['STATE_LEVEL_BY_GENERAL_VALUE', 'STATE_LEVEL_BY_GENERAL_VALUE_WHILE_ACCEL_BUDDY_MODE']);
   function isLevelTracker(s) {
-    return (s.commonName ?? '').toLowerCase().startsWith('status level');
+    return (s.commonName ?? '').toLowerCase().startsWith('status level') || HIDDEN_COUNTERS.has(s.codedName);
   }
 
   // Format a partyCondition object into a human-readable "if ..." clause.
@@ -961,7 +1086,7 @@ function generateEffectsText(parsed) {
     const jobIds = Array.isArray(src.anyJobId) ? src.anyJobId : (src.anyJobId != null ? [src.anyJobId] : []);
     for (const id of jobIds) {
       const key = DB.jobIds[id];
-      names.push(key ? schoolName(key) : `Job #${id}`);
+      names.push(key ? jobName(key) : `Job #${id}`);
     }
     const serIds = Array.isArray(src.anyBuddySeriesId) ? src.anyBuddySeriesId : (src.anyBuddySeriesId != null ? [src.anyBuddySeriesId] : []);
     for (const id of serIds) names.push(seriesDisplayName(id));
@@ -1015,14 +1140,16 @@ function generateEffectsText(parsed) {
     if (jobM) {
       for (const id of (jobM[1].match(/\d+/g) ?? []).map(Number)) {
         const key = DB.jobIds[id];
-        names.push(key ? schoolName(key) : `Job #${id}`);
+        names.push(key ? jobName(key) : `Job #${id}`);
       }
     }
     const serM = condArgStr.match(/anyBuddySeriesId\s*:\s*\[([^\]]+)\]/);
     if (serM) {
       for (const id of (serM[1].match(/\d+/g) ?? []).map(Number)) names.push(seriesDisplayName(id));
     }
-    const attachM = !names.length && condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/);
+    // The older form counts one Infusion directly: `attachElementIdCount: { 100: { greaterEqual: 4 } }`.
+    const attachM = !names.length && (condArgStr.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? condArgStr.match(/hasAttachElementByElementId\s*:\s*(\d+)/)
+      ?? condArgStr.match(/attachElementIdCount\s*:\s*\{\s*(\d+)\s*:/));
     if (attachM) {
       const elements = (attachM[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)]).filter(Boolean).map(fmtElement);
       return elements.length ? { count, names: elements, attach: true } : null;
@@ -1038,6 +1165,8 @@ function generateEffectsText(parsed) {
     if (!target) return '';
     const raw = String(target);
     if (raw === 'default') return ' to the user';
+    const allies = /^ALIVE_BUDDIES_BY_ACTOR_CONDITION:(.+)$/.exec(raw);
+    if (allies) return ` to all ${allies[1]}`;
     const t = raw.toUpperCase();
     const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
     const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
@@ -1068,23 +1197,19 @@ function generateEffectsText(parsed) {
                   : sa.props.secondaryDamageThresholdLv ? 199999
                   : sa.props.damageCapBoost ? 9999 + sa.props.damageCapBoost : null;
     const capStr  = capVal ? ` capped at ${capVal}` : '';
-    const flags   = [
-      // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
-      sa.props.ranged   ? 'ranged'           : null,
-      sa.props.jump     ? 'jump'             : null,
-      extraNote         ?? null,
-    ].filter(Boolean);
-    const flagStr    = flags.length ? `, ${flags.join(', ')}` : '';
-    const piercingStr = sa.props.piercing ? 'piercing ' : '';
-    const atkWord    = attackNoun(sa, hits);
-    return `${hitsWord(hits)} ${elemStr}${piercingStr}${atkWord}${perHit}${capStr}${flagStr}`;
+    // autoHit / ignores evasion is implied for all soul breaks — omitted intentionally
+    const flagStr = extraNote ? `, ${extraNote}` : '';
+    const atkWord = attackNoun(sa, hits);
+    return `${hitsWord(hits)} ${elemStr}${atkWord}${perHit}${capStr}${flagStr}`;
   }
 
   // Collect statuses from an ability's sub-actions, tagged with their target.
   // HIT_ACTOR_OF_SPECIFIC_SUB_ACTION (5001): resolves to the target of the referenced sub-action.
-  function subActionStatuses(ab, skip = new Set()) {
+  // inserts: { sub-action → entries to list in its place } (statusesWithEither).
+  function subActionStatuses(ab, skip = new Set(), inserts = new Map()) {
     const out = [];
     for (const sa of ab.subActions) {
+      if (inserts.has(sa)) out.push(...inserts.get(sa));
       if (sa.isStateLevelIncrement || skip.has(sa)) continue;
       let target = sa.target;
       if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
@@ -1155,7 +1280,7 @@ function generateEffectsText(parsed) {
 
   const segs = [];
 
-  const wrappedLabels = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+  const wrappedLabels = new Set(['arg1', '_getFirstAbilityId', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
   const wrapped  = parsed.subAbilities.find(s => wrappedLabels.has(s._label));
   const commands = parsed.subAbilities.filter(s => !wrappedLabels.has(s._label));
   const exec     = wrapped ?? parsed;
@@ -1168,6 +1293,60 @@ function generateEffectsText(parsed) {
     const total = abilityForFallback.props.multiplier;
     if (total != null) return total / (sa.props.hits ?? 1);
     return null;
+  }
+
+  // A follow-up that scales with the rank of the ability that triggered it checks
+  // `abilityCondition: { grade: { greaterEqual: N } }` in an IF / ELSE IF … / ELSE chain,
+  // highest rank first; the ELSE is every rank below the lowest one checked.
+  const rankOf = cond => {
+    const m = /^\s*abilityCondition\s*:\s*\{\s*grade\s*:\s*\{\s*greaterEqual\s*:\s*(\d+)\s*\}\s*,?\s*\}\s*$/.exec(cond ?? '');
+    return m ? Number(m[1]) : null;
+  };
+  // Every such chain in a sub-action list, at any depth, as { start, end, tiers }: tiers
+  // in ascending rank, each { rank, sas } with only the branch's own sub-actions (nested
+  // blocks included). Chains without an ELSE or with a non-rank branch are skipped.
+  function rankChains(sas) {
+    const chains = [];
+    for (let i = 0; i < sas.length; i++) {
+      if ((sas[i].controlTypeRaw ?? 0) !== 1 || rankOf(sas[i].conditionArg) == null) continue;
+      let depth = 0, end = -1;
+      const heads = [];
+      for (let j = i; j < sas.length; j++) {
+        const raw = sas[j].controlTypeRaw ?? 0;
+        if (raw === 1) { depth++; if (depth === 1) heads.push(j); }
+        else if ((raw === 2 || raw === 3) && depth === 1) heads.push(j);
+        else if (raw === 4 && --depth === 0) { end = j; break; }
+      }
+      if (end < 0) continue;
+      const branches = heads.map((h, k) => ({ head: sas[h], sas: sas.slice(h + 1, heads[k + 1] ?? end) }));
+      const ranks = branches.map(b => (b.head.controlTypeRaw === 3 ? null : rankOf(b.head.conditionArg)));
+      const last = branches[branches.length - 1];
+      if (last.head.controlTypeRaw !== 3 || ranks.slice(0, -1).some(r => r == null)) continue;
+      ranks[ranks.length - 1] = 1;
+      if (Math.min(...ranks.slice(0, -1)) <= 1) continue;
+      chains.push({ start: i, end, tiers: branches.map((b, k) => ({ rank: ranks[k], sas: b.sas })).sort((a, b) => a.rank - b.rank) });
+      i = end;
+    }
+    return chains;
+  }
+  // "at rank 1/2/3/4/5 of the triggering ability" (docs/decisions.md "Rank of the
+  // triggering ability"); tiers that cover several ranks read "1-2/3+".
+  function rankLabel(tiers) {
+    const parts = tiers.map((t, k) => {
+      const next = tiers[k + 1]?.rank;
+      if (next == null) return t.rank >= 5 ? `${t.rank}` : `${t.rank}+`;
+      return next - 1 > t.rank ? `${t.rank}-${next - 1}` : `${t.rank}`;
+    });
+    return `at rank ${parts.join('/')} of the triggering ability`;
+  }
+  // "[HP Stock (500)]", "[HP Stock (1000)]" … → "[HP Stock (500/1000/…)]" when the names
+  // differ only in one number, as the sheet writes them; "[A]/[B]/…" otherwise.
+  function rankNames(names) {
+    const split = names.map(n => /^(\D*?)(\d[\d,.]*)(.*)$/.exec(n));
+    if (split.every(Boolean) && new Set(split.map(m => `${m[1]}\u0000${m[3]}`)).size === 1 && !/\d/.test(split[0][3]) && !/\d/.test(split[0][1])) {
+      return `[${split[0][1]}${split.map(m => m[2]).join('/')}${split[0][3]}]`;
+    }
+    return names.map(n => `[${n}]`).join('/');
   }
 
   // Detect an IF/ELSE_IF/ELSE/ENDIF conditional attack block in a sub-action list.
@@ -1246,7 +1425,8 @@ function generateEffectsText(parsed) {
       }
       const p = findParam(cond);
       const STAT_LABELS = { atk:'ATK', def:'DEF', matk:'MAG', mdef:'RES', mnd:'MND', spd:'SPD' };
-      const fmt = s => STAT_LABELS[String(s).toLowerCase()] ?? String(s).toUpperCase();
+      // "atk," when the condition is written with commas ({ a: atk, b: matk }).
+      const fmt = s => { const k = String(s).replace(/[^a-z]/gi, '').toLowerCase(); return STAT_LABELS[k] ?? k.toUpperCase(); };
       if (p?.a && p?.b) return `${fmt(p.a)} and ${fmt(p.b)}`;
     } catch(e) {}
     return null;
@@ -1350,7 +1530,41 @@ function generateEffectsText(parsed) {
   // Find the first top-level IF/ELSE block where BOTH branches contain status (non-attack) sub-actions.
   // Returns { ifStatuses, elseStatuses, conditionArg } or null.
   // Skips blocks that contain any attacks (those are handled by the attack conditional logic).
-  function findConditionalStatus(sas) {
+  // [{ s, target }] for every status a branch grants, or null when it has a nested block.
+  function branchGrants(branch, all = branch) {
+    if (branch.some(sa => (sa.controlTypeRaw ?? 0) !== 0)) return null;
+    return branch.filter(sa => sa.statuses.length > 0 && !sa.levelIncrease?.status && !sa.isStateLevelIncrement)
+      .flatMap(sa => sa.statuses.filter(st => !isLevelTracker(st)).map(st => ({ s: st, target: resolvedTarget(sa, all) })));
+  }
+
+  // Two status blocks that test the same condition and grant the same things to the same
+  // targets in each branch.
+  function sameStatusBlock(a, b) {
+    const ids = sts => sts.map(st => st.id).join(',');
+    const same = (x, y) => ids(x.statuses) === ids(y.statuses) && targetLabel(x.target) === targetLabel(y.target);
+    const norm = arg => String(arg ?? '').replace(/\s+/g, '');
+    return norm(a.conditionArg) === norm(b.conditionArg) && a.hasElse === b.hasElse
+      && same({ statuses: a.ifStatuses, target: a.ifTarget }, { statuses: b.ifStatuses, target: b.ifTarget })
+      && same({ statuses: a.elseStatuses, target: a.elseTarget }, { statuses: b.elseStatuses, target: b.elseTarget })
+      && a.elifs.length === b.elifs.length && a.elifs.every((e, k) => norm(e.conditionArg) === norm(b.elifs[k].conditionArg) && same(e, b.elifs[k]));
+  }
+
+  // Marks a clause in the direct path's list that takes "causes" instead of "grants".
+  const CAUSES = '\u0001';
+
+  // A sub-action's target, with "whoever sub-action N hit" (HIT_ACTOR, processOrder: N)
+  // read as that sub-action's target, as subActionStatuses does.
+  function resolvedTarget(sa, all) {
+    if (!sa) return undefined;
+    if (String(sa.target).includes('HIT_ACTOR') || String(sa.target) === '5001') {
+      const m = String(sa.targetArgRaw ?? '').match(/processOrder\s*:\s*(\d+)/);
+      const ref = m && all.find(r => r.processOrder === parseInt(m[1]));
+      if (ref) return ref.target;
+    }
+    return sa.target;
+  }
+
+  function findConditionalStatus(sas, all = sas) {
     const isAtk = sa => sa.props.hits != null || sa.props.multiplier != null;
     let depth = 0, blockStart = -1, blockElse = -1, blockElifs = [];
     for (let i = 0; i < sas.length; i++) {
@@ -1372,19 +1586,32 @@ function generateEffectsText(parsed) {
           // ELSE IF branches, in order.
           const elifBranches = blockElifs.map((start, k) => sas.slice(start + 1, blockElifs[k + 1] ?? elseIdx));
           if (![...ifBranch, ...elseBranch, ...elifBranches.flat()].some(isAtk)) {
-            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0);
+            // A mode's level increase grants "Increase Status Level": it's listed as the
+            // increase, not as a grant.
+            const statusSA = branch => branch.find(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length > 0 && !sa.levelIncrease?.status);
             const ifSA   = statusSA(ifBranch);
             const elseSA = statusSA(elseBranch);
             if (ifSA || elseSA) {
               const elifs = elifBranches.map((branch, k) => ({
-                statuses: statusSA(branch)?.statuses ?? [], target: statusSA(branch)?.target,
+                statuses: statusSA(branch)?.statuses ?? [], target: resolvedTarget(statusSA(branch), all),
                 conditionArg: sas[blockElifs[k]].conditionArg ?? '',
               }));
               return { ifStatuses: ifSA?.statuses ?? [], elseStatuses: elseSA?.statuses ?? [],
-                       ifTarget: ifSA?.target, elseTarget: elseSA?.target,
+                       ifTarget: resolvedTarget(ifSA, all), elseTarget: resolvedTarget(elseSA, all),
+                       ifTargetArg: ifSA?.targetArgRaw ?? '',
+                       ifBranch,
+                       // Every grant in each branch, when a branch has several (Eiko's AASB:
+                       // one to all allies and one to the user in each).
+                       ifAll: branchGrants(ifBranch, all), elseAll: branchGrants(elseBranch, all),
                        conditionArg: sas[blockStart].conditionArg ?? '',
                        hasElse: !!elseSA, elifs };
             }
+          } else if (blockElse >= 0 && !blockElifs.length && parseStatComparisonLabel(sas[blockStart].conditionArg)) {
+            // A hybrid attack whose physical and magic branches each hold the same status
+            // block (Wedge's Triple Star: after either attack, Imperil Prismatic 30% with
+            // 4+ Thief/XIX/XX allies, 10% otherwise) has that block, once.
+            const inner = findConditionalStatus(ifBranch, all), other = findConditionalStatus(elseBranch, all);
+            if (inner && other && sameStatusBlock(inner, other)) return inner;
           }
           blockStart = -1; blockElse = -1; blockElifs = [];
         }
@@ -1396,14 +1623,177 @@ function generateEffectsText(parsed) {
   // A status block on a party condition, or null: "[X] to the user/[X] to all allies if
   // there are 0-2/3+ Job allies in the party" — ELSE first (fewer allies), IF second —
   // or every tier when there are ELSE IF branches.
-  function partyConditionClause(condStat) {
+  function partyConditionClause(condStat, { goldFirst = false } = {}) {
     if (!parsePartyConditionLabel(condStat.conditionArg)) return null;
     if (condStat.elifs.length) return partyTiers(condStat);
     const list = statuses => statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-    const parts = [];
-    if (list(condStat.elseStatuses)) parts.push(`${list(condStat.elseStatuses)}${targetLabel(condStat.elseTarget)}`);
-    if (list(condStat.ifStatuses))   parts.push(`${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`);
-    return parts.length ? `${parts.join('/')} ${parsePartyConditionLabel(condStat.conditionArg)}` : null;
+    // "If 1+ Witch allies, grant [X] to every Witch ally" only says who gets it (likewise
+    // allies with Attach Ice).
+    const pc = partyConditionParts(condStat.conditionArg);
+    const same = pc.attach ? `allies with ${pc.names.map(n => `Attach ${n}`).join(' or ')}` : `${pc.names.join(' or ')} allies`;
+    if (!condStat.hasElse && pc.count === 1 && (String(condStat.ifTarget) === `ALIVE_BUDDIES_BY_ACTOR_CONDITION:${same}`
+        || sameAllies(condStat.conditionArg, condStat.ifTargetArg))) {
+      // Its branch can itself pick by stat: "[Deadly Strikes +15% (15s)] or [Sorcery +15%
+      // Boost (15s)] to all allies with Attach Wind based on ATK or MAG" (Wedge's Super Raiment).
+      const at = (condStat.ifBranch ?? []).findIndex(sa => (sa.controlTypeRaw ?? 0) === 1);
+      const pick = at >= 0 && statComparisonBlock(condStat.ifBranch, at);
+      if (pick) {
+        const side = branch => branch.filter(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length);
+        const a = side(pick.ifBranch), b = side(pick.elseBranch);
+        const targets = new Set([...a, ...b].map(sa => targetLabel(sa.target)));
+        if (a.length && b.length && targets.size === 1) {
+          const names = sas => joinWithAnd(sas.flatMap(sa => sa.statuses).filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
+          return { text: `${names(b)} or ${names(a)}${[...targets][0]} based on ${statsInOrder(condStat.ifBranch[at].conditionArg)}`, verb: 'Grants' };
+        }
+      }
+      return list(condStat.ifStatuses) ? { text: `${list(condStat.ifStatuses)}${targetLabel(condStat.ifTarget)}`, verb: 'Grants' } : null;
+    }
+    // A weapon skill's IF is its Gold condition, written first as the sheet's weapon skills
+    // do ("grants [X] to user if Level 2+ EnEarth, grants [Y] to user if not"): "grants
+    // [Gold] to the user if there are 3+ V allies in the party, grants [Blue] to the user
+    // if not" (docs/decisions.md "Weapon skill Gold conditions").
+    // Branches with several grants: what both grant is listed as usual (`shared`), and only
+    // the difference is conditional: "grants [Critical Chance +50% (25s)] and [High Quick
+    // Cast 2] to all allies, grants [Soul Break Gauge +250] to the user/[100% Critical (25s)]
+    // to all allies if there are 0-3/4+ IX allies in the party".
+    const multi = condStat.ifAll && condStat.elseAll && condStat.hasElse
+      && new Set([...condStat.ifAll, ...condStat.elseAll].map(g => String(g.target))).size > 1;
+    if (multi) {
+      const key = g => `${g.s.id}|${targetLabel(g.target)}`;
+      const inElse = new Set(condStat.elseAll.map(key)), inIf = new Set(condStat.ifAll.map(key));
+      const shared = condStat.ifAll.filter(g => inElse.has(key(g)));
+      const only = (gs, other) => gs.filter(g => !other.has(key(g)));
+      const part = gs => {
+        const byT = new Map();
+        for (const g of gs) { const t = targetLabel(g.target); if (!byT.has(t)) byT.set(t, []); byT.get(t).push(g.s); }
+        return [...byT].map(([t, sts]) => ({ statuses: sts, target: gs.find(g => targetLabel(g.target) === t).target }));
+      };
+      const ifP = part(only(condStat.ifAll, inElse)), elseP = part(only(condStat.elseAll, inIf));
+      if (ifP.length <= 1 && elseP.length <= 1 && (ifP.length || elseP.length)) {
+        const ifOnly = { ...condStat, ifStatuses: ifP[0]?.statuses ?? [], ifTarget: ifP[0]?.target, elseStatuses: elseP[0]?.statuses ?? [], elseTarget: elseP[0]?.target, hasElse: elseP.length > 0, ifAll: null, elseAll: null };
+        const clause = partyConditionClause(ifOnly, { goldFirst });
+        return clause && { ...clause, shared };
+      }
+    }
+    const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
+    if (goldFirst && list(condStat.ifStatuses) && !`${ifT}${elseT}`.includes('enem')) {
+      const gold = `${list(condStat.ifStatuses)}${ifT} if there are ${pc.count}+ ${pc.allies}`;
+      return { text: list(condStat.elseStatuses) ? `${gold}, grants ${list(condStat.elseStatuses)}${elseT} if not` : gold, verb: 'Grants' };
+    }
+    const tiers = [{ statuses: condStat.elseStatuses, target: condStat.elseTarget }, { statuses: condStat.ifStatuses, target: condStat.ifTarget }]
+      .filter(t => list(t.statuses));
+    if (!tiers.length) return null;
+    const { text, verb } = tierList(tiers);
+    return { text: `${text} ${parsePartyConditionLabel(condStat.conditionArg)}`, verb };
+  }
+
+  // IF the user has Attach Dark, grant [X] to allies with Attach Dark; ELSE IF an ally has
+  // Attach Ice, grant [X] to allies with Attach Ice (Edea's Super Raiment). The user's
+  // Infusion decides, in the sheet's "if the user has Attach Fire, … otherwise" form:
+  // "[X] to all allies with Attach Dark if the user has Attach Dark, to all allies with
+  // Attach Ice otherwise". The ELSE IF's own check (an ally has Attach Ice) only says who
+  // gets it, so it isn't shown. Null for any other block.
+  function infusionAlliesClause(condStat) {
+    if (condStat.elifs.length !== 1 || condStat.hasElse) return null;
+    const [first, second] = [{ statuses: condStat.ifStatuses, target: condStat.ifTarget, conditionArg: condStat.conditionArg }, condStat.elifs[0]];
+    const prefix = 'ALIVE_BUDDIES_BY_ACTOR_CONDITION:allies with ';
+    const ids = b => b.statuses.filter(st => !isLevelTracker(st)).map(st => st.id).join(',');
+    if (!ids(first) || ids(second) !== ids(first)) return null;
+    if ([first, second].some(b => !String(b.target ?? '').startsWith(prefix))) return null;
+    // The IF checks the user's Infusion; the ELSE IF counts allies with an Infusion.
+    const userIds = /^\s*actorCondition/.test(first.conditionArg ?? '')
+      && (first.conditionArg.match(/hasAnyAttachElementByElementIds\s*:\s*\[([^\]]+)\]/) ?? first.conditionArg.match(/hasAttachElementByElementId\s*:\s*(\d+)/));
+    if (!userIds || !partyConditionParts(second.conditionArg)?.attach) return null;
+    const userHas = (userIds[1].match(/\d+/g) ?? []).map(id => DB.elementTypes[Number(id)] ? `Attach ${fmtElement(DB.elementTypes[Number(id)])}` : `Attach #${id}`).join(' or ');
+    const names = joinWithAnd(first.statuses.filter(st => !isLevelTracker(st)).map(st => `[${statusName(st)}]`));
+    return { text: `${names}${targetLabel(first.target)} if the user has ${userHas},${targetLabel(second.target)} otherwise`, verb: 'Grants' };
+  }
+
+  // The tiers of a party-condition block, "[A]/[B]/[C] to all allies": one target at the
+  // end when they share it (as in 102 sheet rows, against 25 that repeat it), else each
+  // keeps its own. Enemy tiers are caused: { text: "[A]/[B] on enemies", verb: 'Causes' }.
+  function tierList(tiers) {
+    const list = t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
+    const labels = [...new Set(tiers.filter(list).map(t => targetLabel(t.target)))];
+    const enemy = labels.length > 0 && labels.every(l => l.includes('enem'));
+    const on = l => enemy ? l.replace(' to ', ' on ') : l;
+    const text = labels.length === 1 ? tiers.map(list).join('/') + on(labels[0])
+      : tiers.map(t => list(t) + on(targetLabel(t.target))).join('/');
+    return { text, verb: enemy ? 'Causes' : 'Grants' };
+  }
+
+  // True when a partyCondition counts the same allies the block grants to: its
+  // buddyCondition is the target's actorCondition. Compared as game data, since the
+  // count's label leaves parts out ("or without an Infusion", Cidolfus's soul drive).
+  function sameAllies(conditionArg, targetArg) {
+    const body = (text, key) => {
+      const at = String(text ?? '').search(new RegExp(`\\b${key}\\s*:\\s*\\{`));
+      if (at < 0) return null;
+      const open = String(text).indexOf('{', at);
+      let depth = 0;
+      for (let i = open; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}' && --depth === 0) return text.slice(open, i + 1).replace(/\s+/g, '').replace(/,(?=[}\]])/g, '');
+      }
+      return null;
+    };
+    const buddy = body(conditionArg, 'buddyCondition');
+    return buddy !== null && buddy === body(targetArg, 'actorCondition');
+  }
+
+  // subActionStatuses, except that each top-level IF/ELSE on a stat comparison
+  // (isAParamLessThanBParam) becomes one entry in its place: { _text: "[B] or [A]" } for
+  // what only one branch grants (ELSE branch first), with what both grant listed as usual. A block whose
+  // branch-only grants go to different targets is listed as before.
+  function statusesWithEither(ab) {
+    const sas = ab.subActions;
+    const skip = new Set(), inserts = new Map();
+    // A branch's statuses, read against the whole ability (targets can point at another
+    // sub-action), leaving out any IF nested in it.
+    const branchStatuses = branch => {
+      const keep = new Set(branch.filter(sa => !subActionsInBlocks(branch).has(sa)));
+      return subActionStatuses(ab, new Set(sas.filter(sa => !keep.has(sa)))).filter(s => !isLevelTracker(s));
+    };
+    for (let i = 0; i < sas.length; i++) {
+      const block = (sas[i].controlTypeRaw ?? 0) === 1 && statComparisonBlock(sas, i);
+      if (!block) continue;
+      const a = branchStatuses(block.ifBranch), b = branchStatuses(block.elseBranch);
+      const inA = new Set(a.map(s => s.id)), inB = new Set(b.map(s => s.id));
+      const both = a.filter(s => inB.has(s.id)), onlyA = a.filter(s => !inB.has(s.id)), onlyB = b.filter(s => !inA.has(s.id));
+      const labels = new Set([...onlyA, ...onlyB].map(s => targetLabel(s._target)));
+      if (onlyA.length && onlyB.length && labels.size === 1) {
+        const list = statuses => joinWithAnd(statuses.map(s => `[${statusName(s)}]`));
+        for (const sa of sas.slice(i, block.end + 1)) skip.add(sa);
+        // The ELSE branch first: "[ATK +50% (25s)] or [MAG +50% (25s)]" (10 sheet rows vs 3).
+        inserts.set(sas[i], [{ id: `_either_${i}`, _text: `${list(onlyB)} or ${list(onlyA)}`, _basedOn: statsInOrder(sas[i].conditionArg),
+          _target: onlyA[0]._target, _partyCondition: null }, ...both]);
+      }
+      i = block.end;
+    }
+    return subActionStatuses(ab, skip, inserts);
+  }
+
+  // "ATK or MAG" for isAParamLessThanBParam { a: atk, b: matk }: the IF branch is the one
+  // where b is higher, so with the ELSE branch first the stats read a, then b.
+  function statsInOrder(condArgStr) {
+    return parseStatComparisonLabel(condArgStr)?.replace(' and ', ' or ') ?? null;
+  }
+
+  // The top-level IF at sas[start], when it compares two stats and has an ELSE (and no
+  // ELSE IF): { ifBranch, elseBranch, end }, or null.
+  function statComparisonBlock(sas, start) {
+    if (!parseStatComparisonLabel(sas[start].conditionArg)) return null;
+    let depth = 0, elseAt = -1;
+    for (let i = start; i < sas.length; i++) {
+      const raw = sas[i].controlTypeRaw ?? 0;
+      if (raw === 1) depth++;
+      else if (raw === 2 && depth === 1) return null;
+      else if (raw === 3 && depth === 1) elseAt = i;
+      else if (raw === 4 && --depth === 0) {
+        return elseAt < 0 ? null : { ifBranch: sas.slice(start + 1, elseAt), elseBranch: sas.slice(elseAt + 1, i), end: i };
+      }
+    }
+    return null;
   }
 
   // Sub-actions inside IF/ELSE blocks (and the block markers themselves).
@@ -1439,8 +1829,8 @@ function generateEffectsText(parsed) {
       if (next == null) return `${t.from}+`;
       return next - 1 === t.from ? `${t.from}` : `${t.from}-${next - 1}`;
     });
-    const parts = tiers.map(t => t.statuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ') + targetLabel(t.target));
-    return `${parts.join('/')} if there are ${labels.join('/')} ${who(branches[0])}`;
+    const { text, verb } = tierList(tiers);
+    return { text: `${text} if there are ${labels.join('/')} ${who(branches[0])}`, verb };
   }
 
   const nestedCondAtk = findNestedConditionalAtk(exec.subActions);
@@ -1506,7 +1896,19 @@ function generateEffectsText(parsed) {
     const ifElems   = ifAtk?.elements  ?? [];
     const elseElems = elseAtk?.elements ?? [];
     const elemsDiffer = JSON.stringify([...ifElems].sort()) !== JSON.stringify([...elseElems].sort());
-    if (enLabel && sameFactors && elemsDiffer) {
+    // An attack that scales with the triggering ability's rank lists every rank's
+    // multiplier (and cap, when they differ): "Six single attacks (0.24/0.37/0.45/0.63/0.76
+    // each) at rank 1/2/3/4/5 of the triggering ability".
+    const rankChain = rankOf(conditionArg) != null
+      ? rankChains(exec.subActions).find(c => exec.subActions[c.start].conditionArg === conditionArg) : null;
+    const rankAtks = rankChain?.tiers.map(t => t.sas.find(sa => sa.props.hits != null || sa.props.multiplier != null));
+    const rankPerHit = rankAtks?.every(Boolean) && new Set(rankAtks.map(a => a.props.hits ?? 1)).size === 1
+      ? rankAtks.map(a => resolvePerHit(a, exec)) : null;
+    if (rankPerHit?.every(f => f != null)) {
+      const caps = rankAtks.map(atkCap);
+      const capStr = new Set(caps).size > 1 ? ` capped at ${caps.join('/')}` : (caps[0] !== 9999 ? ` capped at ${caps[0]}` : '');
+      segs.push(`${hitsWord(hits)} ${atkWord}${perHitText(hits, rankPerHit.map(f => f.toFixed(2)).join('/'))}${capStr} ${rankLabel(rankChain.tiers)}${hpStr}`);
+    } else if (enLabel && sameFactors && elemsDiffer) {
       // "One Fire/NE or Ice/NE or Lightning/NE single attack (34.60 each) capped at 199,999 based on EnFire or EnIce"
       const fmtEL      = sa => sa?.elements?.map(fmtElement).filter(Boolean).join('/') || 'NE';
       const allBranches = [ifAtk, ...elseIfAtks.map(e => e.atk), elseAtk].filter(Boolean);
@@ -1540,22 +1942,77 @@ function generateEffectsText(parsed) {
     }
   }
 
+  // ── 1a. Chain: after the attack (LBC), or first when there is none (CSB) ──
+  {
+    const chain = chainClause(parsed.chain);
+    if (chain) segs.push(chain);
+  }
+
   // ── 1b. HEAL_HP sub-actions ──
   {
     const healSAs = exec.subActions.filter(sa => sa.props.healFactor != null);
     const effectiveHealSAs = healSAs.length > 0
       ? healSAs
       : parsed.subActions.filter(sa => sa.props.healFactor != null);
+    // "Restores HP (105) capped at 19999, removes KO [Raise: 100%] capped at 19999", as the
+    // sheet has it (docs/decisions.md "Heals").
+    // Heals that scale with the triggering ability's rank are one heal: "Restores HP
+    // (10/15/25/35/45) at rank 1/2/3/4/5 of the triggering ability". A chain repeated in
+    // both branches of another condition (Aria's Tears of the Priestess) is written once.
+    const healSource = healSAs.length > 0 ? exec.subActions : parsed.subActions;
+    const rankHealed = new Set(), rankHealTexts = new Set();
+    for (const chain of rankChains(healSource)) {
+      const heals = chain.tiers.map(t => t.sas.filter(sa => sa.props.healFactor != null));
+      if (!heals.every(h => h.length === 1) || heals.some(h => h[0].props.reviveRate || h[0].props.damageCapBoost)) continue;
+      heals.forEach(h => rankHealed.add(h[0]));
+      rankHealTexts.add(`Restores HP (${heals.map(h => h[0].props.healFactor).join('/')}) ${rankLabel(chain.tiers)}`);
+    }
+    for (const text of rankHealTexts) segs.push(text);
     for (const hsa of effectiveHealSAs) {
-      segs.push(`Restores HP (${hsa.props.healFactor})`);
+      if (rankHealed.has(hsa)) continue;
+      const cap = hsa.props.damageCapBoost ? ` capped at ${9999 + hsa.props.damageCapBoost}` : '';
+      segs.push(`Restores HP (${hsa.props.healFactor})${cap}`);
+      if (hsa.props.reviveRate) segs.push(`removes KO [Raise: ${hsa.props.reviveRate}%]${cap}`);
     }
   }
 
   // ── 1c. Level increases: "increases Hero Boost level by 1" (Master Mode Star Strikes) ──
+  // "increases Devotion Mode: Selphie level by 1 to all allies" (docs/decisions.md), after
+  // the grants, as the sheet lists it. A soul break with two Learning Modes raises one or
+  // the other by what the user has: "increases [A] or [B] level by 1 to all allies if the
+  // user has/does not have Realm Synergy" (or Job Synergy, or a status).
+  const userHas = cond => {
+    if (!/^\s*actorCondition/.test(cond)) return null;
+    if (/hasSeriesStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Realm Synergy';
+    if (/hasJobStatusBonusBuddy\s*:\s*true/.test(cond)) return 'Job Synergy';
+    const id = /^\s*actorCondition\s*:\s*\{\s*hasSaId\s*:\s*(\d+)\s*,?\s*\}\s*$/.exec(cond)?.[1];
+    return id ? `[${statusName(lookupStatus(Number(id)))}]` : null;
+  };
+  const modeLevels = [];
+  const blocks = [];
   for (const sa of exec.subActions) {
+    const raw = sa.controlTypeRaw ?? 0;
+    if (raw === 1) { blocks.push({ cond: sa.conditionArg ?? '', inElse: false }); continue; }
+    if (raw === 2 && blocks.length) { blocks[blocks.length - 1] = { cond: sa.conditionArg ?? '', inElse: false }; continue; }
+    if (raw === 3 && blocks.length) { blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], inElse: true }; continue; }
+    if (raw === 4) { blocks.pop(); continue; }
     const level = sa.levelIncrease;
     const name = level && LEVEL_KEY_NAMES[level.key];
     if (name) segs.push(`increases ${name} level by ${level.by}`);
+    else if (level?.status) {
+      const block = blocks.find(b => userHas(b.cond));
+      modeLevels.push({ name: statusName(level.status), by: level.by, has: block && userHas(block.cond), inElse: block?.inElse });
+    }
+  }
+  const modeLevelSegs = modeLevels.filter(m => !m.has).map(m => `increases ${m.name} level by ${m.by} to all allies`);
+  for (const has of new Set(modeLevels.map(m => m.has).filter(Boolean))) {
+    const yes = modeLevels.filter(m => m.has === has && !m.inElse), no = modeLevels.filter(m => m.has === has && m.inElse);
+    if (yes.length === 1 && no.length === 1 && yes[0].by === no[0].by) {
+      modeLevelSegs.push(`increases ${yes[0].name} or ${no[0].name} level by ${yes[0].by} to all allies if the user has/does not have ${has}`);
+    } else {
+      for (const m of yes) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user has ${has}`);
+      for (const m of no) modeLevelSegs.push(`increases ${m.name} level by ${m.by} to all allies if the user does not have ${has}`);
+    }
   }
 
   // ── 2. Activation statuses ──
@@ -1579,10 +2036,22 @@ function generateEffectsText(parsed) {
     // A party-condition IF/ELSE in the wrapped ability is one conditional clause, not a
     // list of everything in both branches.
     const wrappedCond = findConditionalStatus(wrapped.subActions);
-    const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond) : null;
+    const wrappedPartyClause = wrappedCond ? partyConditionClause(wrappedCond, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' }) : null;
+    // A stat comparison with an ELSE grants one branch or the other: "[ATK +50% (25s)] or
+    // [MAG +50% (25s)] to all allies based on ATK or MAG" (ELSE branch first), in the IF block's place among the
+    // grants, also when the branches hold a hybrid attack (docs/decisions.md "Either/or grants").
+    // The party-condition clause goes in its IF block's place, as the sheet lists it
+    // ("Activates Fire Chain …, causes [Imperil Fire 10% (5s)]/… if there are 0-1/2-3/4+
+    // allies with Attach Fire, grants [ATK +50% (25s)] to all allies").
+    const partyIf = wrappedPartyClause && wrapped.subActions.find(sa => (sa.controlTypeRaw ?? 0) === 1 && (sa.conditionArg ?? '') === (wrappedCond.conditionArg ?? ''));
+    const wrappedStatuses = wrappedPartyClause
+      ? subActionStatuses(wrapped, subActionsInBlocks(wrapped.subActions),
+          new Map([[partyIf, [...(wrappedPartyClause.shared ?? []).map(({ s, target }) => ({ ...s, _target: target, _partyCondition: null })),
+            { id: '_party', _clause: wrappedPartyClause, _target: null, _partyCondition: null }]]]))
+      : statusesWithEither(wrapped);
     const activationStatuses = [
       ...parsed.statuses.map(s => ({ ...s, _target: s.target ?? 'default' })),
-      ...subActionStatuses(wrapped, wrappedPartyClause ? subActionsInBlocks(wrapped.subActions) : undefined),
+      ...wrappedStatuses,
       ...attachLvStatuses,
     ].filter(s => !isLevelTracker(s));
     const seenIds = new Set();
@@ -1595,13 +2064,17 @@ function generateEffectsText(parsed) {
       const unconditional = uniqueStatuses.filter(s => !s._partyCondition);
       const conditional   = uniqueStatuses.filter(s =>  s._partyCondition);
 
+      // An either/or grant is a clause of its own, so its "based on" covers only it.
       const byTargetUnc = new Map();
       for (const s of unconditional) {
-        const tLabel = targetLabel(s._target);
-        if (!byTargetUnc.has(tLabel)) byTargetUnc.set(tLabel, []);
-        byTargetUnc.get(tLabel).push(s);
+        const key = s._basedOn || s._clause ? s.id : targetLabel(s._target);
+        if (!byTargetUnc.has(key)) byTargetUnc.set(key, []);
+        byTargetUnc.get(key).push(s);
       }
-      for (const [tLabel, group] of byTargetUnc) {
+      for (const group of byTargetUnc.values()) {
+        const tLabel = targetLabel(group[0]._target);
+        if (group[0]._basedOn) { segs.push(`Grants ${group[0]._text}${tLabel} based on ${group[0]._basedOn}`); continue; }
+        if (group[0]._clause) { segs.push(`${group[0]._clause.verb} ${group[0]._clause.text}`); continue; }
         const statusStr = joinWithAnd(group.map(s => `[${statusName(s)}]`));
         if (tLabel.includes('enem')) {
           segs.push(`Causes ${statusStr}${tLabel.replace(' to ', ' on ')}`);
@@ -1632,7 +2105,6 @@ function generateEffectsText(parsed) {
         if (allyParts.length)  segs.push(`Grants ${allyParts.join('/')}${condSuffix}`);
       }
     }
-    if (wrappedPartyClause) segs.push(`Grants ${wrappedPartyClause}`);
   } else {
     // Direct ability (exec = parsed): depth-aware collection with conditional status support.
     // Collect unconditional statuses at depth 0, grouped by target.
@@ -1656,19 +2128,53 @@ function generateEffectsText(parsed) {
       }
     }
     // Conditional status block: IF(/ELSE) where branches have status sub-actions.
-    const condStat = findConditionalStatus(exec.subActions);
-    const clauses = [];
+    let condStat = findConditionalStatus(exec.subActions);
+    // Grants that scale with the triggering ability's rank: "Grants [HP Stock
+    // (500/1000/1500/2000/3000)] at rank 1/2/3/4/5 of the triggering ability". What every
+    // rank grants is listed as usual. The sheet leaves out "to all allies" on these (5 rows
+    // vs 1; docs/decisions.md "Rank of the triggering ability").
+    let rankClause = null;
+    if (condStat && rankOf(condStat.conditionArg) != null) {
+      const chain = rankChains(exec.subActions).find(c => exec.subActions[c.start].conditionArg === condStat.conditionArg);
+      const grants = chain?.tiers.map(t => t.sas.filter(sa => (sa.controlTypeRaw ?? 0) === 0 && sa.statuses.length && !sa.levelIncrease?.status)
+        .flatMap(sa => sa.statuses.filter(s => !isLevelTracker(s)).map(s => ({ s, target: resolvedTarget(sa, exec.subActions) }))));
+      if (grants?.every(g => g.length)) {
+        const key = g => `${g.s.id}|${targetLabel(g.target)}`;
+        const everyRank = grants[0].filter(g => grants.every(gs => gs.some(x => key(x) === key(g))));
+        const differ = grants.map(gs => gs.filter(g => !everyRank.some(x => key(x) === key(g))));
+        const targets = new Set(differ.flat().map(g => targetLabel(g.target)));
+        if (differ.every(d => d.length === 1) && targets.size === 1) {
+          const t = [...targets][0];
+          rankClause = `${rankNames(differ.map(d => statusName(d[0].s)))}${t === ' to all allies' ? '' : t} ${rankLabel(chain.tiers)}`;
+          for (const { s, target } of everyRank) {
+            const tLabel = targetLabel(target);
+            if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
+            if (!byTarget.get(tLabel).some(x => x.id === s.id)) byTarget.get(tLabel).push(s);
+          }
+          condStat = null;
+        }
+      }
+    }
+    const partyClause = condStat && (infusionAlliesClause(condStat) ?? partyConditionClause(condStat, { goldFirst: DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE' }));
+    for (const { s, target } of partyClause?.shared ?? []) {
+      const tLabel = targetLabel(target);
+      if (!byTarget.has(tLabel)) byTarget.set(tLabel, []);
+      if (!byTarget.get(tLabel).some(x => x.id === s.id)) byTarget.get(tLabel).push(s);
+    }
+    const clauses = [], causes = [];
     for (const [tLabel, statuses] of byTarget) {
       if (statuses.length > 0) clauses.push(joinWithAnd(statuses.map(s => `[${statusName(s)}]`)) + tLabel);
     }
+    if (rankClause) clauses.unshift(rankClause);
     if (condStat) {
       const statLabel      = parseStatComparisonLabel(condStat.conditionArg)
                              ?? parseEnElementLabel(condStat.conditionArg)?.label;
       const elemBuffLabel  = parseElementAtkAttributeLvLabel(condStat.conditionArg);
       const ifStr      = condStat.ifStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
-      const partyClause = partyConditionClause(condStat);
-      if (partyClause) {
-        clauses.push(partyClause);
+      if (partyClause?.verb === 'Causes') {
+        causes.push(partyClause.text);
+      } else if (partyClause) {
+        clauses.push(partyClause.text);
       } else if (condStat.hasElse) {
         const tLabel  = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const elseStr = condStat.elseStatuses.filter(s => !isLevelTracker(s)).map(s => `[${statusName(s)}]`).join(', ');
@@ -1679,15 +2185,28 @@ function generateEffectsText(parsed) {
           if (elseStr) parts.push(`${elseStr}${tLabel} if not`);
           if (parts.length) clauses.push(parts.join(', grants '));
         } else {
-          // Two-sided: "grants [X] or [Y] to self based on condition"
-          const parts = [ifStr, elseStr].filter(Boolean);
-          if (parts.length) clauses.push(parts.join(' or ') + tLabel + (statLabel ? ` based on ${statLabel}` : ''));
+          // Two-sided: "grants [Y] or [X] to the user". On a stat comparison the ELSE branch
+          // comes first, then "based on ATK or MAG", as for a wrapped ability's
+          // (docs/decisions.md "Either/or grants").
+          const stat = parseStatComparisonLabel(condStat.conditionArg);
+          const ifT = targetLabel(condStat.ifTarget), elseT = targetLabel(condStat.elseTarget);
+          if (stat && ifStr && elseStr && ifT !== elseT) {
+            // Branches to different targets each keep theirs: "[Y] to all allies or [X] to the user".
+            clauses.push(`${elseStr}${elseT} or ${ifStr}${ifT} based on ${statsInOrder(condStat.conditionArg)}`);
+          } else {
+            const parts = (stat ? [elseStr, ifStr] : [ifStr, elseStr]).filter(Boolean);
+            if (parts.length) clauses.push(parts.join(' or ') + tLabel + (stat ? ` based on ${statsInOrder(condStat.conditionArg)}` : statLabel ? ` based on ${statLabel}` : ''));
+          }
         }
       } else {
         // One-sided: "grants [X] to self if condition" or "after N uses" for stateLevel.equal
         const tLabel   = targetLabel(condStat.ifTarget) || targetLabel(condStat.elseTarget);
         const useCount = parseStateLevelEqualCondition(condStat.conditionArg);
-        if (ifStr) clauses.push(ifStr + tLabel + (useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : ''));
+        const when = useCount != null ? ` after ${useCount} uses` : statLabel ? ` if ${statLabel}` : '';
+        // A status on enemies is caused: "causes [Blind] on enemy".
+        // A status on enemies is caused, in its place among the clauses: "causes [Blind] on enemy".
+        if (ifStr && tLabel.includes('enem')) clauses.push(`${CAUSES}${ifStr}${tLabel.replace(' to ', ' on ')}${when}`);
+        else if (ifStr) clauses.push(ifStr + tLabel + when);
         // TACTICAL_AWAKE weapon skill: if the condition is an element infusion check without ELSE,
         // battle.js implies the else branch grants "Attach <elements> <level> with Stacking" to user.
         if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'TACTICAL_AWAKE') {
@@ -1704,7 +2223,9 @@ function generateEffectsText(parsed) {
         }
       }
     }
-    if (clauses.length > 0) segs.push('Grants ' + clauses.join(', grants '));
+    // Clauses marked CAUSES take "causes" instead of "grants".
+    if (clauses.length > 0) segs.push(clauses.map((c, i) => c.startsWith(CAUSES) ? `${i ? 'causes' : 'Causes'} ${c.slice(1)}` : `${i ? 'grants' : 'Grants'} ${c}`).join(', '));
+    for (const c of causes) segs.push(`Causes ${c}`);
   }
 
   // Pre-compute elements handled by section 3b (INFLICT_SA with increaseLv) so sections 3 and 3a
@@ -1792,12 +2313,43 @@ function generateEffectsText(parsed) {
   // ── 5. Commands — parsed but not included in SB tab effects ──
   // (Commands belong in their own tab; excluded here intentionally.)
 
+  segs.push(...modeLevelSegs);
+
   // One sentence, as in the sheet: "…capped at 19999, grants [X] to the user" — later
   // segments start lower-case when they open with a verb, and there is no final period
   // (docs/decisions.md "Effects punctuation").
-  const SEGMENT_VERBS = /^(Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
+  const SEGMENT_VERBS = /^(Activates|Grants|Causes|Removes|Heals|Restores|Damages|Dispels|Cures|Revives|Sets|Inflicts|Deals|Increases|Reduces|Immediately|Chases|Resets|Fills|Recovers|Reveals)\b/;
   const sentence = segs.map((seg, i) => (i > 0 && SEGMENT_VERBS.test(seg) ? seg.charAt(0).toLowerCase() + seg.slice(1) : seg));
-  return segs.length ? sentence.join(', ') : '(No effects detected)';
+  return segs.length ? collapsePrismatic(sentence.join(', ')) : '(No effects detected)';
+}
+
+// The same status for all nine elements is one "Prismatic" status, as the sheet writes it:
+// "[Imperil Prismatic 10% (15s)]" for [Imperil Fire 10% (15s)], …, [Imperil Poison 10% (15s)]
+// (docs/decisions.md "Prismatic").
+const PRISMATIC_ELEMENTS = ['Fire', 'Ice', 'Lightning', 'Earth', 'Wind', 'Water', 'Holy', 'Dark', 'Poison'];
+function collapsePrismatic(text) {
+  const elementRe = new RegExp(`\\b(${PRISMATIC_ELEMENTS.join('|')})\\b`);
+  return text.replace(/\[[^\]]+\](?:(?:, | and )\[[^\]]+\])+/g, list => {
+    const items = list.slice(1, -1).split(/\](?:, | and )\[/);
+    const byTemplate = new Map();
+    for (const item of items) {
+      const m = elementRe.exec(item);
+      if (!m) continue;
+      const template = item.replace(elementRe, '%E%');
+      (byTemplate.get(template) ?? byTemplate.set(template, new Set()).get(template)).add(m[1]);
+    }
+    const full = [...byTemplate].filter(([, els]) => els.size === PRISMATIC_ELEMENTS.length).map(([t]) => t);
+    if (!full.length) return list;
+    const out = [];
+    for (const item of items) {
+      const template = elementRe.test(item) ? item.replace(elementRe, '%E%') : null;
+      if (template && full.includes(template)) {
+        const name = template.replace('%E%', 'Prismatic');
+        if (!out.includes(name)) out.push(name);
+      } else out.push(item);
+    }
+    return out.length < 2 ? `[${out[0]}]` : `[${out.slice(0, -1).join('], [')}] and [${out[out.length - 1]}]`;
+  });
 }
 
 // ─── Soul break lookup ────────────────────────────────────────────────────────
@@ -1904,7 +2456,7 @@ const SECOND_ROWS = {
 };
 
 // Sub-ability labels that mean "this sub-ability is what actually executes".
-const WRAPPED_LABELS = new Set(['arg1', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
+const WRAPPED_LABELS = new Set(['arg1', '_getFirstAbilityId', 'wrappedAbilityId', 'abilityId', 'defaultAbility', 'defaultAbilityId', 'burstAbilityArgs', 'crystalForceAbilityId']);
 
 // The ability whose sub-actions do the work: the wrapped sub-ability, or the ability itself.
 function execAbility(parsed) {
@@ -1950,7 +2502,7 @@ function typeAndFormula(parsed) {
 
 // Who a SUB_ACTION_TARGET_TYPE name (or similar) points at.
 function targetKind(targetStr) {
-  const t       = String(targetStr ?? '').toUpperCase();
+  const t       = String(targetStr ?? '').replace(/:.*$/, '').toUpperCase();
   const isEnemy = t.includes('OPPONENT') || t.includes('ENEMY');
   const isAlly  = t.includes('PARTY') || t.includes('ALLY') || t.includes('FRIEND') || t.includes('COLLEAGUE');
   const isSelf  = !isEnemy && !isAlly && (t.startsWith('EXECUTER') || t === 'SELF' || t.startsWith('SELF_') || t.endsWith('_SELF'));
@@ -2059,6 +2611,12 @@ function combatColumns(parsed) {
     const damage = multiplier ? damageFormula(parsed) : null;
     Object.assign(columns, damage === 'Hybrid' ? { formula: 'Hybrid', multiplier: '-' }
                          : damage ? { formula: damage } : { formula: '', multiplier: '' });
+  }
+  // A heal with no attack has no Formula: every heal-only Soul Breaks row (238) and 35 of
+  // 42 Other rows leave it blank (docs/decisions.md "Rank of the triggering ability").
+  if (columns.formula && !attackSubActions(parsed).length) {
+    const exec = execAbility(parsed);
+    if ([...parsed.subActions, ...exec.subActions].some(sa => sa.props.healFactor != null)) columns.formula = '';
   }
   return columns;
 }
@@ -2309,6 +2867,54 @@ function renderExtraSheetPreview(parsed, ekParent, genEffects) {
   });
 }
 
+// ─── Synchro sheet column preview (a Synchro soul break's commands) ──────────
+// The condition's name is the Synchro tab's own name for its ID ("17" → "Darkness"),
+// or the element's; any other ID gets a placeholder.
+function synchroConditionName(conditionId) {
+  if (!conditionId) return '';
+  if (DB.synchroConditionNames[conditionId]) return DB.synchroConditionNames[conditionId];
+  const element = DB.elementTypes[Number(conditionId)];
+  return element ? fmtElement(element) : `<synchro condition ${conditionId}>`;
+}
+
+function renderSynchroSheetPreview(parsed, parent, genEffects) {
+  const id = parsed.abilityId;
+  const { type, formula, multiplier, target, autoTarget, element, counter } = combatColumns(parsed);
+  const synchroRow = DB.synchroMap[id] ?? null;
+  const imgFormula = `=IMAGE("https://dff.sp.mbga.jp/dff/static/lang/image/ability/${id}/${id}_128.png")`;
+
+  const colValues = {
+    'Character':            { val: parent.character },
+    'Source':               { val: parent.sbName },
+    'SB Ver':               { val: parent.sbVer || 'SASB' },
+    'Name':                 { val: synchroRow?.['Name'] || '', src: !!synchroRow?.['Name'] },
+    'Synchro Ability Slot': { val: String(parent.slot) },
+    'Synchro Condition':    { val: synchroConditionName(parent.conditionId) },
+    'Type':                 { val: type },
+    'Target':               { val: target },
+    'Formula':              { val: formula },
+    'Multiplier':           { val: multiplier },
+    'Element':              { val: element },
+    'Time':                 { val: parsed.castTime ?? '' },
+    'Effects':              { val: genEffects },
+    'Counter':              { val: counter },
+    'Auto Target':          { val: autoTarget },
+    'SB':                   { val: String(parsed.sbCharge || '') },
+    'School':               { val: schoolName(parsed.category) },
+    'Name (JP)':            { val: parsed.name },
+    'ID':                   { val: String(id) },
+    'Synchro Condition ID': { val: parent.conditionId },
+    'GL':                   { val: '' },
+    '✓':                    { val: '' },
+  };
+
+  const COLUMN_ORDER = ['Character', 'Source', 'SB Ver', 'Img', 'Name', 'Synchro Ability Slot', 'Synchro Condition', 'Type', 'Target', 'Formula', 'Multiplier', 'Element', 'Time', 'Effects', 'Counter', 'Auto Target', 'SB', 'School', 'Name (JP)', 'ID', 'Synchro Condition ID', 'GL', '✓'];
+  return renderSheetPreview({
+    title: 'Synchro tab columns', idPrefix: 'syp', id,
+    columns: COLUMN_ORDER.map(col => col === 'Img' ? { col, val: imgFormula } : { col, ...(colValues[col] ?? { val: '' }) }),
+  });
+}
+
 // ─── Follow-Up Ability: Other tab column preview ─────────────────────────────
 function renderFollowUpSheetPreview(parsed, genEffects, source = '') {
 
@@ -2545,6 +3151,12 @@ function renderAbility(parsed, depth, ctx) {
     html += renderFollowUpSheetPreview(parsed, genText, busterOtherSource);
   }
 
+  // Synchro tab column preview — for a Synchro soul break's commands
+  const synchroParent = relations.synchroParent[parseInt(parsed.abilityId)];
+  if (synchroParent) {
+    html += renderSynchroSheetPreview(parsed, synchroParent, genText);
+  }
+
   // Extra tab column preview — for EXTRA_ZETSUGI extra kiwami abilities
   const ekParent = relations.extraKiwamiParent[parseInt(parsed.abilityId)];
   if (ekParent) {
@@ -2592,6 +3204,7 @@ function newRelations() {
     extraKiwamiParent: {}, // EXTRA_ZETSUGI extra kiwami ability IDs (arg3/5/7/9/11) → { character, realm, sbName }
     extraCrushSource:  {}, // EXTRA_ZETSUGI ability crush ID (arg2) → source label (parent SB name)
     masterFinish:      {}, // MASB masterFinishAbilityId → source label ("Master Mode: <character>")
+    synchroParent:     {}, // SYNCHRO command IDs (arg2/arg3) → { character, sbName, sbVer, slot, conditionId }
   };
 }
 
@@ -2680,6 +3293,33 @@ function recordRelations(parsed, ability, ctx) {
     const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
       .map(st => st.commonName ?? '').find(n => n.startsWith('Master Mode: ')) ?? '';
     relations.masterFinish[masterFinish.abilityId] = modeName;
+  }
+
+  // Soul drive: what its Soul Drive Mode casts after a Soul Break (arg2) is written into the
+  // mode's own Effects, with no Other-tab row (docs/decisions.md "Soul Drive Mode wording
+  // (decoder)"). Recorded by the mode's name for the "Not on the Status tab" rows.
+  const soulDriveChase = parsed.subAbilities.find(sub => sub._label === 'soulDriveChaseAbilityId');
+  if (soulDriveChase) {
+    const modeName = parsed.subAbilities.flatMap(sub => sub.subActions).flatMap(sa => sa.statuses)
+      .map(st => st.commonName ?? '').find(n => n.startsWith('Soul Drive Mode: '));
+    if (modeName) DB.soulDriveFollowUps[modeName] = generateEffectsText(soulDriveChase);
+  }
+
+  // A Synchro soul break's commands: arg2 is slot 1 and arg3 slot 2, with their
+  // conditions' IDs in arg4 and arg5 (as the Synchro tab has them in 628 of 630 rows).
+  if (DB.soulStrikeCategories[parsed.soulStrikeCategory] === 'SYNCHRO') {
+    [['arg2', 'arg4'], ['arg3', 'arg5']].forEach(([abilityArg, conditionArg], i) => {
+      const commandId = parseInt(ability.options?.[abilityArg] ?? 0);
+      if (commandId > 0) {
+        relations.synchroParent[commandId] = {
+          character:   sbRow?.['Character'] || actorName,
+          sbName:      sbRow?.['Name']      || parsed.name,
+          sbVer:       soulBreakVersion(sbRow, sbRow?.['Character'] || actorName, sbRow?.['Tier'] || 'SASB'),
+          slot:        i + 1,
+          conditionId: String(parseInt(ability.options?.[conditionArg] ?? 0) || ''),
+        };
+      }
+    });
   }
 
   // Populate relations.extraKiwamiParent and relations.extraCrushSource from raw args.
@@ -2900,6 +3540,7 @@ document.getElementById('results').addEventListener('click', e => {
 function processBattleJson(jsonText) {
   DB.lastInput = jsonText;
   DB.missingStatuses = new Map();
+  DB.soulDriveFollowUps = {};
   DB.unknownActions = new Set();
   let json;
   try {
@@ -2967,6 +3608,10 @@ function processBattleJson(jsonText) {
   }
 
   if (DB.missingStatuses.size) {
+    // A Soul Drive Mode's Effects take what it casts, from its soul drive in this paste.
+    for (const m of DB.missingStatuses.values()) {
+      if (m.described?.name in DB.soulDriveFollowUps) m.described = describeFromGameData(m.id, { [m.described.name]: [DB.soulDriveFollowUps[m.described.name]] }) ?? m.described;
+    }
     const missing = [...DB.missingStatuses.values()];
     resultsEl.innerHTML = markMissingStatuses(resultsEl.innerHTML, missing) + renderMissingStatuses(missing);
   }

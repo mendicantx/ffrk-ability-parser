@@ -15,6 +15,7 @@ module DataLoader
     other:           'OTHER_SHEET_URL',
     hero_abilities:  'HERO_ABILITIES_SHEET_URL',
     extra:           'EXTRA_SHEET_URL',
+    synchro:         'SYNCHRO_SHEET_URL',
     action_args:     'ACTION_ARGS_SHEET_URL',
   }.freeze
 
@@ -27,6 +28,7 @@ module DataLoader
     other:          'ID',
     hero_abilities: 'Name',
     extra:          'Name',
+    synchro:        'ID',
     action_args:    'action_id',
   }.freeze
 

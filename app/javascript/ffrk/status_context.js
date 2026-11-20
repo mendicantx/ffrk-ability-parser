@@ -67,7 +67,9 @@ export function statusDescriber({ conf, statusParams }, sheets) {
 
   const abilityName = id => (id == null ? null : otherNames[id] ?? KNOWN_ABILITY_NAMES[id] ?? null);
 
-  const describe = statusId => {
+  // extra.followUpEffects: { source: [Effects] } for follow-ups not on the Other tab; the
+  // Other tab's rows come first.
+  const describe = (statusId, extra = {}) => {
     const params = statusParams[statusId];
     if (!params) return null;
     // Abilities shown as the placeholder, so the tools can link to adding them.
@@ -88,7 +90,7 @@ export function statusDescriber({ conf, statusParams }, sheets) {
       statusParams:    key => statusParams[statusByKey[key]] ?? null,
       characterName:   raw => canonicalCharacterName(titleCase(raw), characterNames),
       followUps:       source => namesBySource[source] ?? [],
-      followUpEffects: source => effectsBySource[source] ?? [],
+      followUpEffects: source => effectsBySource[source] ?? extra.followUpEffects?.[source] ?? [],
     });
     return result && missing.size && `${result.name} ${result.effects}`.includes(MISSING_ABILITY)
       ? { ...result, missingAbilities: [...missing] } : result;
