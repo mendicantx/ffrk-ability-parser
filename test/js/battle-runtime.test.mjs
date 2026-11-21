@@ -17,7 +17,7 @@ test('battle.js builds without module errors', () => {
 
 test('exposes the battle constant tables', () => {
   assert.ok(Object.keys(conf).length > 150, `only ${Object.keys(conf).length} Conf tables`);
-  assert.equal(Object.keys(conf.STATUS_AILMENTS_TYPE).length, 7965);
+  assert.equal(Object.keys(conf.STATUS_AILMENTS_TYPE).length, 8002);
   assert.equal(conf.ELEMENT_TYPE.WIND, 104);
 });
 

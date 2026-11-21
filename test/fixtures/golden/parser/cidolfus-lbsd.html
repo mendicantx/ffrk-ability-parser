@@ -9,8 +9,7 @@
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Grants [Soul Drive Mode], [Soul Drive Mode: Cidolfus (Lightning)] and [Instant ATB 1] to the user</div>
 <div class="effects-sheet">
-<span class="effects-label">Sheet:</span>Soul Drive Mode & Instant ATB 1 to user
-Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to members with/without En-Lightning & Quick ATB 1 to user after casting SB, removes Soul Drive Mode</div>
+<span class="effects-label">Sheet:</span>Grants [Soul Drive Mode], [Soul Drive Mode: Cidolfus (Lightning)] and [Instant ATB 1] to the user</div>
 </div>
 <details class="sb-preview-details">
 <summary>Soul Break tab columns</summary>
@@ -23,7 +22,7 @@ Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to memb
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="sbp-tsv-23610005" rows="1" readonly>XVI	Cidolfus	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",23610005,"/",23610005,"_256.png"),4,64,64)	Soul Drive: Cidolfus (Lightning)	LBSD		NAT	Self				0.01	Grants [Soul Drive Mode], [Soul Drive Mode: Cidolfus (Lightning)] and [Instant ATB 1] to the user	N	Self	250			Daggers of Oath (XVI)	SD・シドルファス雷	23610005			</textarea>
+<textarea class="sbp-tsv-area" id="sbp-tsv-23610005" rows="1" readonly>XVI	Cidolfus	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",23610005,"/",23610005,"_256.png"),4,64,64)	Soul Drive: Cidolfus (Lightning)	LBSD		NAT	Self				0.01	Grants [Soul Drive Mode], [Soul Drive Mode: Cidolfus (Lightning)] and [Instant ATB 1] to the user	N	Self	250			Daggers of Oath (XVI)	SD・シドルファス雷	23610005			✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -86,7 +85,7 @@ Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to memb
 </tr>
 <tr>
 <td class="sbp-col">Effects</td>
-<td class="sbp-derived">Grants [Soul Drive Mode], <span class="status-missing" title="Not on the Status tab yet">[Soul Drive Mode: Cidolfus (Lightning)]</span> and [Instant ATB 1] to the user</td>
+<td class="sbp-derived">Grants [Soul Drive Mode], [Soul Drive Mode: Cidolfus (Lightning)] and [Instant ATB 1] to the user</td>
 </tr>
 <tr>
 <td class="sbp-col">Counter</td>
@@ -134,8 +133,7 @@ Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to memb
 </tr>
 <tr>
 <td class="sbp-col">✓</td>
-<td class="sbp-empty">
-</td>
+<td class="sbp-sheet">✓</td>
 </tr>
 </tbody>
 </table>
@@ -325,12 +323,10 @@ Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to memb
 <tr>
 <th>Status</th>
 <td>
-<span class="tag status" title="Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, casts <ability missing from Other Tab> after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]">
-<span class="status-missing" title="Not on the Status tab yet">[Soul Drive Mode: Cidolfus (Lightning)]</span>
-</span>
+<span class="tag status" title="Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, grants [200% ATB 1] to the user, grants [Attach Lightning] to all allies with Attach Lightning or without an Infusion after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]">[Soul Drive Mode: Cidolfus (Lightning)]</span>
 <span style="color:#888;font-size:11px;">(56151)</span>
 <br>
-<span style="color:#888;font-size:11px;">Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, casts &lt;ability missing from Other Tab&gt; after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]</span>
+<span style="color:#888;font-size:11px;">Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, grants [200% ATB 1] to the user, grants [Attach Lightning] to all allies with Attach Lightning or without an Infusion after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]</span>
 </td>
 </tr>
 <tr>
@@ -1015,39 +1011,4 @@ Soul Drive Mode: -1 SB Gauge Cost & Instant SB Cast; Grants En-Lightning to memb
 </div>
 </div>
 </details>
-</div>
-<div class="ability-block missing-statuses" id="missing-statuses">
-<h3>Not on the Status tab (1)</h3>
-<p class="missing-note">These statuses have no Status-tab row yet; their names above are underlined. Each row is in the Status tab's column order: insert a row below the one in "Insert after", then paste.</p>
-<table class="sb-preview-table missing-table">
-<thead>
-<tr>
-<th>Insert after</th>
-<th>ID</th>
-<th>Common Name</th>
-<th>Effects</th>
-<th>Default Duration</th>
-<th>Coded Name</th>
-<th>Notes</th>
-<th>
-</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="insert-after">56150 <span class="insert-after-name">Zenith Mode: Cidolfus</span>
-</td>
-<td>56151</td>
-<td>Soul Drive Mode: Cidolfus (Lightning)</td>
-<td>Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, grants [200% ATB 1] to the user, grants [Attach Lightning] to all allies with Attach Lightning or without an Infusion after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]</td>
-<td>-</td>
-<td>LIMIT_BREAK_SOUL_DRIVE_MODE_CIDOLFUS_LIGHTNING</td>
-<td class="sbp-empty">—</td>
-<td>
-<button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-56151">Copy row</button>
-<textarea class="status-tsv-area" id="status-tsv-56151" rows="1" readonly hidden>56151	Soul Drive Mode: Cidolfus (Lightning)	Reduces the SB points cost for Soul Breaks by 250, instant cast speed for Soul Breaks, grants [200% ATB 1] to the user, grants [Attach Lightning] to all allies with Attach Lightning or without an Infusion after using a Soul Break, removed after triggering, removed if the character hasn't [Soul Drive Mode]	-	-	-	LIMIT_BREAK_SOUL_DRIVE_MODE_CIDOLFUS_LIGHTNING	</textarea>
-</td>
-</tr>
-</tbody>
-</table>
 </div>

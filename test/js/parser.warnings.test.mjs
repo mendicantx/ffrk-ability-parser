@@ -31,7 +31,10 @@ test('a sub-action key the parser does not read is listed under Unrecognised Arg
 test('a Status Decoder that cannot start is reported, and the soul break still parses', async () => {
   // A battle.js where the module the decoder scans for status assignments was renamed.
   const battleJs = snapshot().battleJs.split('define("scenes/battle/StatusAilmentsConfig"').join('define("scenes/battle/StatusAilmentsConfigRenamed"');
-  const page = await loadPage('ability_parser', { gameData: false, battleJs });
+  // The decoder starts only for a status missing from the Status tab, so leave out
+  // Seymour's party buff (6116).
+  const sheets = s => ({ ...s, status: s.status.filter(r => String(r.ID) !== '6116') });
+  const page = await loadPage('ability_parser', { gameData: false, battleJs, sheets });
   const html = parse(page, fixture('seymour-xsb.txt'));
   assert.match(html, /class="parse-warning">⚠ The Status Decoder couldn't start/);
   assert.ok((html.match(/class="sbp-tsv-area"/g) ?? []).length > 0, 'the rows are still shown');
