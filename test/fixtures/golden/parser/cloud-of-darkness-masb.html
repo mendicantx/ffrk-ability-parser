@@ -9,10 +9,7 @@
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Grants [Master Mode], [Master Mode: Cloud of Darkness (Lightning)], [Instant ATB 1] and [Diffusion Barrier 1] to the user, grants [Learning Mode: Cloud of Darkness] to all Witch allies</div>
 <div class="effects-sheet">
-<span class="effects-label">Sheet:</span>Damage +5% to Witches, Master Mode, Instant ATB 1 & Diffusion Barrier 1 to user
-Master Mode: Cap Break Level 4, Zero SB Cost 1 & Instant SB/LB Cast 1
-Interval Chase: 10 single-target Lightning/NE magic attacks, Damage +10/15/20/25/30% to Witches after 1/2/3/4/5 chases (max 5 chases)
-Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1, Damage +30% for 1 turn to Witches, removes Master Mode</div>
+<span class="effects-label">Sheet:</span>Grants [Master Mode], [Master Mode: Cloud of Darkness (Lightning)], [Instant ATB 1] and [Diffusion Barrier 1] to the user, grants [Learning Mode: Cloud of Darkness] to all Witch allies</div>
 </div>
 <details class="sb-preview-details">
 <summary>Soul Break tab columns</summary>
@@ -25,7 +22,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="sbp-tsv-22670041" rows="1" readonly>III	Cloud of Darkness	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",22670041,"/",22670041,"_256.png"),4,64,64)	Starry Electrostatic Thunder Beam	MASB		NAT	Self				0.01	Grants [Master Mode], [Master Mode: Cloud of Darkness (Lightning)], [Instant ATB 1] and [Diffusion Barrier 1] to the user, grants [Learning Mode: Cloud of Darkness] to all Witch allies	N	Self	750			Steel Snake (III)	極星帯電式雷電砲	22670041			</textarea>
+<textarea class="sbp-tsv-area" id="sbp-tsv-22670041" rows="1" readonly>III	Cloud of Darkness	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",22670041,"/",22670041,"_256.png"),4,64,64)	Starry Electrostatic Thunder Beam	MASB		NAT	Self				0.01	Grants [Master Mode], [Master Mode: Cloud of Darkness (Lightning)], [Instant ATB 1] and [Diffusion Barrier 1] to the user, grants [Learning Mode: Cloud of Darkness] to all Witch allies	N	Self	750			Steel Snake (III)	極星帯電式雷電砲	22670041			✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -136,8 +133,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </tr>
 <tr>
 <td class="sbp-col">✓</td>
-<td class="sbp-empty">
-</td>
+<td class="sbp-sheet">✓</td>
 </tr>
 </tbody>
 </table>
@@ -420,8 +416,10 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 <tr>
 <th>Status</th>
 <td>
-<span class="tag status" title="">[Master Mode: Cloud of Darkness (Lightning)]</span>
+<span class="tag status" title=". Triggers [Star Strike: Cloud of Darkness (Lightning)] after using Crystal Force abilities (max 2)">[Master Mode: Cloud of Darkness (Lightning)]</span>
 <span style="color:#888;font-size:11px;">(55750)</span>
+<br>
+<span style="color:#888;font-size:11px;">. Triggers [Star Strike: Cloud of Darkness (Lightning)] after using Crystal Force abilities (max 2)</span>
 </td>
 </tr>
 <tr>
@@ -950,13 +948,15 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </table>
 </div>
 </details>
-<div class="sb-row" style="border-left-color:#555">
-<span class="sb-name">極星帯電式雷電砲</span>
-<span class="sb-meta">ID: 22670045</span>
+<div class="sb-row" style="border-left-color:#c586c0">
+<span class="sb-name">North Star: Electrostatic Thunder Beam</span>
+<span class="sb-meta">from: Master Mode: Cloud of Darkness (Lightning)</span>
 </div>
 <div class="effects-block">
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>One single attack (26.50) capped at 199999, grants [Master +30% Boost 1] to all Witch allies</div>
+<div class="effects-sheet">
+<span class="effects-label">Sheet:</span>One single attack (26.50) capped at 199999, grants [Master +30% Boost 1] if there are 0/1+ Witch allies in the party</div>
 </div>
 <details class="sb-preview-details">
 <summary>Other tab columns (Follow-Up)</summary>
@@ -969,7 +969,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="fup-tsv-22670045" rows="1" readonly>Follow-Up Status	Master Mode: Cloud of Darkness (Lightning)		極星帯電式雷電砲	BLK	Single enemy	Magical	26.50	Lightning, NE	0.01	One single attack (26.50) capped at 199999, grants [Master +30% Boost 1] to all Witch allies	N	Lowest HP% enemy	0		22670045		✓</textarea>
+<textarea class="sbp-tsv-area" id="fup-tsv-22670045" rows="1" readonly>Follow-Up Status	Master Mode: Cloud of Darkness (Lightning)		North Star: Electrostatic Thunder Beam	BLK	Single enemy	Magical	26.50	Lightning, NE	0.01	One single attack (26.50) capped at 199999, grants [Master +30% Boost 1] to all Witch allies	N	Lowest HP% enemy	0		22670045		✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -985,7 +985,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </tr>
 <tr>
 <td class="sbp-col">Source</td>
-<td class="sbp-derived">Master Mode: Cloud of Darkness (Lightning)</td>
+<td class="sbp-sheet">Master Mode: Cloud of Darkness (Lightning)</td>
 </tr>
 <tr>
 <td class="sbp-col">Img</td>
@@ -994,7 +994,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </tr>
 <tr>
 <td class="sbp-col">Name</td>
-<td class="sbp-derived">極星帯電式雷電砲</td>
+<td class="sbp-sheet">North Star: Electrostatic Thunder Beam</td>
 </tr>
 <tr>
 <td class="sbp-col">Type</td>
@@ -1257,13 +1257,15 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </div>
 </div>
 </details>
-<div class="sb-row" style="border-left-color:#555">
-<span class="sb-name">星撃・暗闇の雲雷</span>
-<span class="sb-meta">ID: 31545773</span>
+<div class="sb-row" style="border-left-color:#c586c0">
+<span class="sb-name">Star Strike: Cloud of Darkness (Lightning)</span>
+<span class="sb-meta">from: Master Mode: Cloud of Darkness (Lightning)</span>
 </div>
 <div class="effects-block">
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Ten single attacks (3.05 each), increases Hero Boost level by 1, increases Learning Mode: Cloud of Darkness level by 1 to all allies</div>
+<div class="effects-sheet">
+<span class="effects-label">Sheet:</span>Ten single attacks (3.05 each), increases Hero Boost level by 1, increases Learning Mode: Cloud of Darkness level by 1 to all allies</div>
 </div>
 <details class="sb-preview-details">
 <summary>Other tab columns (Follow-Up)</summary>
@@ -1276,7 +1278,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="fup-tsv-31545773" rows="1" readonly>Follow-Up Status	Master Mode: Cloud of Darkness (Lightning)		星撃・暗闇の雲雷	BLK	Single enemy	Magical	30.50	Lightning, NE	0.01	Ten single attacks (3.05 each), increases Hero Boost level by 1, increases Learning Mode: Cloud of Darkness level by 1 to all allies	N	Lowest HP% enemy	0	Witch	31545773		✓</textarea>
+<textarea class="sbp-tsv-area" id="fup-tsv-31545773" rows="1" readonly>Follow-Up Status	Master Mode: Cloud of Darkness (Lightning)		Star Strike: Cloud of Darkness (Lightning)	BLK	Single enemy	Magical	30.50	Lightning, NE	0.01	Ten single attacks (3.05 each), increases Hero Boost level by 1, increases Learning Mode: Cloud of Darkness level by 1 to all allies	N	Lowest HP% enemy	0	Witch	31545773		✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -1292,7 +1294,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </tr>
 <tr>
 <td class="sbp-col">Source</td>
-<td class="sbp-derived">Master Mode: Cloud of Darkness (Lightning)</td>
+<td class="sbp-sheet">Master Mode: Cloud of Darkness (Lightning)</td>
 </tr>
 <tr>
 <td class="sbp-col">Img</td>
@@ -1301,7 +1303,7 @@ Master Chase: Single-target Lightning/NE magic attack at True Cap Break Level 1,
 </tr>
 <tr>
 <td class="sbp-col">Name</td>
-<td class="sbp-derived">星撃・暗闇の雲雷</td>
+<td class="sbp-sheet">Star Strike: Cloud of Darkness (Lightning)</td>
 </tr>
 <tr>
 <td class="sbp-col">Type</td>

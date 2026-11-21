@@ -9,11 +9,7 @@
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Grants [Master Mode], [Master Mode: Selphie] and [Instant ATB 1] to the user, grants [Learning Mode: Selphie (VIII)], [Learning Mode: Selphie (Ice)] and [Max HP +2000] to all allies</div>
 <div class="effects-sheet">
-<span class="effects-label">Sheet:</span>Max HP +2000 to party, Master Mode, Instant ATB 1 & Starry The End to user
-Master Mode: Cap Break Level 1, Zero SB Cost 1 & Instant SB/LB Cast 1
-Starry The End: [Damage] or [Ice Damage] +5% to party if user has/does not have Realm Synergy
-Interval Chase: [10 single-target Prismatic/NE white magic attacks] or [Single-target minor DeShell for 5 seconds] & [Damage] or [Ice Damage] +10/15/20/25/30% to party after 1/2/3/4/5 chases if user has/does not have Realm Synergy (max 5 chases)
-Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap Break Level 1, Instant Cast 1 to party & Quick ATB 1 to En-Ice members, removes Master Mode</div>
+<span class="effects-label">Sheet:</span>Grants [Master Mode], [Master Mode: Selphie] and [Instant ATB 1] to the user, grants [Learning Mode: Selphie (VIII)], [Learning Mode: Selphie (Ice)] and [Max HP +2000] to all allies</div>
 </div>
 <details class="sb-preview-details">
 <summary>Soul Break tab columns</summary>
@@ -26,7 +22,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="sbp-tsv-20510024" rows="1" readonly>VIII	Selphie	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",20510024,"/",20510024,"_256.png"),4,64,64)	Starry The End	MASB		NAT	All allies				0.01	Grants [Master Mode], [Master Mode: Selphie] and [Instant ATB 1] to the user, grants [Learning Mode: Selphie (VIII)], [Learning Mode: Selphie (Ice)] and [Max HP +2000] to all allies	N	All allies	750			Golden Flail (VIII)	極星ジエンド	20510024			</textarea>
+<textarea class="sbp-tsv-area" id="sbp-tsv-20510024" rows="1" readonly>VIII	Selphie	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",20510024,"/",20510024,"_256.png"),4,64,64)	Starry The End	MASB		NAT	All allies				0.01	Grants [Master Mode], [Master Mode: Selphie] and [Instant ATB 1] to the user, grants [Learning Mode: Selphie (VIII)], [Learning Mode: Selphie (Ice)] and [Max HP +2000] to all allies	N	All allies	750			Golden Flail (VIII)	極星ジエンド	20510024			✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -137,8 +133,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </tr>
 <tr>
 <td class="sbp-col">✓</td>
-<td class="sbp-empty">
-</td>
+<td class="sbp-sheet">✓</td>
 </tr>
 </tbody>
 </table>
@@ -486,8 +481,10 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 <tr>
 <th>Status</th>
 <td>
-<span class="tag status" title="">[Master Mode: Selphie]</span>
+<span class="tag status" title=". Triggers [Star Strike: Selphie] after using Crystal Force abilities (max 2)">[Master Mode: Selphie]</span>
 <span style="color:#888;font-size:11px;">(55816)</span>
+<br>
+<span style="color:#888;font-size:11px;">. Triggers [Star Strike: Selphie] after using Crystal Force abilities (max 2)</span>
 </td>
 </tr>
 <tr>
@@ -1245,13 +1242,15 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </table>
 </div>
 </details>
-<div class="sb-row" style="border-left-color:#555">
-<span class="sb-name">極星ジエンド</span>
-<span class="sb-meta">ID: 20510026</span>
+<div class="sb-row" style="border-left-color:#c586c0">
+<span class="sb-name">North Star: The End</span>
+<span class="sb-meta">from: Master Mode: Selphie</span>
 </div>
 <div class="effects-block">
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>One single piercing attack (28.00) capped at 199999, grants [Instant Cast 1] to all allies, grants [200% ATB 1] to all allies with Attach Ice</div>
+<div class="effects-sheet">
+<span class="effects-label">Sheet:</span>One piercing single attack (28.00) capped at 199999, grants [Instant Cast 1] to all allies, grants [200% ATB 1] to all allies with Attach Ice</div>
 </div>
 <details class="sb-preview-details">
 <summary>Other tab columns (Follow-Up)</summary>
@@ -1264,7 +1263,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="fup-tsv-20510026" rows="1" readonly>Follow-Up Status	Master Mode: Selphie		極星ジエンド	WHT	Single enemy	Magical	28.00	Fire, Ice, Lightning, Earth, Wind, Water, Holy, Dark, Poison, NE	0.01	One single piercing attack (28.00) capped at 199999, grants [Instant Cast 1] to all allies, grants [200% ATB 1] to all allies with Attach Ice	N	Lowest HP% enemy	0		20510026		✓</textarea>
+<textarea class="sbp-tsv-area" id="fup-tsv-20510026" rows="1" readonly>Follow-Up Status	Master Mode: Selphie		North Star: The End	WHT	Single enemy	Magical	28.00	Fire, Ice, Lightning, Earth, Wind, Water, Holy, Dark, Poison, NE	0.01	One single piercing attack (28.00) capped at 199999, grants [Instant Cast 1] to all allies, grants [200% ATB 1] to all allies with Attach Ice	N	Lowest HP% enemy	0		20510026		✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -1280,7 +1279,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </tr>
 <tr>
 <td class="sbp-col">Source</td>
-<td class="sbp-derived">Master Mode: Selphie</td>
+<td class="sbp-sheet">Master Mode: Selphie</td>
 </tr>
 <tr>
 <td class="sbp-col">Img</td>
@@ -1289,7 +1288,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </tr>
 <tr>
 <td class="sbp-col">Name</td>
-<td class="sbp-derived">極星ジエンド</td>
+<td class="sbp-sheet">North Star: The End</td>
 </tr>
 <tr>
 <td class="sbp-col">Type</td>
@@ -1591,13 +1590,15 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </div>
 </div>
 </details>
-<div class="sb-row" style="border-left-color:#555">
-<span class="sb-name">星撃・セルフィ</span>
-<span class="sb-meta">ID: 31545886</span>
+<div class="sb-row" style="border-left-color:#c586c0">
+<span class="sb-name">Star Strike: Selphie</span>
+<span class="sb-meta">from: Master Mode: Selphie</span>
 </div>
 <div class="effects-block">
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Ten single attacks (3.10 each), increases Hero Boost level by 1, increases Learning Mode: Selphie (VIII) or Learning Mode: Selphie (Ice) level by 1 to all allies if the user has/does not have Realm Synergy</div>
+<div class="effects-sheet">
+<span class="effects-label">Sheet:</span>Ten single attacks (3.10 each), increases Hero Boost level by 1, increases Learning Mode: Selphie (VIII) or Learning Mode: Selphie (Ice) level by 1 to all allies if the user has/does not have Realm Synergy</div>
 </div>
 <details class="sb-preview-details">
 <summary>Other tab columns (Follow-Up)</summary>
@@ -1610,7 +1611,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="fup-tsv-31545886" rows="1" readonly>Follow-Up Status	Master Mode: Selphie		星撃・セルフィ	NAT	Single enemy	Magical	31.00	Fire, Ice, Lightning, Earth, Wind, Water, Holy, Dark, Poison, NE	0.01	Ten single attacks (3.10 each), increases Hero Boost level by 1, increases Learning Mode: Selphie (VIII) or Learning Mode: Selphie (Ice) level by 1 to all allies if the user has/does not have Realm Synergy	N	Lowest HP% enemy	0	Special	31545886		✓</textarea>
+<textarea class="sbp-tsv-area" id="fup-tsv-31545886" rows="1" readonly>Follow-Up Status	Master Mode: Selphie		Star Strike: Selphie	NAT	Single enemy	Magical	31.00	Fire, Ice, Lightning, Earth, Wind, Water, Holy, Dark, Poison, NE	0.01	Ten single attacks (3.10 each), increases Hero Boost level by 1, increases Learning Mode: Selphie (VIII) or Learning Mode: Selphie (Ice) level by 1 to all allies if the user has/does not have Realm Synergy	N	Lowest HP% enemy	0	Special	31545886		✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -1626,7 +1627,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </tr>
 <tr>
 <td class="sbp-col">Source</td>
-<td class="sbp-derived">Master Mode: Selphie</td>
+<td class="sbp-sheet">Master Mode: Selphie</td>
 </tr>
 <tr>
 <td class="sbp-col">Img</td>
@@ -1635,7 +1636,7 @@ Master Chase: Single-target Prismatic/NE piercing white magic attack at True Cap
 </tr>
 <tr>
 <td class="sbp-col">Name</td>
-<td class="sbp-derived">星撃・セルフィ</td>
+<td class="sbp-sheet">Star Strike: Selphie</td>
 </tr>
 <tr>
 <td class="sbp-col">Type</td>

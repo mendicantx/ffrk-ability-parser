@@ -148,10 +148,11 @@ const SHEET_ROUTES = {
 };
 const BATTLE_JS_ROUTES = ['/data/battle_js', '/ability_parser/battle_js'];
 
-// battleJsOverride replaces the snapshot's battle.js (e.g. a simulated repack).
-function makeFetch(battleJsOverride) {
+// battleJsOverride replaces the snapshot's battle.js (e.g. a simulated repack);
+// sheetsOverride, if given, maps the snapshot's sheets to the ones served.
+function makeFetch(battleJsOverride, sheetsOverride) {
   return async url => {
-    const { sheets } = snapshot();
+    const sheets = sheetsOverride ? sheetsOverride(snapshot().sheets) : snapshot().sheets;
     const battleJs = battleJsOverride ?? snapshot().battleJs;
     const ok = (body, json) => ({
       ok: true,
@@ -221,7 +222,9 @@ export function runBattleJsInVm(battleJs, underscoreJs) {
 // gameData: false keeps battle.js from running (the decoder then has no game data),
 // e.g. for a simulated repack whose renamed battle.js can't be executed.
 // search: the page URL's query string, e.g. '?ability=1&status=2'.
-export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = true, search = '' } = {}) {
+// sheets: a function that changes the served sheets, e.g. to drop a Status-tab row so a
+// test doesn't depend on what the snapshot's sheet happens to have.
+export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = true, search = '', sheets } = {}) {
   const page = PAGES[view];
   if (!page) throw new Error(`Unknown page: ${view}`);
 
@@ -229,7 +232,7 @@ export async function loadPage(view, { timeoutMs = 60000, battleJs, gameData = t
   installGlobals({
     document,
     window: globalThis,
-    fetch: makeFetch(battleJs),
+    fetch: makeFetch(battleJs, sheets),
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     location: { reload() {}, search },

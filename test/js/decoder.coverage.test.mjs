@@ -5,7 +5,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage, snapshot } from './harness.mjs';
 
-const FLOOR = 1040;
+// 1040 → 678 (snapshot of 2026-11-21): the sheet filled in Effects on 427 Status-tab rows,
+// most of them statuses the decoder described, so they no longer count as missing. No
+// status stopped decoding (statuses.jsonl), and 33 of the 37 new statuses decode.
+const FLOOR = 678;
 
 test('decodes statuses that are missing from the Status sheet', async t => {
   const sheet = new Map(snapshot().sheets.status.map(r => [r['Coded Name'], r]));

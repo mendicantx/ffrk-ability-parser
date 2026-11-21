@@ -8,6 +8,8 @@ import { loadPage, snapshot, FIXTURES } from './harness.mjs';
 
 const fixture = name => fs.readFileSync(path.join(FIXTURES, 'battles', name), 'utf8');
 
+const withoutStatus6116 = s => ({ ...s, status: s.status.filter(r => String(r.ID) !== '6116') });
+
 // Serves POST /data/refresh and a Status tab with one extra row; records every request.
 function reloadingFetch(original, extraStatusRow) {
   const requests = [];
@@ -15,7 +17,8 @@ function reloadingFetch(original, extraStatusRow) {
     requests.push(`${options.method ?? 'GET'} ${url}`);
     if (String(url).startsWith('/data/refresh')) return { ok: true, status: 200, json: async () => ({ refresh_errors: {} }) };
     if (String(url).startsWith('/data/sheets')) {
-      const body = { ...snapshot().sheets, status: [...snapshot().sheets.status, extraStatusRow], last_refreshed_at: '2026-01-01T00:00:00Z' };
+      const sheets = withoutStatus6116(snapshot().sheets);
+      const body = { ...sheets, status: [...sheets.status, extraStatusRow], last_refreshed_at: '2026-01-01T00:00:00Z' };
       return { ok: true, status: 200, json: async () => body };
     }
     return original(url, options);
@@ -24,10 +27,10 @@ function reloadingFetch(original, extraStatusRow) {
 }
 
 test('the parser reloads only the Status and Other tabs and re-parses with the new names', async () => {
-  const page = await loadPage('ability_parser', { gameData: false });
+  // Serve the Status tab without status 6116 (Seymour's party buff), as if its row weren't added yet.
+  const page = await loadPage('ability_parser', { gameData: false, sheets: withoutStatus6116 });
   page.document.getElementById('json-input').value = fixture('seymour-xsb.txt');
   page.eval(`processBattleJson(document.getElementById('json-input').value)`);
-  // Status 6116 has no Status-tab row in the snapshot.
   assert.match(page.document.getElementById('results').innerHTML, /status-missing[^>]*>\[ATK, MAG and MND \+15%, DEF and RES \+25% \(25s\)\]/);
 
   const { fetch, requests } = reloadingFetch(globalThis.fetch, { 'ID': '6116', 'Common Name': 'Test Name From Sheet', 'Effects': 'x', 'Default Duration': '25' });

@@ -9,8 +9,7 @@
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants [Linked Assist Mode: VIII] to the user</div>
 <div class="effects-sheet">
-<span class="effects-label">Sheet:</span>Activates VIII Chain (150) & 50% VIII Field, ATK/MAG/MND +30% & 30% Stoneskin to party, Link Assist Mode & Instant Cast 1 to user
-Link Assist Mode: After an VIII member uses [Element] ability, chases with minor Prismatic Imperil to all targets (max 3 chases, 1 per element)</div>
+<span class="effects-label">Sheet:</span>Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants [Linked Assist Mode: VIII] to the user</div>
 </div>
 <details class="sb-preview-details">
 <summary>Soul Break tab columns</summary>
@@ -23,7 +22,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="sbp-tsv-20510027" rows="1" readonly>VIII	Selphie	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",20510027,"/",20510027,"_256.png"),4,64,64)	Bond (Selphie)	CSB+		NAT	All allies				0.01	Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants [Linked Assist Mode: VIII] to the user	N	All allies	0			Crystal Nunchaku (VIII)	絆【セルフィ】	20510027			</textarea>
+<textarea class="sbp-tsv-area" id="sbp-tsv-20510027" rows="1" readonly>VIII	Selphie	=image(CONCATENATE("https://dff.sp.mbga.jp/dff/static/lang/image/soulstrike/",20510027,"/",20510027,"_256.png"),4,64,64)	Bond (Selphie)	CSB+		NAT	All allies				0.01	Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants [Linked Assist Mode: VIII] to the user	N	All allies	0			Crystal Nunchaku (VIII)	絆【セルフィ】	20510027			✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -86,7 +85,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </tr>
 <tr>
 <td class="sbp-col">Effects</td>
-<td class="sbp-derived">Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants <span class="status-missing" title="Not on the Status tab yet">[Linked Assist Mode: VIII]</span> to the user</td>
+<td class="sbp-derived">Activates VIII Chain (max 150, field +50%), grants [ATK, MAG and MND +30%], [Instant Cast 1] and [Stoneskin: 30%] to all allies, grants [Linked Assist Mode: VIII] to the user</td>
 </tr>
 <tr>
 <td class="sbp-col">Counter</td>
@@ -134,8 +133,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </tr>
 <tr>
 <td class="sbp-col">✓</td>
-<td class="sbp-empty">
-</td>
+<td class="sbp-sheet">✓</td>
 </tr>
 </tbody>
 </table>
@@ -385,12 +383,10 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 <tr>
 <th>Status</th>
 <td>
-<span class="tag status" title="Casts [<ability missing from Other Tab>] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)">
-<span class="status-missing" title="Not on the Status tab yet">[Linked Assist Mode: VIII]</span>
-</span>
+<span class="tag status" title="Casts [Link Assist: VIII] when a VIII ally uses an ability that deals elemental damage, once per element (max 3). Triggers [Link Assist: VIII] after using Crystal Force abilities (max 2)">[Linked Assist Mode: VIII]</span>
 <span style="color:#888;font-size:11px;">(56083)</span>
 <br>
-<span style="color:#888;font-size:11px;">Casts [&lt;ability missing from Other Tab&gt;] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)</span>
+<span style="color:#888;font-size:11px;">Casts [Link Assist: VIII] when a VIII ally uses an ability that deals elemental damage, once per element (max 3). Triggers [Link Assist: VIII] after using Crystal Force abilities (max 2)</span>
 </td>
 </tr>
 </table>
@@ -800,12 +796,10 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 <tr>
 <th>Status</th>
 <td>
-<span class="tag status" title="Casts [<ability missing from Other Tab>] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)">
-<span class="status-missing" title="Not on the Status tab yet">[Linked Assist Mode: VIII]</span>
-</span>
+<span class="tag status" title="Casts [Link Assist: VIII] when a VIII ally uses an ability that deals elemental damage, once per element (max 3). Triggers [Link Assist: VIII] after using Crystal Force abilities (max 2)">[Linked Assist Mode: VIII]</span>
 <span style="color:#888;font-size:11px;">(56083)</span>
 <br>
-<span style="color:#888;font-size:11px;">Casts [&lt;ability missing from Other Tab&gt;] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)</span>
+<span style="color:#888;font-size:11px;">Casts [Link Assist: VIII] when a VIII ally uses an ability that deals elemental damage, once per element (max 3). Triggers [Link Assist: VIII] after using Crystal Force abilities (max 2)</span>
 </td>
 </tr>
 </table>
@@ -976,13 +970,15 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </div>
 </div>
 </details>
-<div class="sb-row" style="border-left-color:#555">
-<span class="sb-name">リンクアシスト【VIII】</span>
-<span class="sb-meta">ID: 31546268</span>
+<div class="sb-row" style="border-left-color:#c586c0">
+<span class="sb-name">Link Assist: VIII</span>
+<span class="sb-meta">from: Linked Assist Mode: VIII</span>
 </div>
 <div class="effects-block">
 <div class="effects-gen">
 <span class="effects-label">Generated:</span>Grants [Imperil Prismatic 10% (15s)] to enemies</div>
+<div class="effects-sheet">
+<span class="effects-label">Sheet:</span>Grants [Imperil Prismatic 10% (15s)] to enemies</div>
 </div>
 <details class="sb-preview-details">
 <summary>Other tab columns (Follow-Up)</summary>
@@ -995,7 +991,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
       () => { this.nextElementSibling.select(); document.execCommand('copy');
               this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy row', 1500); }
     )">Copy row</button>
-<textarea class="sbp-tsv-area" id="fup-tsv-31546268" rows="1" readonly>Follow-Up Status	Linked Assist Mode: VIII		リンクアシスト【VIII】	NAT	All enemies				0.01	Grants [Imperil Prismatic 10% (15s)] to enemies	N	All enemies	0	Special	31546268		✓</textarea>
+<textarea class="sbp-tsv-area" id="fup-tsv-31546268" rows="1" readonly>Follow-Up Status	Linked Assist Mode: VIII		Link Assist: VIII	NAT	All enemies				0.01	Grants [Imperil Prismatic 10% (15s)] to enemies	N	All enemies	0	Special	31546268		✓</textarea>
 </div>
 <table class="sb-preview-table">
 <thead>
@@ -1011,7 +1007,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </tr>
 <tr>
 <td class="sbp-col">Source</td>
-<td class="sbp-derived">Linked Assist Mode: VIII</td>
+<td class="sbp-sheet">Linked Assist Mode: VIII</td>
 </tr>
 <tr>
 <td class="sbp-col">Img</td>
@@ -1020,7 +1016,7 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </tr>
 <tr>
 <td class="sbp-col">Name</td>
-<td class="sbp-derived">リンクアシスト【VIII】</td>
+<td class="sbp-sheet">Link Assist: VIII</td>
 </tr>
 <tr>
 <td class="sbp-col">Type</td>
@@ -1255,39 +1251,4 @@ Link Assist Mode: After an VIII member uses [Element] ability, chases with minor
 </div>
 </div>
 </details>
-</div>
-<div class="ability-block missing-statuses" id="missing-statuses">
-<h3>Not on the Status tab (1)</h3>
-<p class="missing-note">These statuses have no Status-tab row yet; their names above are underlined. Each row is in the Status tab's column order: insert a row below the one in "Insert after", then paste.</p>
-<table class="sb-preview-table missing-table">
-<thead>
-<tr>
-<th>Insert after</th>
-<th>ID</th>
-<th>Common Name</th>
-<th>Effects</th>
-<th>Default Duration</th>
-<th>Coded Name</th>
-<th>Notes</th>
-<th>
-</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="insert-after">56081 <span class="insert-after-name">Tactical Chase Mode: Squall (Fire)</span>
-</td>
-<td>56083</td>
-<td>Linked Assist Mode: VIII</td>
-<td>Casts [<a class="missing-ability-link" href="#fup-tsv-31546268" data-jump-to="fup-tsv-31546268" title="Ability 31546268 isn't on the Other tab: find it in the Ability Parser">&lt;ability missing from Other Tab&gt;</a>] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)</td>
-<td>15 seconds</td>
-<td>LINK_ASSIST_MODE_VIII</td>
-<td class="sbp-empty">—</td>
-<td>
-<button class="sbp-copy-btn status-copy-btn" data-copy-target="status-tsv-56083">Copy row</button>
-<textarea class="status-tsv-area" id="status-tsv-56083" rows="1" readonly hidden>56083	Linked Assist Mode: VIII	Casts [&lt;ability missing from Other Tab&gt;] when a VIII ally uses an ability that deals elemental damage, once per element (max 3)	15 seconds	-	-	LINK_ASSIST_MODE_VIII	</textarea>
-</td>
-</tr>
-</tbody>
-</table>
 </div>
