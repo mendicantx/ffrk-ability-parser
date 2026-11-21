@@ -36,7 +36,7 @@ The repository is public: https://github.com/mendicantx/ffrk-ability-parser
 ## Running it locally
 
 You need:
-- **Ruby 4.0.9** (`.tool-versions` / `.ruby-version`; asdf on Linux and macOS, RubyInstaller on Windows).
+- **Ruby 4.0.10** (`.tool-versions` / `.ruby-version`; asdf on Linux and macOS, RubyInstaller on Windows).
 - **Node 24**, for the JavaScript tests.
 - **Python 3.12**, only for the legacy `scripts/infer_statuses.py` tests.
 - **Edge or Chrome**, for the browser smoke test.

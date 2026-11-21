@@ -38,7 +38,7 @@ These are the owner's standing decisions. Follow them without asking again.
 | Aspect | Decision | Reason |
 |---|---|---|
 | Framework | Rails 7.0 (7.0.10) | User preference for Ruby web layer |
-| Ruby | 4.0.9 via asdf | `.tool-versions` pins the exact version; the Gemfile allows `~> 4.0` |
+| Ruby | 4.0.10 via asdf | `.tool-versions` pins the exact version; the Gemfile allows `~> 4.0` |
 | Database | None; data is cached as files in `data/` | Keeps it simple for now |
 | Google Sheets | Published CSV export URL per tab | No credentials needed; sheet must be published publicly |
 | battle.js | Dean Edwards p,a,c,k,e,r packed JS | Unpacked to raw JS string; content is AMD module code, not JSON |
@@ -185,6 +185,8 @@ The server's settings live in `shared/.env` (a Capistrano linked file). It must 
 A refresh checks each download before it replaces the cached file: a sheet must have rows, its key column (`REQUIRED_COLUMNS` in `lib/data_loader.rb`) and at least half its previous rows; battle.js must have status entries and at least half its previous size. A source that fails keeps its previous data, the error is saved in `metadata.json` and shown in `/data/status` (`refresh_errors`) and by the Refresh data button, and `rake data:refresh` exits non-zero so cron and the deploy hook notice.
 
 After rows are added to the Status or Other tab, **Reload Status & Other tabs** (on both tools) re-fetches just those two sheets with the same checks (`POST /data/refresh?sheets=status,other`, `DataLoader.refresh_sheets`, at most once a minute). It keeps battle.js and the full refresh time; `/data/status` shows the reload as `sheets_refreshed_at`.
+
+**Upgrading Ruby:** install the new version on the server first (`asdf install ruby <version>` as `jason`), then merge the change to `.ruby-version` and `.tool-versions`. Merging deploys straight away, and Capistrano uses the version in `.tool-versions`. Nothing else on the server changes: Passenger is the system package (`/usr/lib/apache2/modules/mod_passenger.so`), the site's Apache config (`/etc/apache2/sites-available/ffrk-ability-parser.conf`) sets `PassengerRuby /home/jason/.asdf/shims/ruby`, which follows the app's `.tool-versions`, and the cron's `shared/asdf-wrapper` just loads asdf. Keep the old Ruby installed until the deploy is checked.
 
 `data/` is a Capistrano linked dir (`shared/data` on the server), so the cache survives deploys. On a deploy where `shared/data/metadata.json` doesn't exist, the `data:refresh_if_missing` hook in `config/deploy.rb` runs `rake data:refresh` before Passenger restarts.
 
